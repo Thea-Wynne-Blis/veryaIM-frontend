@@ -22,6 +22,8 @@ import {
   Radio,
 } from 'lucide-vue-next'
 import AppAvatar from './AppAvatar.vue'
+import ContactsView from './ContactsView.vue'
+import MeView from './MeView.vue'
 import type { ChatMessage, Conversation } from '../data/workspace'
 
 const props = defineProps<{
@@ -248,20 +250,8 @@ function grouping(messages: ChatMessage[]) {
         </p>
       </div>
 
-      <!-- 其他 tab 占位 -->
-      <div v-else class="empty" style="min-height: 60vh">
-        <div class="empty-mark">
-          <component
-            :is="tab === 'contacts' ? Users : User"
-            :size="22"
-            :stroke-width="1.6"
-          />
-        </div>
-        <h3 class="empty-title">{{ tabTitle }}</h3>
-        <p class="empty-text">
-          {{ tab === 'contacts' ? '通讯录将聚合好友、群与好友申请。' : '个人资料、设备与隐私设置。' }}
-        </p>
-      </div>
+      <ContactsView v-else-if="tab === 'contacts'" class="m-embed" />
+      <MeView v-else class="m-embed" />
     </div>
 
     <nav class="m-tabs" aria-label="主导航">
@@ -372,6 +362,12 @@ function grouping(messages: ChatMessage[]) {
 </template>
 
 <style scoped>
+.m-embed {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .m-chat-enter-active,
 .m-chat-leave-active {
   transition: transform 280ms var(--ease-out), opacity 200ms var(--ease-out);

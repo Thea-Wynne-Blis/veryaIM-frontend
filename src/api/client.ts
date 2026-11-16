@@ -91,6 +91,8 @@ export const api = {
   get: <T>(path: string) => request<T>(path),
   post: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: 'POST', body: JSON.stringify(body ?? {}) }),
+  put: <T>(path: string, body?: unknown) =>
+    request<T>(path, { method: 'PUT', body: JSON.stringify(body ?? {}) }),
   delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
 }
 
@@ -137,11 +139,18 @@ export type ContactView = {
   avatar?: string | null
 }
 
+let cachedDeviceId: string | null = null
+
+/** 当前浏览器的设备标识；换账号登录时会被重置。 */
 export function deviceHeaders() {
-  let deviceId = localStorage.getItem('veryal.deviceId')
-  if (!deviceId) {
-    deviceId = `web-${Math.random().toString(36).slice(2, 10)}`
-    localStorage.setItem('veryal.deviceId', deviceId)
+  if (!cachedDeviceId) {
+    cachedDeviceId = `web-${Math.random().toString(36).slice(2, 10)}`
   }
+  const deviceId = cachedDeviceId
   return { deviceId, platform: 'WEB', deviceName: 'Browser' }
+}
+
+/** 设备被绑定到其他账号时，换一个设备标识重试。 */
+export function resetDeviceId(): void {
+  cachedDeviceId = null
 }

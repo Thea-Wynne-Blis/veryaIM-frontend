@@ -3,6 +3,7 @@ import {
   api,
   clearSession,
   deviceHeaders,
+  resetDeviceId,
   getStoredUser,
   getToken,
   saveSession,
@@ -25,17 +26,35 @@ export const useAuthStore = defineStore('auth', {
     async login(username: string, password: string) {
       this.loading = true
       try {
-        const result = await api.post<LoginResult>('/auth/login', {
-          username,
-          password,
-          ...deviceHeaders(),
-        })
+        const result = await this.doLogin(username, password)
         this.token = result.token
         this.user = result.user
         saveSession(result.token, result.user)
         return result
       } finally {
         this.loading = false
+      }
+    },
+
+    /** 403 device is bound to another user 时换设备号重试一次 */
+    async doLogin(username: string, password: string): Promise<LoginResult> {
+      try {
+        return await api.post<LoginResult>('/auth/login', {
+          username,
+          password,
+          ...deviceHeaders(),
+        })
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : ''
+        if (msg.includes('device is bound')) {
+          resetDeviceId()
+          return await api.post<LoginResult>('/auth/login', {
+            username,
+            password,
+            ...deviceHeaders(),
+          })
+        }
+        throw e
       }
     },
 

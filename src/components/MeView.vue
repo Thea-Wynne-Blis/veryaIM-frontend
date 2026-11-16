@@ -30,6 +30,13 @@ const saving = ref(false)
 const message = ref('')
 const error = ref('')
 
+function spot(event: PointerEvent) {
+  const el = event.currentTarget as HTMLElement
+  const rect = el.getBoundingClientRect()
+  el.style.setProperty("--spot-x", `${event.clientX - rect.left}px`)
+  el.style.setProperty("--spot-y", `${event.clientY - rect.top}px`)
+}
+
 const policyLabel: Record<string, string> = {
   REJECT: '拒绝所有人',
   VERIFY: '需要验证',
@@ -122,7 +129,7 @@ onMounted(load)
       </div>
 
       <template v-else>
-        <div class="me-card hero">
+        <div class="me-card hero glare">
           <AppAvatar :initials="initialsOf(profile?.nickname || '我')" tone="jade" size="xl" />
           <div class="hero-text">
             <p class="hero-name">{{ profile?.nickname }}</p>
@@ -130,7 +137,7 @@ onMounted(load)
           </div>
         </div>
 
-        <div class="me-card">
+        <div class="me-card spot" @pointermove="spot">
           <p class="card-label"><User :size="11" :stroke-width="2.4" /> 个人资料</p>
           <label class="field">
             <span class="field-label">昵称</span>
@@ -190,7 +197,7 @@ onMounted(load)
           </label>
         </div>
 
-        <div class="me-card">
+        <div class="me-card spot" @pointermove="spot">
           <p class="card-label"><Smartphone :size="11" :stroke-width="2.4" /> 登录设备 · {{ devices.length }}</p>
           <div v-for="d in devices" :key="d.deviceId" class="device-row">
             <span class="device-main">
