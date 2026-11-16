@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import NavRail from '../components/NavRail.vue'
 import ConversationList from '../components/ConversationList.vue'
 import ChatPane from '../components/ChatPane.vue'
 import DetailPanel from '../components/DetailPanel.vue'
 import MobileWorkspace from '../components/MobileWorkspace.vue'
+import ContactsView from '../components/ContactsView.vue'
+import FilesView from '../components/FilesView.vue'
+import MeView from '../components/MeView.vue'
 import NewChatDialog from '../components/NewChatDialog.vue'
 import { useIsMobile } from '../composables/useIsMobile'
 import { useChatStore } from '../stores/chat'
@@ -14,6 +17,7 @@ import type { ChatMessage, Conversation } from '../data/workspace'
 import { clockTime, initialsOf, listTime, toneOf } from '../utils/present'
 
 const route = useRoute()
+const router = useRouter()
 const isMobile = useIsMobile(768)
 const chat = useChatStore()
 const auth = useAuthStore()
@@ -22,10 +26,15 @@ const detailOpen = ref(true)
 const theme = ref<'light' | 'dark'>(
   new URLSearchParams(window.location.search).get('theme') === 'dark' ? 'dark' : 'light',
 )
-const navActive = ref('chat')
 const dialogOpen = ref(false)
 
-/** 后端卡片 → 组件使用的视图模型 */
+/** 当前一级导航：chat / contacts / files / me */
+const view = computed(() => {
+  const name = String(route.name ?? 'chat')
+  if (name === 'contacts' || name === 'files' || name === 'me') return name
+  return 'chat'
+})
+
 const conversations = computed<Conversation[]>(() =>
   chat.cards.map((card) => ({
     id: card.conversationId,
@@ -38,10 +47,7 @@ const conversations = computed<Conversation[]>(() =>
     time: listTime(card.lastMessageAt ?? card.updatedAt),
     preview: card.lastMessagePreview || '还没有消息',
     members: card.memberCount,
-    context:
-      card.type === 'GROUP'
-        ? `群聊 · ${card.memberCount} 位成员`
-        : '单聊',
+    context: card.type === 'GROUP' ? `群聊 · ${card.memberCount} 位成员` : '单聊',
   })),
 )
 
@@ -68,22 +74,32 @@ const messages = computed<ChatMessage[]>(() =>
 )
 
 function messagesOf(id: string): ChatMessage[] {
-  if (id !== chat.activeId) return []
-  return messages.value
+  return id === chat.activeId ? messages.value : []
 }
 
 async function select(id: string) {
   chat.activeId = id
+  if (view.value !== 'chat') await router.push('/app/chat')
   await chat.open(id)
 }
 
-function closeMobileChat() {
+async function closeMobileChat() {
   chat.activeId = null
 }
 
 async function send(conversationId: string, text: string) {
   if (conversationId !== chat.activeId) chat.activeId = conversationId
   await chat.send(text)
+}
+
+function navigate(target: string) {
+  const map: Record<string, string> = {
+    chat: '/app/chat',
+    contacts: '/app/contacts',
+    files: '/app/files',
+    me: '/app/me',
+  }
+  router.push(map[target] ?? '/app/chat')
 }
 
 function toggleTheme() {
@@ -97,8 +113,15 @@ async function handleCreated(conversationId: string) {
   await select(conversationId)
 }
 
+/** 通讯录里点「发消息」时跳回聊天 */
+function onOpenChatRequest(event: Event) {
+  const id = (event as CustomEvent<string>).detail
+  if (id) select(id)
+}
+
 onMounted(async () => {
   document.documentElement.dataset.theme = theme.value
+  window.addEventListener('veryal:open-chat', onOpenChatRequest)
   await chat.loadCards()
   const fromRoute = route.params.conversationId as string | undefined
   const first = fromRoute ?? chat.cards[0]?.conversationId ?? null
@@ -106,7 +129,10 @@ onMounted(async () => {
   chat.startPolling(4000)
 })
 
-onBeforeUnmount(() => chat.stopPolling())
+onBeforeUnmount(() => {
+  window.removeEventListener('veryal:open-chat', onOpenChatRequest)
+  chat.stopPolling()
+})
 </script>
 
 <template>
@@ -126,11 +152,13 @@ onBeforeUnmount(() => chat.stopPolling())
     <div class="aura" aria-hidden="true"><i /><i /><i /></div>
     <div class="grain" aria-hidden="true" />
 
-    <div class="frame" :class="{ 'detail-open': detailOpen }">
+    <!-- 聊天：四栏 -->
+    <div v-if="view === 'chat'" class="frame" :class="{ 'detail-open': detailOpen }">
       <NavRail
-        v-model:active="navActive"
+        :active="view"
         :unread="chat.totalUnread"
         :theme="theme"
+        @navigate="navigate"
         @toggle-theme="toggleTheme"
       />
 
@@ -154,6 +182,20 @@ onBeforeUnmount(() => chat.stopPolling())
         :conversation="activeConversation"
         @close="detailOpen = false"
       />
+    </div>
+
+    <!-- 通讯录 / 文件 / 我的：两栏 -->
+    <div v-else class="frame single">
+      <NavRail
+        :active="view"
+        :unread="chat.totalUnread"
+        :theme="theme"
+        @navigate="navigate"
+        @toggle-theme="toggleTheme"
+      />
+      <ContactsView v-if="view === 'contacts'" />
+      <FilesView v-else-if="view === 'files'" />
+      <MeView v-else />
     </div>
   </div>
 

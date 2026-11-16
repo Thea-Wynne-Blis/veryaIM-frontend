@@ -1962,3 +1962,14 @@
     padding: 7px 13px 13px;
   }
 }
+
+/* 非聊天视图：rail + 一个宽内容区 */
+.frame.single,
+.frame.single.detail-open {
+  grid-template-columns: var(--rail-w) minmax(0, 1fr);
+}
+
+.frame.single > :nth-child(2) {
+  min-width: 0;
+  overflow: hidden;
+}

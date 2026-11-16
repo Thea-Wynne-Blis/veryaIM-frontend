@@ -55,8 +55,11 @@ chmod o+x /home/ubuntu 2>/dev/null || true
 
 # ---------- 4. 运维脚本 ----------
 info "安装运维脚本"
-install -m 0755 "$UP/bin/veryal" "$APP_HOME/bin/veryal"
-sudo ln -sf "$APP_HOME/bin/veryal" /usr/local/bin/veryal
+sudo rm -f /usr/local/bin/veryal "$APP_HOME/bin/veryal"
+for script in "$UP"/bin/*.sh; do
+  install -m 0755 "$script" "$APP_HOME/bin/$(basename "$script")"
+done
+ok "已安装: $(ls -1 "$APP_HOME"/bin/*.sh | xargs -n1 basename | tr '\n' ' ')"
 
 # ---------- 5. systemd ----------
 info "注册 systemd 服务"
