@@ -17,11 +17,34 @@ import { useAuthStore } from './auth'
 const PAGE_SIZE = 60
 const PREFS_KEY = 'veryal.chatPrefs'
 const REALTIME_HEALTHY_MS = 45_000
-const BACKGROUND_SYNC_MS = 30_000
+const BACKGROUND_SYNC_MS = 60_000
+const REALTIME_COALESCE_MS = 120
+const MARK_READ_THROTTLE_MS = 1000
 
 let realtimeAbort: AbortController | null = null
 let realtimeRetryTimer: number | null = null
 let visibilityHandler: (() => void) | null = null
+const realtimeCoalesceTimers = new Map<string, number>()
+const lastMarkReadAt = new Map<string, number>()
+
+type RealtimePayload = {
+  kind?: string
+  conversationId?: string
+  messageId?: string | null
+  seq?: number
+  senderId?: string
+  clientMsgId?: string | null
+  messageType?: string | null
+  content?: string | null
+  contentEncoding?: string | null
+  createdAt?: string | null
+}
+
+function previewOf(payload: RealtimePayload): string {
+  if (payload.messageType === 'IMAGE') return '[图片]'
+  if (payload.messageType === 'FILE') return '[文件]'
+  return payload.content ?? ''
+}
 
 export type ChatMember = {
   userId: Id
@@ -110,7 +133,13 @@ export const useChatStore = defineStore('chat', {
       return state.cards.find((item) => item.conversationId === state.activeId) ?? null
     },
     activeMessages(state): MessageView[] {
-      return state.activeId ? state.messages[state.activeId] ?? [] : []
+      const list = state.activeId ? state.messages[state.activeId] ?? [] : []
+      if (!list.some((item) => item.pending)) return list
+      // 发送中的占位消息固定排在末尾，避免 seq=0 把顺序打乱
+      return [
+        ...list.filter((item) => !item.pending),
+        ...list.filter((item) => item.pending),
+      ]
     },
     totalUnread(state): number {
       return state.cards.reduce((sum, item) => sum + item.unreadCount, 0)
@@ -167,7 +196,7 @@ export const useChatStore = defineStore('chat', {
       const card = this.cards.find((item) => item.conversationId === conversationId)
 
       const lastSeq = card?.lastSeq ?? 0
-      const existing = this.messages[conversationId] ?? []
+      const existing = (this.messages[conversationId] ?? []).filter((item) => !item.pending)
       const loadedSeq = existing.length ? existing[existing.length - 1]!.seq : -1
       if (!existing.length || loadedSeq < lastSeq) {
         await this.loadMessages(conversationId, Math.max(0, lastSeq - PAGE_SIZE))
@@ -195,7 +224,8 @@ export const useChatStore = defineStore('chat', {
           if (!page.hasMore || page.messages.length === 0 || page.nextCursor == null) break
           cursor = Number(page.nextCursor)
         }
-        this.messages[conversationId] = dedupe(collected)
+        const pending = (this.messages[conversationId] ?? []).filter((item) => item.pending)
+        this.messages[conversationId] = [...dedupe(collected), ...pending]
       } catch (e) {
         this.error = e instanceof Error ? e.message : '加载消息失败'
       } finally {
@@ -204,7 +234,9 @@ export const useChatStore = defineStore('chat', {
     },
 
     async refreshMessages(conversationId: string) {
-      const list = this.messages[conversationId] ?? []
+      const all = this.messages[conversationId] ?? []
+      const pending = all.filter((item) => item.pending)
+      const list = all.filter((item) => !item.pending)
       let cursor = list.length ? list[list.length - 1]!.seq : 0
       try {
         for (let i = 0; i < 3; i++) {
@@ -213,7 +245,7 @@ export const useChatStore = defineStore('chat', {
           )
           if (!page.messages.length) break
           const merged = dedupe([...list, ...page.messages.map(normalize)])
-          this.messages[conversationId] = merged
+          this.messages[conversationId] = [...merged, ...pending]
           if (!page.hasMore || page.nextCursor == null) break
           cursor = Number(page.nextCursor)
         }
@@ -280,6 +312,22 @@ export const useChatStore = defineStore('chat', {
       if (!conversationId) throw new Error('没有选中的会话')
       const clientMessageId = `w-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
       this.error = null
+      // 乐观渲染：先插入占位消息，发送方无需等待服务端往返
+      const optimistic: MessageView = {
+        messageId: clientMessageId,
+        conversationId,
+        senderId: this.myId,
+        clientMsgId: clientMessageId,
+        seq: 0,
+        type,
+        content,
+        contentEncoding: type === 'TEXT' ? 'utf8' : 'base64',
+        createdAt: new Date().toISOString(),
+        pending: true,
+      }
+      const optimisticList = this.messages[conversationId]
+        ?? (this.messages[conversationId] = [])
+      optimisticList.push(optimistic)
       try {
         // 后端返回 { message: {...}, duplicate }, 需取内层
         const resp = await api.post<{
@@ -292,11 +340,13 @@ export const useChatStore = defineStore('chat', {
           content,
         })
         const sent = normalize({ ...resp.message, clientMsgId: clientMessageId })
-        const list = this.messages[conversationId] ?? (this.messages[conversationId] = [])
+        const list = (this.messages[conversationId] ?? [])
+          .filter((item) => item.clientMsgId !== clientMessageId)
         if (!list.some((item) => sameId(item.messageId, sent.messageId))) {
           list.push(sent)
           list.sort((a, b) => a.seq - b.seq)
         }
+        this.messages[conversationId] = list
         const card = this.cards.find((item) => item.conversationId === conversationId)
         if (card) {
           card.lastMessagePreview = preview
@@ -307,6 +357,8 @@ export const useChatStore = defineStore('chat', {
         }
         return sent
       } catch (e) {
+        this.messages[conversationId] = (this.messages[conversationId] ?? [])
+          .filter((item) => !(item.pending && item.clientMsgId === clientMessageId))
         this.error = e instanceof Error ? e.message : '发送失败'
         throw e
       }
@@ -456,6 +508,9 @@ export const useChatStore = defineStore('chat', {
       }
       realtimeAbort?.abort()
       realtimeAbort = null
+      realtimeCoalesceTimers.forEach((timer) => window.clearTimeout(timer))
+      realtimeCoalesceTimers.clear()
+      lastMarkReadAt.clear()
       this.realtimeConnected = false
     },
 
@@ -469,26 +524,108 @@ export const useChatStore = defineStore('chat', {
       }
       this.realtimeLastPing = Date.now()
       if (eventName !== 'message' || !dataLines.length) return
-      let conversationId = ''
+      let payload: RealtimePayload
       try {
-        conversationId = String(
-          (JSON.parse(dataLines.join('\n')) as { conversationId?: string }).conversationId ?? '',
-        )
+        payload = JSON.parse(dataLines.join('\n')) as RealtimePayload
       } catch {
         return
       }
+      const conversationId = payload.conversationId
       if (!conversationId) return
-      const sync = async () => {
-        if (conversationId === this.activeId) {
-          await this.refreshMessages(conversationId)
-          await this.markRead(conversationId)
-          await this.loadReceipts(conversationId)
-        } else {
-          await this.loadCards()
-        }
-        this.lastSync = Date.now()
+
+      // 大群只推游标：合并窗口内拉一次增量，避免每条事件一次请求
+      if (payload.kind === 'cursor' || !payload.messageId) {
+        this.scheduleRealtimeRefresh(conversationId)
+        return
       }
-      void sync()
+      this.applyRealtimeMessage(payload)
+    },
+
+    /** 推送已带消息体：直接落地，不再回查消息接口。 */
+    applyRealtimeMessage(payload: RealtimePayload) {
+      const conversationId = String(payload.conversationId)
+      const messageId = String(payload.messageId)
+      const clientMsgId = payload.clientMsgId ?? undefined
+      const mine = sameId(payload.senderId ?? '', this.myId)
+      const list = this.messages[conversationId] ?? (this.messages[conversationId] = [])
+      const duplicated = list.some(
+        (item) =>
+          sameId(item.messageId, messageId)
+          || (!!clientMsgId && item.clientMsgId === clientMsgId),
+      )
+      if (!duplicated) {
+        const view = normalize({
+          messageId,
+          conversationId,
+          senderId: payload.senderId ?? '',
+          clientMsgId,
+          seq: payload.seq ?? 0,
+          type: payload.messageType ?? 'TEXT',
+          content: payload.content ?? '',
+          contentEncoding: payload.contentEncoding ?? undefined,
+          createdAt: payload.createdAt ?? new Date().toISOString(),
+        })
+        list.push(view)
+        list.sort((a, b) => a.seq - b.seq)
+      }
+      // 服务端确认到达：移除同 clientMsgId 的乐观占位
+      const cleaned = clientMsgId
+        ? list.filter((item) => !(item.pending && item.clientMsgId === clientMsgId))
+        : list
+      if (cleaned !== list) this.messages[conversationId] = cleaned
+
+      const card = this.cards.find((item) => item.conversationId === conversationId)
+      if (card) {
+        if ((payload.seq ?? 0) > card.lastSeq) {
+          card.lastSeq = payload.seq ?? card.lastSeq
+          card.lastMessageAt = payload.createdAt ?? card.lastMessageAt
+          card.lastMessageType = payload.messageType ?? card.lastMessageType
+          card.lastMessagePreview = previewOf(payload)
+        }
+        if (conversationId === this.activeId) {
+          card.unreadCount = 0
+        } else if (!mine) {
+          card.unreadCount = (card.unreadCount ?? 0) + 1
+        }
+      } else {
+        // 新会话（首次私聊/被拉群）：卡片信息不在本地，拉一次列表
+        void this.loadCards()
+      }
+
+      this.lastSync = Date.now()
+      if (conversationId === this.activeId) {
+        this.markReadThrottled(conversationId)
+        void this.loadReceipts(conversationId)
+      }
+    },
+
+    /** 游标事件合并：120ms 窗口内同一会话只处理一次。 */
+    scheduleRealtimeRefresh(conversationId: string) {
+      const existing = realtimeCoalesceTimers.get(conversationId)
+      if (existing !== undefined) window.clearTimeout(existing)
+      const timer = window.setTimeout(() => {
+        realtimeCoalesceTimers.delete(conversationId)
+        void (async () => {
+          if (conversationId === this.activeId) {
+            await this.refreshMessages(conversationId)
+            this.markReadThrottled(conversationId)
+            void this.loadReceipts(conversationId)
+          } else {
+            await this.loadCards()
+          }
+          this.lastSync = Date.now()
+        })()
+      }, REALTIME_COALESCE_MS)
+      realtimeCoalesceTimers.set(conversationId, timer)
+    },
+
+    /** 已读上报节流：高频群聊下避免每条消息一次写库。 */
+    markReadThrottled(conversationId: string) {
+      const now = Date.now()
+      const last = lastMarkReadAt.get(conversationId) ?? 0
+      if (now - last < MARK_READ_THROTTLE_MS) return
+      lastMarkReadAt.set(conversationId, now)
+      void this.markRead(conversationId)
     },
 
     startPolling(intervalMs = 3000) {
