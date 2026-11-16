@@ -1,13 +1,22 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { MessageCircle, Loader2, ArrowRight } from 'lucide-vue-next'
 import { useAuthStore } from '../stores/auth'
 import { useChatStore } from '../stores/chat'
 
+const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 const chat = useChatStore()
+
+/** 只接受站内路径，避免 ?redirect=https://evil 变成开放跳转。 */
+function redirectTarget(): string {
+  const raw = route.query.redirect
+  const value = Array.isArray(raw) ? raw[0] : raw
+  if (typeof value === 'string' && value.startsWith('/') && !value.startsWith('//')) return value
+  return '/app/chat'
+}
 
 type Mode = 'login' | 'register'
 const mode = ref<Mode>('login')
@@ -36,7 +45,7 @@ async function submit() {
       await auth.login(username.value.trim(), password.value)
     }
     chat.reset()
-    await router.replace('/app/chat')
+    await router.replace(redirectTarget())
   } catch (e) {
     error.value = e instanceof Error ? e.message : '登录失败'
   } finally {

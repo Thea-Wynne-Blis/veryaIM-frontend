@@ -9,12 +9,16 @@ import {
   Sun,
 } from 'lucide-vue-next'
 import AppAvatar from './AppAvatar.vue'
+import { useAuthStore } from '../stores/auth'
+import { initialsOf } from '../utils/present'
 
 defineProps<{ unread: number; theme: 'light' | 'dark' }>()
 const emit = defineEmits<{
   (e: 'navigate', view: 'chat' | 'contacts' | 'files' | 'me'): void
   (e: 'toggle-theme'): void
 }>()
+
+const auth = useAuthStore()
 
 const nav = [
   { key: 'chat', icon: MessageCircle, label: '消息' },
@@ -23,6 +27,11 @@ const nav = [
 ] as const
 
 const active = defineModel<string>('active', { default: 'chat' })
+
+function go(view: 'chat' | 'contacts' | 'files' | 'me') {
+  active.value = view
+  emit('navigate', view)
+}
 </script>
 
 <template>
@@ -38,10 +47,7 @@ const active = defineModel<string>('active', { default: 'chat' })
         :data-tip="item.label"
         :aria-label="item.label"
         :aria-current="active === item.key ? 'page' : undefined"
-        @click="
-          active = item.key;
-          emit('navigate', item.key)
-        "
+        @click="go(item.key)"
       >
         <component :is="item.icon" :size="19" :stroke-width="1.85" />
         <span v-if="item.key === 'chat' && unread > 0" class="rail-badge num">
@@ -64,24 +70,22 @@ const active = defineModel<string>('active', { default: 'chat' })
         :stroke-width="1.85"
       />
     </button>
-    <button class="rail-item tip" data-tip="通知" aria-label="通知">
+    <button class="rail-item tip" :data-tip="unread ? `${unread} 条未读` : '暂无新通知'" aria-label="通知" @click="go('chat')">
       <Bell :size="18" :stroke-width="1.85" />
+      <span v-if="unread > 0" class="rail-badge num">{{ unread > 99 ? '99+' : unread }}</span>
     </button>
     <button
       class="rail-item tip"
       :class="{ active: active === 'me' }"
-      data-tip="设置"
-      aria-label="设置"
-      @click="
-        active = 'me';
-        emit('navigate', 'me')
-      "
+      data-tip="我的"
+      aria-label="我的"
+      @click="go('me')"
     >
       <Settings :size="18" :stroke-width="1.85" />
     </button>
 
-    <button class="rail-avatar tip" data-tip="我的账号" aria-label="账号">
-      <AppAvatar initials="我" tone="jade" size="sm" />
+    <button class="rail-avatar tip" data-tip="我的账号" aria-label="我的账号" @click="go('me')">
+      <AppAvatar :initials="initialsOf(auth.user?.nickname || '我')" tone="jade" size="sm" />
     </button>
   </aside>
 </template>

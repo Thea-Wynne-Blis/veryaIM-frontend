@@ -1,22 +1,55 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import { X, Pin, Users, FileText, Download, BellOff } from 'lucide-vue-next'
+import { computed, ref, watch } from 'vue'
+import { X, Pin, PinOff, Users, BellOff, Bell, Loader2, Megaphone } from 'lucide-vue-next'
 import AppAvatar from './AppAvatar.vue'
 import { trackSpotlight } from '../composables/usePointerFx'
-import { groupMembers, sharedFiles, type Conversation } from '../data/workspace'
+import { api, type GroupModeration } from '../api/client'
+import type { ChatMember } from '../stores/chat'
+import { initialsOf, toneOf } from '../utils/present'
+import type { Conversation } from '../data/workspace'
 
-const props = defineProps<{ conversation: Conversation }>()
-const emit = defineEmits<{ (e: 'close'): void }>()
+const props = defineProps<{
+  conversation: Conversation
+  members?: ChatMember[]
+  pinned?: boolean
+  muted?: boolean
+}>()
 
-const memberCount = computed(() =>
-  props.conversation.kind === 'group'
-    ? props.conversation.members ?? groupMembers.length
-    : 2,
+const emit = defineEmits<{
+  (e: 'close'): void
+  (e: 'toggle-pin'): void
+  (e: 'toggle-mute'): void
+  (e: 'manage'): void
+}>()
+
+const isGroup = computed(() => props.conversation.kind === 'group')
+const memberList = computed(() => props.members ?? [])
+const memberCount = computed(() => props.conversation.members ?? memberList.value.length)
+const onlineCount = computed(
+  () => memberList.value.filter((member) => member.online).length,
 )
 
-const fileCount = computed(() => sharedFiles.length)
-const onlineCount = computed(() =>
-  Math.max(1, Math.round(memberCount.value * 0.5)),
+const moderation = ref<GroupModeration | null>(null)
+const loadingModeration = ref(false)
+
+async function loadModeration() {
+  if (!isGroup.value) return
+  loadingModeration.value = true
+  try {
+    moderation.value = await api.get<GroupModeration>(
+      `/groups/${props.conversation.id}/moderation`,
+    )
+  } catch {
+    moderation.value = null
+  } finally {
+    loadingModeration.value = false
+  }
+}
+
+watch(
+  () => [props.conversation.id, isGroup.value] as const,
+  () => loadModeration(),
+  { immediate: true },
 )
 </script>
 
@@ -34,7 +67,7 @@ const onlineCount = computed(() =>
         <AppAvatar
           :initials="conversation.initials"
           :tone="conversation.tone"
-          :rounded="conversation.kind === 'group'"
+          :rounded="isGroup"
           size="xl"
         />
         <div>
@@ -53,72 +86,68 @@ const onlineCount = computed(() =>
           <p class="stat-label">在线</p>
         </div>
         <div class="stat-cell">
-          <p class="stat-value">{{ fileCount }}</p>
-          <p class="stat-label">文件</p>
+          <p class="stat-value">{{ isGroup ? '群聊' : '单聊' }}</p>
+          <p class="stat-label">类型</p>
         </div>
       </div>
 
-      <div class="card spot glare" @pointermove="trackSpotlight">
+      <div v-if="isGroup" class="card spot glare" @pointermove="trackSpotlight">
         <p class="card-label">
-          <Pin :size="11" :stroke-width="2.4" />
+          <Megaphone :size="11" :stroke-width="2.4" />
           群公告
         </p>
-        <p class="card-text">
-          本周五前完成交互走查，重点覆盖窄屏状态与深色模式。有问题直接在这里回我。
+        <p v-if="loadingModeration" class="card-text muted-line">
+          <Loader2 :size="12" class="spin" /> 加载中…
         </p>
+        <p v-else class="card-text">
+          {{ moderation?.announcement || '暂无群公告' }}
+        </p>
+        <p v-if="moderation?.muteAll" class="card-warn">全员禁言中</p>
       </div>
 
       <div
-        v-if="conversation.kind === 'group'"
+        v-if="isGroup"
         class="card spot"
         @pointermove="trackSpotlight"
       >
         <p class="card-label">
           <Users :size="11" :stroke-width="2.4" />
-          成员 · {{ groupMembers.length }}
+          成员 · {{ memberList.length || memberCount }}
         </p>
-        <div class="member-grid">
+        <div v-if="memberList.length" class="member-grid">
           <div
-            v-for="member in groupMembers"
-            :key="member.name"
+            v-for="member in memberList"
+            :key="member.userId"
             class="member tip"
-            :data-tip="`${member.name} · ${member.role}`"
+            :data-tip="`${member.nickname}${member.role ? ' · ' + member.role : ''}`"
           >
             <AppAvatar
-              :initials="member.initials"
-              :tone="member.tone"
+              :initials="initialsOf(member.nickname)"
+              :tone="toneOf(member.userId)"
               size="sm"
-              :presence="member.role === '群主' ? 'online' : 'offline'"
+              :presence="member.online ? 'online' : 'offline'"
             />
-            <span class="member-name">{{ member.name }}</span>
+            <span class="member-name">{{ member.nickname }}</span>
           </div>
         </div>
+        <p v-else class="card-text muted-line">暂无成员资料</p>
       </div>
 
-      <div class="card">
-        <p class="card-label">
-          <FileText :size="11" :stroke-width="2.4" />
-          共享文件
-        </p>
-        <button
-          v-for="file in sharedFiles"
-          :key="file.name"
-          class="file-row glare"
-        >
-          <span class="file-row-icon">
-            <FileText :size="14" :stroke-width="1.9" />
-          </span>
-          <span class="file-row-main">
-            <span class="file-row-name">{{ file.name }}</span>
-            <span class="file-row-size">{{ file.size }}</span>
-          </span>
-          <Download :size="13" :stroke-width="1.9" style="color: var(--ink-3)" />
-        </button>
-      </div>
+      <button v-if="isGroup" class="action-btn" @click="emit('manage')">
+        <Users :size="13" :stroke-width="2" />
+        群管理
+      </button>
 
-      <button class="mute-btn">
-        <BellOff :size="13" :stroke-width="2" />
-        消息免打扰
+      <button class="action-btn" @click="emit('toggle-pin')">
+        <PinOff v-if="pinned" :size="13" :stroke-width="2" />
+        <Pin v-else :size="13" :stroke-width="2" />
+        {{ pinned ? '取消置顶' : '置顶会话' }}
+      </button>
+
+      <button class="action-btn" @click="emit('toggle-mute')">
+        <Bell v-if="muted" :size="13" :stroke-width="2" />
+        <BellOff v-else :size="13" :stroke-width="2" />
+        {{ muted ? '开启消息提醒' : '消息免打扰' }}
       </button>
     </div>
   </aside>
@@ -135,7 +164,7 @@ const onlineCount = computed(() =>
   transform: translate(-50%, -100%) scale(1);
 }
 
-.mute-btn {
+.action-btn {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -151,9 +180,25 @@ const onlineCount = computed(() =>
     color var(--dur-1) var(--ease-out), border-color var(--dur-1) var(--ease-out);
 }
 
-.mute-btn:hover {
+.action-btn:hover {
   background: var(--surface-hover);
   border-color: var(--line-strong);
   color: var(--ink);
+}
+
+.muted-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-3);
+}
+
+.card-warn {
+  font-size: 10.5px;
+  color: var(--danger);
+}
+
+.spin {
+  animation: tick-spin 900ms linear infinite;
 }
 </style>

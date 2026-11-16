@@ -20,6 +20,8 @@ export type Attachment = {
   name: string
   size: string
   kind: 'file' | 'image'
+  /** 雪花 ID 超出 JS 安全整数，可能以 string 形式存在。 */
+  fileId?: string | number
 }
 
 export type ChatMessage = {
@@ -33,6 +35,7 @@ export type ChatMessage = {
   attachment?: Attachment
   image?: boolean
   read?: boolean
+  recalled?: boolean
 }
 
 export const conversations: Conversation[] = [

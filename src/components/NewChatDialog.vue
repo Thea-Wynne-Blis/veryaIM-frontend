@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { X, Search, Loader2, MessageSquarePlus } from 'lucide-vue-next'
 import AppAvatar from './AppAvatar.vue'
-import { api } from '../api/client'
+import { api, sameId, type Id } from '../api/client'
 import { useChatStore } from '../stores/chat'
 import { initialsOf, toneOf } from '../utils/present'
 
@@ -12,45 +12,60 @@ const emit = defineEmits<{
   (e: 'created', conversationId: string): void
 }>()
 
-type UserHit = { userId: number; nickname: string; username: string }
+type UserHit = { userId: Id; nickname: string; username: string }
 
 const chat = useChatStore()
 const keyword = ref('')
 const hits = ref<UserHit[]>([])
 const loading = ref(false)
 const error = ref('')
-const creating = ref<number | null>(null)
+const creating = ref<Id | null>(null)
 
 const canSearch = computed(() => keyword.value.trim().length >= 1)
 
+let seq = 0
+
 async function search() {
-  if (!canSearch.value) {
+  const kw = keyword.value.trim()
+  if (!kw) {
     hits.value = []
+    loading.value = false
     return
   }
+  const current = ++seq
   loading.value = true
   error.value = ''
   try {
     const result = await api.get<unknown>(
-      `/users/search?keyword=${encodeURIComponent(keyword.value.trim())}&limit=20`,
+      `/users/search?keyword=${encodeURIComponent(kw)}&limit=20`,
     )
-    const list = Array.isArray(result) ? result : (result as { items?: unknown[] })?.items ?? []
-    hits.value = (list as Record<string, unknown>[]).map((item) => ({
-      userId: Number(item.userId ?? item.id ?? 0),
-      nickname: String(item.nickname ?? item.username ?? '用户'),
-      username: String(item.username ?? ''),
-    }))
+    if (current !== seq) return // 关键词已变，丢弃过期结果
+    const list = Array.isArray(result) ? result : []
+    hits.value = (list as Record<string, unknown>[])
+      .map((item) => ({
+        userId: String(item.userId ?? ''),
+        nickname: String(item.nickname ?? item.username ?? '用户'),
+        username: String(item.username ?? ''),
+      }))
+      .filter((item) => item.userId && item.userId !== '0')
   } catch (e) {
+    if (current !== seq) return
     error.value = e instanceof Error ? e.message : '搜索失败'
     hits.value = []
   } finally {
-    loading.value = false
+    if (current === seq) loading.value = false
   }
 }
 
 let timer: number | null = null
 watch(keyword, () => {
   if (timer) window.clearTimeout(timer)
+  if (!canSearch.value) {
+    seq++
+    hits.value = []
+    loading.value = false
+    return
+  }
   timer = window.setTimeout(search, 320)
 })
 
@@ -58,9 +73,12 @@ watch(
   () => props.open,
   (open) => {
     if (!open) {
+      if (timer) window.clearTimeout(timer)
+      seq++
       keyword.value = ''
       hits.value = []
       error.value = ''
+      loading.value = false
     }
   },
 )
@@ -124,7 +142,7 @@ async function pick(hit: UserHit) {
               <span class="hit-sub">@{{ hit.username }}</span>
             </span>
             <Loader2
-              v-if="creating === hit.userId"
+              v-if="sameId(creating, hit.userId)"
               :size="15"
               class="spin"
               style="color: var(--accent)"

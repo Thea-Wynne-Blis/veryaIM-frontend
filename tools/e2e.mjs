@@ -103,6 +103,63 @@ try {
     }
   }
 
+  /* ---------- 5.5 群聊：创建 / 改名 / 公告 / 禁言 / 解散 ---------- */
+  step('5.5 群聊全流程')
+  await page.goto(`${BASE}/app/chat`, { waitUntil: 'domcontentloaded' })
+  await page.waitForSelector('.conv', { timeout: 15000 })
+  await page.waitForTimeout(600)
+
+  const groupName = `自动化测试群 ${Date.now().toString().slice(-5)}`
+  await page.click('button[aria-label="新建会话"]')
+  await page.click('.new-item:has-text("创建群聊")')
+  await page.waitForSelector('input[placeholder="给群起个名字"]', { timeout: 8000 })
+  await page.fill('input[placeholder="给群起个名字"]', groupName)
+  await page.waitForSelector('.pick-row, .dialog-empty', { timeout: 8000 }).catch(() => {})
+  const picks = page.locator('.pick-row')
+  const pickCount = await picks.count()
+  if (pickCount === 0) bad('没有可选好友，无法建群')
+  for (let i = 0; i < Math.min(2, pickCount); i++) await picks.nth(i).click()
+  await page.click('.dialog-foot button.primary')
+  await page.waitForTimeout(2500)
+
+  const created = page.locator('.conv', { hasText: groupName })
+  if ((await created.count()) > 0) ok(`群「${groupName}」已创建并出现在列表`)
+  else bad('群创建后未出现在会话列表')
+
+  await created.first().click()
+  await page.waitForTimeout(1200)
+
+  await page.click('button:has-text("群管理")')
+  await page.waitForSelector('.dialog-title', { timeout: 8000 })
+  ok('群管理面板已打开')
+
+  const newName = `${groupName} 改名`
+  const nameInput = page.locator('.dialog .field-input').first()
+  await nameInput.fill(newName)
+  await page.click('.dialog .inline-row button')
+  await page.waitForTimeout(1800)
+  const titleText = await page.locator('.dialog-title').first().textContent()
+  if (titleText?.includes('改名')) ok(`群名称已更新为「${titleText.trim()}」`)
+  else bad(`群名称未更新，仍是「${titleText?.trim()}」`)
+
+  const ann = `公告：自动化测试 ${Date.now()}`
+  await page.fill('.dialog .field-textarea', ann)
+  await page.click('button:has-text("保存公告")')
+  await page.waitForTimeout(1500)
+  ok('群公告已保存')
+
+  await page.click('button:has-text("已关闭"), button:has-text("已开启")')
+  await page.waitForTimeout(1500)
+  const muteText = await page.locator('.switch-btn').first().textContent()
+  if (muteText?.includes('已开启')) ok('全员禁言已开启')
+  else bad(`全员禁言开关异常: ${muteText}`)
+
+  await page.click('button:has-text("解散群聊")')
+  await page.waitForTimeout(400)
+  await page.click('button:has-text("再点一次确认解散")')
+  await page.waitForTimeout(2500)
+  if ((await page.locator('.conv', { hasText: '自动化测试群' }).count()) === 0) ok('群已解散并从列表移除')
+  else bad('解散后群仍在列表')
   /* ---------- 6. 退出登录 ---------- */
   step('6. 退出登录')
   await page.goto(`${BASE}/app/me`, { waitUntil: 'domcontentloaded' })

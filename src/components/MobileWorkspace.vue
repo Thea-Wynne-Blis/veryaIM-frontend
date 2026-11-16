@@ -3,7 +3,7 @@ import { computed, nextTick, ref, watch } from 'vue'
 import {
   MessageCircle,
   Users,
-  Compass,
+  FolderOpen,
   User,
   Search,
   Plus,
@@ -12,18 +12,15 @@ import {
   Smile,
   Send,
   MoreHorizontal,
-  FileText,
   CheckCheck,
   Check,
-  Sparkles,
-  ScanLine,
-  BookOpen,
-  MapPin,
-  Radio,
+  Loader2,
 } from 'lucide-vue-next'
 import AppAvatar from './AppAvatar.vue'
 import ContactsView from './ContactsView.vue'
+import FilesView from './FilesView.vue'
 import MeView from './MeView.vue'
+import MessageAttachment from './MessageAttachment.vue'
 import type { ChatMessage, Conversation } from '../data/workspace'
 
 const props = defineProps<{
@@ -31,21 +28,24 @@ const props = defineProps<{
   messagesOf: (id: string) => ChatMessage[]
   activeId: string | null
   me?: string
+  error?: string | null
+  loading?: boolean
 }>()
 
 const emit = defineEmits<{
   (e: 'select', id: string): void
   (e: 'send', payload: { conversationId: string; text: string }): void
+  (e: 'attach', payload: { conversationId: string; file: File }): void
   (e: 'close'): void
   (e: 'new-chat'): void
 }>()
 
-type Tab = 'chat' | 'contacts' | 'discover' | 'me'
+type Tab = 'chat' | 'contacts' | 'files' | 'me'
 
-/** 支持 ?tab=discover 直接落地到指定页，便于演示与截图。 */
+/** 支持 ?tab=files 直接落地到指定页，便于演示与截图。 */
 const initialTab = (() => {
   const value = new URLSearchParams(window.location.search).get('tab')
-  return value === 'contacts' || value === 'discover' || value === 'me'
+  return value === 'contacts' || value === 'files' || value === 'me'
     ? (value as Tab)
     : 'chat'
 })()
@@ -55,26 +55,15 @@ const keyword = ref('')
 const draft = ref('')
 const scroller = ref<HTMLElement | null>(null)
 const bodyScrolled = ref(false)
+const stickToBottom = ref(true)
+const fileInput = ref<HTMLInputElement | null>(null)
 
 const tabs = [
   { key: 'chat', label: '消息', icon: MessageCircle },
   { key: 'contacts', label: '通讯录', icon: Users },
-  { key: 'discover', label: '发现', icon: Compass },
+  { key: 'files', label: '文件', icon: FolderOpen },
   { key: 'me', label: '我的', icon: User },
 ] as const
-
-const discoverGroups = [
-  [
-    { name: '朋友圈', desc: '好友动态与图片', icon: Sparkles, tone: 'jade' },
-    { name: '扫一扫', desc: '二维码 / 条码', icon: ScanLine, tone: 'sky' },
-    { name: '看一看', desc: '推荐阅读', icon: BookOpen, tone: 'violet' },
-  ],
-  [
-    { name: '搜一搜', desc: '搜索聊天与联系人', icon: Search, tone: 'amber' },
-    { name: '附近', desc: '附近的人与群', icon: MapPin, tone: 'rose' },
-    { name: '直播', desc: '正在直播', icon: Radio, tone: 'sand' },
-  ],
-]
 
 const totalUnread = computed(() =>
   props.conversations.reduce((sum, item) => sum + item.unread, 0),
@@ -105,10 +94,22 @@ const tabTitle = computed(
     ({
       chat: '消息',
       contacts: '通讯录',
-      discover: '发现',
+      files: '文件',
       me: '我的',
     })[tab.value],
 )
+
+function triggerAttach() {
+  fileInput.value?.click()
+}
+
+function onFilePicked(event: Event) {
+  const el = event.target as HTMLInputElement
+  const file = el.files?.[0]
+  el.value = ''
+  if (!file || !props.activeId) return
+  emit('attach', { conversationId: props.activeId, file })
+}
 
 function open(id: string) {
   emit('select', id)
@@ -123,17 +124,35 @@ function send() {
   if (!canSend.value || !props.activeId) return
   emit('send', { conversationId: props.activeId, text: draft.value.trim() })
   draft.value = ''
+  stickToBottom.value = true
+  scrollBottom(true)
 }
 
-function scrollBottom() {
+function scrollBottom(force = false) {
+  if (!force && !stickToBottom.value) return
   nextTick(() => {
     const el = scroller.value
-    if (el) el.scrollTop = el.scrollHeight
+    if (!el) return
+    el.scrollTop = el.scrollHeight
+    stickToBottom.value = true
   })
 }
 
-watch(() => currentMessages.value.length, scrollBottom)
-watch(() => props.activeId, scrollBottom, { immediate: true })
+function onMessageScroll() {
+  const el = scroller.value
+  if (!el) return
+  stickToBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight <= 48
+}
+
+watch(() => currentMessages.value.length, () => scrollBottom())
+watch(
+  () => props.activeId,
+  () => {
+    stickToBottom.value = true
+    scrollBottom(true)
+  },
+  { immediate: true },
+)
 
 function onBodyScroll(event: Event) {
   const el = event.target as HTMLElement
@@ -214,41 +233,8 @@ function grouping(messages: ChatMessage[]) {
         </p>
       </template>
 
-      <!-- 发现 -->
-      <div v-else-if="tab === 'discover'" class="m-discover">
-        <div
-          v-for="(group, gi) in discoverGroups"
-          :key="gi"
-          class="discover-section"
-        >
-          <button
-            v-for="item in group"
-            :key="item.name"
-            class="discover-row"
-            :style="{
-              animation: `fade-up 340ms var(--ease-out) ${gi * 60}ms backwards`,
-            }"
-          >
-            <span class="discover-icon" :class="`tone-${item.tone}`">
-              <component :is="item.icon" :size="17" :stroke-width="1.9" />
-            </span>
-            <span class="discover-text">
-              <span class="discover-name">{{ item.name }}</span>
-              <span class="discover-desc">{{ item.desc }}</span>
-            </span>
-          </button>
-        </div>
-        <p
-          style="
-            text-align: center;
-            font-size: 11.5px;
-            color: var(--ink-4);
-            padding: 4px 0 8px;
-          "
-        >
-          发现页内容为占位，待接入后端
-        </p>
-      </div>
+      <!-- 文件 -->
+      <FilesView v-else-if="tab === 'files'" class="m-embed" />
 
       <ContactsView v-else-if="tab === 'contacts'" class="m-embed" />
       <MeView v-else class="m-embed" />
@@ -289,7 +275,13 @@ function grouping(messages: ChatMessage[]) {
           </button>
         </header>
 
-        <div ref="scroller" class="m-messages">
+        <div
+          ref="scroller"
+          class="m-messages"
+          @scroll.passive="onMessageScroll"
+          @load.capture="scrollBottom(false)"
+        >
+          <p v-if="error" class="m-error">{{ error }}</p>
           <p class="day-divider">今天</p>
           <div
             v-for="({ message, grouped }, index) in grouping(currentMessages)"
@@ -310,18 +302,13 @@ function grouping(messages: ChatMessage[]) {
               <span v-if="!grouped && message.side === 'in'" class="msg-author">
                 {{ message.author }}
               </span>
-              <div v-if="message.attachment" class="bubble" style="padding: 8px">
-                <div class="attach" style="min-width: 186px">
-                  <span class="attach-icon">
-                    <FileText :size="16" :stroke-width="1.8" />
-                  </span>
-                  <span class="attach-meta">
-                    <span class="attach-name">{{ message.attachment.name }}</span>
-                    <span class="attach-size">{{ message.attachment.size }}</span>
-                  </span>
-                </div>
+              <MessageAttachment
+                v-if="message.attachment && !message.recalled"
+                :attachment="message.attachment"
+              />
+              <div v-else class="bubble" :class="{ recalled: message.recalled }">
+                {{ message.text }}
               </div>
-              <div v-else class="bubble">{{ message.text }}</div>
               <div class="msg-foot">
                 <span class="num">{{ message.time }}</span>
                 <template v-if="message.side === 'out'">
@@ -333,6 +320,10 @@ function grouping(messages: ChatMessage[]) {
               </div>
             </div>
           </div>
+          <p v-if="loading && !currentMessages.length" class="m-loading">
+            <Loader2 :size="15" class="spin" /> 正在加载消息…
+          </p>
+          <p v-else-if="!currentMessages.length" class="m-loading">还没有消息，发一条试试</p>
         </div>
 
         <div class="m-composer-wrap">
@@ -348,12 +339,13 @@ function grouping(messages: ChatMessage[]) {
               aria-label="输入消息"
               @keydown.enter.exact.prevent="send"
             />
-            <button v-if="!canSend" class="icon-btn" aria-label="附件">
+            <button v-if="!canSend" class="icon-btn" aria-label="附件" @click="triggerAttach">
               <Paperclip :size="20" :stroke-width="1.9" />
             </button>
             <button v-else class="m-send" aria-label="发送" @click="send">
               <Send :size="17" :stroke-width="2.2" />
             </button>
+            <input ref="fileInput" type="file" hidden @change="onFilePicked" />
           </div>
         </div>
       </section>
@@ -366,6 +358,37 @@ function grouping(messages: ChatMessage[]) {
   flex: 1;
   min-height: 0;
   overflow: hidden;
+}
+
+.m-error {
+  margin: 8px 12px;
+  padding: 7px 10px;
+  border-radius: var(--r-sm);
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 11.5px;
+}
+
+.m-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 26px 16px;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+.bubble.recalled {
+  background: transparent;
+  border: 1px dashed var(--line-strong);
+  color: var(--ink-3);
+  font-size: 11.5px;
+  font-style: italic;
+}
+
+.spin {
+  animation: tick-spin 900ms linear infinite;
 }
 
 .m-chat-enter-active,

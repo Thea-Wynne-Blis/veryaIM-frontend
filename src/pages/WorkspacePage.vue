@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import NavRail from '../components/NavRail.vue'
 import ConversationList from '../components/ConversationList.vue'
@@ -10,11 +10,16 @@ import ContactsView from '../components/ContactsView.vue'
 import FilesView from '../components/FilesView.vue'
 import MeView from '../components/MeView.vue'
 import NewChatDialog from '../components/NewChatDialog.vue'
+import CreateGroupDialog from '../components/CreateGroupDialog.vue'
+import GroupManageDialog from '../components/GroupManageDialog.vue'
 import { useIsMobile } from '../composables/useIsMobile'
 import { useChatStore } from '../stores/chat'
 import { useAuthStore } from '../stores/auth'
-import type { ChatMessage, Conversation } from '../data/workspace'
-import { clockTime, initialsOf, listTime, toneOf } from '../utils/present'
+import type { Attachment, ChatMessage, Conversation } from '../data/workspace'
+import { parseJson, sameId, type Id, type MessageView } from '../api/client'
+import { clockTime, humanBytes, initialsOf, listTime, toneOf } from '../utils/present'
+
+const THEME_KEY = 'veryal.theme'
 
 const route = useRoute()
 const router = useRouter()
@@ -24,9 +29,32 @@ const auth = useAuthStore()
 
 const detailOpen = ref(true)
 const theme = ref<'light' | 'dark'>(
-  new URLSearchParams(window.location.search).get('theme') === 'dark' ? 'dark' : 'light',
+  (localStorage.getItem(THEME_KEY) as 'light' | 'dark' | null) ??
+    (new URLSearchParams(window.location.search).get('theme') === 'dark' ? 'dark' : 'light'),
 )
 const dialogOpen = ref(false)
+const createGroupOpen = ref(false)
+const manageOpen = ref(false)
+
+/** 建群成功后直接进入该群会话 */
+async function onGroupCreated(groupId: string) {
+  createGroupOpen.value = false
+  await chat.loadCards()
+  await select(groupId)
+}
+
+/** 群信息变更后刷新列表与成员 */
+async function onGroupChanged() {
+  await chat.loadCards()
+  if (chat.activeId) await chat.loadMembers(chat.activeId, true)
+}
+
+/** 退群或解散后清空当前会话 */
+async function onGroupRemoved() {
+  manageOpen.value = false
+  chat.activeId = null
+  await chat.loadCards()
+}
 
 /** 当前一级导航：chat / contacts / files / me */
 const view = computed(() => {
@@ -35,8 +63,21 @@ const view = computed(() => {
   return 'chat'
 })
 
+function timeOfCard(card: { lastMessageAt: string | null; updatedAt: string }): number {
+  return new Date(card.lastMessageAt ?? card.updatedAt).getTime() || 0
+}
+
+const sortedCards = computed(() =>
+  [...chat.cards].sort((a, b) => {
+    const pinnedA = chat.pinnedIds.includes(a.conversationId) ? 1 : 0
+    const pinnedB = chat.pinnedIds.includes(b.conversationId) ? 1 : 0
+    if (pinnedA !== pinnedB) return pinnedB - pinnedA
+    return timeOfCard(b) - timeOfCard(a)
+  }),
+)
+
 const conversations = computed<Conversation[]>(() =>
-  chat.cards.map((card) => ({
+  sortedCards.value.map((card) => ({
     id: card.conversationId,
     name: card.title,
     initials: initialsOf(card.title),
@@ -48,6 +89,8 @@ const conversations = computed<Conversation[]>(() =>
     preview: card.lastMessagePreview || '还没有消息',
     members: card.memberCount,
     context: card.type === 'GROUP' ? `群聊 · ${card.memberCount} 位成员` : '单聊',
+    pinned: chat.pinnedIds.includes(card.conversationId),
+    muted: chat.mutedIds.includes(card.conversationId),
   })),
 )
 
@@ -55,11 +98,64 @@ const activeCard = computed(() => chat.activeCard)
 const activeConversation = computed(
   () => conversations.value.find((item) => item.id === chat.activeId) ?? null,
 )
+const activeMembers = computed(() =>
+  chat.activeId ? chat.members[chat.activeId] ?? [] : [],
+)
+
+function decodeContent(item: MessageView): string {
+  if (item.contentEncoding !== 'base64') return item.content ?? ''
+  try {
+    const binary = atob(item.content ?? '')
+    const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0))
+    return new TextDecoder().decode(bytes)
+  } catch {
+    return ''
+  }
+}
+
+function attachmentOf(item: MessageView): Attachment | undefined {
+  if (item.recalled) return undefined
+  if (item.type === 'TEXT' || item.type === 'EMOJI' || item.type === 'SYSTEM') return undefined
+  const content = decodeContent(item)
+  try {
+    const data = parseJson<{
+      fileId?: Id
+      fileName?: string
+      name?: string
+      sizeBytes?: number
+    }>(content)
+    const fileId = data.fileId ? String(data.fileId) : undefined
+    const name = data.fileName || data.name || `文件 ${fileId || ''}`.trim()
+    return {
+      name,
+      size: humanBytes(Number(data.sizeBytes ?? 0)),
+      kind: item.type === 'IMAGE' ? 'image' : 'file',
+      fileId,
+    }
+  } catch {
+    return {
+      name: item.type === 'IMAGE' ? '图片' : '文件',
+      size: '',
+      kind: item.type === 'IMAGE' ? 'image' : 'file',
+    }
+  }
+}
+
+function authorOf(item: MessageView): string {
+  if (sameId(item.senderId, chat.myId)) return '我'
+  if (activeCard.value?.type === 'GROUP') {
+    return activeMembers.value.find((member) => sameId(member.userId, item.senderId))?.nickname
+      ?? `成员 ${item.senderId}`
+  }
+  return activeCard.value?.title ?? '对方'
+}
 
 const messages = computed<ChatMessage[]>(() =>
   chat.activeMessages.map((item) => {
-    const mine = item.senderId === chat.myId
-    const author = mine ? '我' : activeCard.value?.title ?? '对方'
+    const mine = sameId(item.senderId, chat.myId)
+    const author = authorOf(item)
+    const peerReadSeq = chat.peerReadSeq(item.conversationId)
+    const attachment = attachmentOf(item)
     return {
       id: String(item.messageId),
       author,
@@ -67,8 +163,11 @@ const messages = computed<ChatMessage[]>(() =>
       tone: mine ? 'jade' : toneOf(item.senderId),
       side: mine ? 'out' : 'in',
       time: clockTime(item.createdAt),
-      text: item.type === 'TEXT' ? item.content : `[${item.type}]`,
-      read: false,
+      text: item.recalled ? '消息已撤回' : decodeContent(item),
+      attachment,
+      image: attachment?.kind === 'image',
+      read: mine && !!peerReadSeq && item.seq <= peerReadSeq,
+      recalled: !!item.recalled,
     }
   }),
 )
@@ -77,10 +176,21 @@ function messagesOf(id: string): ChatMessage[] {
   return id === chat.activeId ? messages.value : []
 }
 
-async function select(id: string) {
-  chat.activeId = id
-  if (view.value !== 'chat') await router.push('/app/chat')
+async function select(id: string, updateRoute = true) {
+  if (!chat.cards.some((card) => card.conversationId === id)) {
+    await chat.loadCards()
+  }
+  if (updateRoute) {
+    if (view.value !== 'chat') {
+      await router.push({ name: 'conversation', params: { conversationId: id } })
+    } else {
+      await router.replace({ name: 'conversation', params: { conversationId: id } })
+    }
+  }
   await chat.open(id)
+  if (activeCard.value?.type === 'GROUP') {
+    await chat.loadMembers(id)
+  }
 }
 
 async function closeMobileChat() {
@@ -90,6 +200,15 @@ async function closeMobileChat() {
 async function send(conversationId: string, text: string) {
   if (conversationId !== chat.activeId) chat.activeId = conversationId
   await chat.send(text)
+}
+
+async function attach(conversationId: string, file: File) {
+  if (conversationId !== chat.activeId) chat.activeId = conversationId
+  try {
+    await chat.sendAttachment(file)
+  } catch {
+    /* 错误已在 store 中展示 */
+  }
 }
 
 function navigate(target: string) {
@@ -105,6 +224,7 @@ function navigate(target: string) {
 function toggleTheme() {
   theme.value = theme.value === 'dark' ? 'light' : 'dark'
   document.documentElement.dataset.theme = theme.value
+  localStorage.setItem(THEME_KEY, theme.value)
 }
 
 async function handleCreated(conversationId: string) {
@@ -119,20 +239,60 @@ function onOpenChatRequest(event: Event) {
   if (id) select(id)
 }
 
+function onUnauthorized() {
+  chat.reset()
+  if (route.name !== 'login') {
+    router.replace({ name: 'login', query: { redirect: route.fullPath } })
+  }
+}
+
+function onTogglePin() {
+  if (chat.activeId) chat.togglePin(chat.activeId)
+}
+
+function onToggleMute() {
+  if (chat.activeId) chat.toggleMute(chat.activeId)
+}
+
+watch(
+  () => route.params.conversationId as string | undefined,
+  (id) => {
+    if (id && id !== chat.activeId) select(id, false)
+  },
+)
+
+watch(
+  () => route.name,
+  (name) => {
+    if (name !== 'chat' && name !== 'conversation') return
+    const fromRoute = route.params.conversationId as string | undefined
+    if (fromRoute && fromRoute !== chat.activeId) {
+      select(fromRoute, false)
+    } else if (!isMobile.value && !chat.activeId && chat.cards[0]) {
+      // 移动端进入消息页应先看到会话列表，而不是自动打开第一个会话。
+      select(chat.cards[0].conversationId)
+    }
+  },
+)
+
 onMounted(async () => {
   document.documentElement.dataset.theme = theme.value
   window.addEventListener('veryal:open-chat', onOpenChatRequest)
-  await chat.loadCards()
+  window.addEventListener('veryal:unauthorized', onUnauthorized)
+  await Promise.allSettled([chat.loadCards(), auth.refresh()])
   if (view.value === 'chat') {
     const fromRoute = route.params.conversationId as string | undefined
-    const first = fromRoute ?? chat.cards[0]?.conversationId ?? null
-    if (first) await select(first)
+    const first = fromRoute ?? (isMobile.value ? null : chat.cards[0]?.conversationId ?? null)
+    if (first) await select(first, false)
   }
-  chat.startPolling(4000)
+  chat.startPolling(3000)
+  chat.startRealtime()
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('veryal:open-chat', onOpenChatRequest)
+  window.removeEventListener('veryal:unauthorized', onUnauthorized)
+  chat.stopRealtime()
   chat.stopPolling()
 })
 </script>
@@ -144,9 +304,12 @@ onBeforeUnmount(() => {
     :messages-of="messagesOf"
     :active-id="chat.activeId"
     :me="auth.user?.nickname ?? '我'"
+    :error="chat.error"
+    :loading="chat.loadingMessages"
     @select="select"
     @close="closeMobileChat"
     @send="(payload) => send(payload.conversationId, payload.text)"
+    @attach="(payload) => attach(payload.conversationId, payload.file)"
     @new-chat="dialogOpen = true"
   />
 
@@ -169,6 +332,7 @@ onBeforeUnmount(() => {
         :active-id="chat.activeId"
         @select="select"
         @new-chat="dialogOpen = true"
+        @new-group="createGroupOpen = true"
       />
 
       <ChatPane
@@ -176,14 +340,23 @@ onBeforeUnmount(() => {
         :messages="messages"
         :detail-open="detailOpen"
         :error="chat.error"
+        :members="activeMembers"
+        :loading="chat.loadingMessages"
         @send="(text) => chat.activeId && send(chat.activeId, text)"
+        @attach="(file) => chat.activeId && attach(chat.activeId, file)"
         @toggle-detail="detailOpen = !detailOpen"
       />
 
       <DetailPanel
         v-if="detailOpen && activeConversation"
         :conversation="activeConversation"
+        :members="activeMembers"
+        :pinned="chat.isPinned(activeConversation.id)"
+        :muted="chat.isMuted(activeConversation.id)"
+        @manage="manageOpen = true"
         @close="detailOpen = false"
+        @toggle-pin="onTogglePin"
+        @toggle-mute="onToggleMute"
       />
     </div>
 
@@ -206,5 +379,19 @@ onBeforeUnmount(() => {
     :open="dialogOpen"
     @close="dialogOpen = false"
     @created="handleCreated"
+  />
+
+  <CreateGroupDialog
+    :open="createGroupOpen"
+    @close="createGroupOpen = false"
+    @created="onGroupCreated"
+  />
+
+  <GroupManageDialog
+    :open="manageOpen"
+    :group-id="chat.activeId"
+    @close="manageOpen = false"
+    @changed="onGroupChanged"
+    @removed="onGroupRemoved"
   />
 </template>

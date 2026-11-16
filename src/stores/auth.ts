@@ -7,6 +7,7 @@ import {
   getStoredUser,
   getToken,
   saveSession,
+  updateStoredUser,
   type AuthUser,
   type LoginResult,
 } from '../api/client'
@@ -61,6 +62,29 @@ export const useAuthStore = defineStore('auth', {
     async register(username: string, password: string, nickname: string) {
       await api.post('/auth/register', { username, password, nickname })
       return this.login(username, password)
+    },
+
+    /** 刷新页面后用后端资料覆盖本地缓存，避免昵称/头像过期。 */
+    async refresh() {
+      if (!this.token) return
+      try {
+        const user = await api.get<AuthUser>('/auth/me')
+        this.user = user
+        updateStoredUser(user)
+      } catch (e) {
+        // 令牌失效由 api 层清空并派发 veryal:unauthorized。
+        if (e instanceof Error && e.message.includes('会话')) {
+          this.token = null
+          this.user = null
+        }
+      }
+    },
+
+    /** 修改资料后同步 Pinia 与 localStorage。 */
+    updateUser(patch: Partial<AuthUser>) {
+      if (!this.user) return
+      this.user = { ...this.user, ...patch }
+      updateStoredUser(this.user)
     },
 
     async logout() {

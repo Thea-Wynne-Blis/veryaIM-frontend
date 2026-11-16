@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { Search, Plus, Pin, BellOff } from 'lucide-vue-next'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { Search, Plus, Pin, BellOff, UserPlus, Users } from 'lucide-vue-next'
 import AppAvatar from './AppAvatar.vue'
 import { trackSpotlight } from '../composables/usePointerFx'
 import type { Conversation } from '../data/workspace'
@@ -10,9 +10,12 @@ const props = defineProps<{
   activeId: string | null
 }>()
 
+const menuOpen = ref(false)
+
 const emit = defineEmits<{
   (e: 'select', id: string): void
   (e: 'new-chat'): void
+  (e: 'new-group'): void
 }>()
 
 type Filter = 'all' | 'unread'
@@ -38,6 +41,13 @@ const visible = computed(() => {
 const pinned = computed(() => visible.value.filter((item) => item.pinned))
 const rest = computed(() => visible.value.filter((item) => !item.pinned))
 const filterIndex = computed(() => (filter.value === 'all' ? 0 : 1))
+
+function closeMenu() {
+  menuOpen.value = false
+}
+
+onMounted(() => document.addEventListener('click', closeMenu))
+onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
 </script>
 
 <template>
@@ -48,9 +58,35 @@ const filterIndex = computed(() => (filter.value === 'all' ? 0 : 1))
           消息
           <span v-if="totalUnread" class="list-count num">{{ totalUnread }}</span>
         </h1>
-        <button class="icon-btn glide" aria-label="新建会话" @click="emit('new-chat')">
-          <Plus :size="18" :stroke-width="2" />
-        </button>
+        <div class="new-wrap">
+          <button class="icon-btn glide" aria-label="新建会话" @click.stop="menuOpen = !menuOpen">
+            <Plus :size="18" :stroke-width="2" />
+          </button>
+          <Transition name="fade">
+            <div v-if="menuOpen" class="new-menu" @click.stop>
+              <button
+                class="new-item"
+                @click="
+                  menuOpen = false;
+                  emit('new-chat')
+                "
+              >
+                <UserPlus :size="14" :stroke-width="1.9" />
+                发起私聊
+              </button>
+              <button
+                class="new-item"
+                @click="
+                  menuOpen = false;
+                  emit('new-group')
+                "
+              >
+                <Users :size="14" :stroke-width="1.9" />
+                创建群聊
+              </button>
+            </div>
+          </Transition>
+        </div>
       </div>
 
       <label class="search">
@@ -192,6 +228,50 @@ const filterIndex = computed(() => (filter.value === 'all' ? 0 : 1))
 </template>
 
 <style scoped>
+.new-wrap {
+  position: relative;
+}
+
+.new-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 20;
+  min-width: 132px;
+  padding: 4px;
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-pop);
+  animation: pop-in 160ms var(--ease-spring);
+}
+
+.new-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 9px;
+  border-radius: var(--r-xs);
+  font-size: 12.5px;
+  font-weight: 550;
+  color: var(--ink-2);
+  text-align: left;
+}
+
+.new-item:hover {
+  background: var(--surface-hover);
+  color: var(--ink);
+}
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 140ms var(--ease-out);
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
 .empty-text {
   padding: 40px 12px;
   text-align: center;

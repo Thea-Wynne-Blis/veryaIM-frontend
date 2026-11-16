@@ -2,20 +2,28 @@
 import { computed, onMounted, ref } from 'vue'
 import {
   Users, Search, MessageSquarePlus, Loader2, UserPlus,
-  Check, X, Pencil, Inbox, Hash, Send,
+  Check, X, Pencil, Inbox, Hash, Send, Trash2,
 } from 'lucide-vue-next'
 import AppAvatar from './AppAvatar.vue'
-import { api } from '../api/client'
+import { api, sameId, type Id } from '../api/client'
 import { useChatStore } from '../stores/chat'
 import { initialsOf, relativeTime, toneOf } from '../utils/present'
 
-type Friend = { userId: number; nickname: string; username?: string; remark?: string | null }
+/** 后端 /contacts 的 friends 只有 friendId，没有 userId / username。 */
+type Friend = {
+  friendId: Id
+  nickname: string
+  avatar?: string | null
+  remark?: string | null
+  online?: boolean
+  createdAt?: string
+}
 type GroupItem = { groupId: string; name: string }
 type Contacts = { friends: Friend[]; groups: GroupItem[]; pendingRequests: number }
 type Request = {
   requestId: number
-  fromUserId: number
-  toUserId: number
+  fromUserId: Id
+  toUserId: Id
   fromNickname: string
   toNickname: string
   message?: string
@@ -31,29 +39,30 @@ const error = ref('')
 const notice = ref('')
 const keyword = ref('')
 const selected = ref<Friend | null>(null)
-const opening = ref<number | null>(null)
+const opening = ref<Id | null>(null)
+const openingGroup = ref<string | null>(null)
 const tab = ref<'friends' | 'groups' | 'requests'>('friends')
-const editingRemark = ref<number | null>(null)
+const editingRemark = ref<Id | null>(null)
 const remarkDraft = ref('')
 
 /* 添加好友弹窗 */
 const addOpen = ref(false)
 const addKeyword = ref('')
-const addHits = ref<{ userId: number; nickname: string; username: string }[]>([])
+const addHits = ref<{ userId: Id; nickname: string; username: string }[]>([])
 const addMessage = ref('')
-const addBusy = ref<number | null>(null)
+const addBusy = ref<Id | null>(null)
 
 const tabIndex = computed(() => {
-  if (tab.value === "friends") return 0
-  if (tab.value === "groups") return 1
+  if (tab.value === 'friends') return 0
+  if (tab.value === 'groups') return 1
   return 2
 })
 
 function spot(event: PointerEvent) {
   const el = event.currentTarget as HTMLElement
   const rect = el.getBoundingClientRect()
-  el.style.setProperty("--spot-x", `${event.clientX - rect.left}px`)
-  el.style.setProperty("--spot-y", `${event.clientY - rect.top}px`)
+  el.style.setProperty('--spot-x', `${event.clientX - rect.left}px`)
+  el.style.setProperty('--spot-y', `${event.clientY - rect.top}px`)
 }
 
 const pendingRequests = computed(() =>
@@ -64,11 +73,16 @@ const friends = computed(() => {
   const kw = keyword.value.trim().toLowerCase()
   if (!kw) return data.value.friends
   return data.value.friends.filter((f) =>
-    [f.nickname, f.username, f.remark].filter(Boolean).some((v) =>
+    [f.nickname, f.remark].filter(Boolean).some((v) =>
       String(v).toLowerCase().includes(kw),
     ),
   )
 })
+
+function flash(text: string) {
+  notice.value = text
+  window.setTimeout(() => (notice.value = ''), 2200)
+}
 
 async function load() {
   loading.value = true
@@ -78,8 +92,17 @@ async function load() {
       api.get<Contacts>('/contacts'),
       api.get<Request[]>('/friends/requests').catch(() => [] as Request[]),
     ])
-    data.value = c
+    data.value = {
+      friends: Array.isArray(c?.friends) ? c.friends : [],
+      groups: Array.isArray(c?.groups) ? c.groups : [],
+      pendingRequests: c?.pendingRequests ?? 0,
+    }
     requests.value = Array.isArray(r) ? r : []
+    // 选中的好友可能已被删除，同步清理。
+    if (selected.value) {
+      selected.value =
+        data.value.friends.find((f) => sameId(f.friendId, selected.value?.friendId)) ?? null
+    }
   } catch (e) {
     error.value = e instanceof Error ? e.message : '加载通讯录失败'
   } finally {
@@ -88,10 +111,10 @@ async function load() {
 }
 
 async function openChat(friend: Friend) {
-  opening.value = friend.userId
+  opening.value = friend.friendId
   error.value = ''
   try {
-    const conversationId = await chat.createPrivate(friend.userId)
+    const conversationId = await chat.createPrivate(friend.friendId)
     await chat.loadCards()
     await chat.open(conversationId)
     window.dispatchEvent(new CustomEvent('veryal:open-chat', { detail: conversationId }))
@@ -102,21 +125,49 @@ async function openChat(friend: Friend) {
   }
 }
 
+async function openGroup(group: GroupItem) {
+  openingGroup.value = group.groupId
+  error.value = ''
+  try {
+    if (!chat.cards.length) await chat.loadCards()
+    await chat.open(group.groupId)
+    window.dispatchEvent(new CustomEvent('veryal:open-chat', { detail: group.groupId }))
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '打开群聊失败'
+  } finally {
+    openingGroup.value = null
+  }
+}
+
 function startEditRemark(friend: Friend) {
-  editingRemark.value = friend.userId
+  editingRemark.value = friend.friendId
   remarkDraft.value = friend.remark ?? ''
 }
 
 async function saveRemark(friend: Friend) {
+  if (!sameId(editingRemark.value, friend.friendId)) return
   const remark = remarkDraft.value.trim()
   editingRemark.value = null
+  if ((friend.remark ?? '') === remark) return
   try {
-    await api.put(`/friends/${friend.userId}`, { remark })
+    await api.put(`/friends/${friend.friendId}`, { remark })
     friend.remark = remark || null
-    notice.value = '备注已保存'
-    setTimeout(() => (notice.value = ''), 2000)
+    flash('备注已保存')
   } catch (e) {
     error.value = e instanceof Error ? e.message : '备注保存失败'
+  }
+}
+
+async function removeFriend(friend: Friend) {
+  if (!window.confirm(`确定删除好友「${friend.remark || friend.nickname}」吗？`)) return
+  error.value = ''
+  try {
+    await api.delete(`/friends/${friend.friendId}`)
+    if (selected.value && sameId(selected.value.friendId, friend.friendId)) selected.value = null
+    flash('已删除好友')
+    await load()
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '删除好友失败'
   }
 }
 
@@ -124,8 +175,7 @@ async function decide(request: Request, action: 'accept' | 'reject') {
   error.value = ''
   try {
     await api.post(`/friends/requests/${request.requestId}/${action}`)
-    notice.value = action === 'accept' ? '已添加为好友' : '已拒绝'
-    setTimeout(() => (notice.value = ''), 2000)
+    flash(action === 'accept' ? '已添加为好友' : '已拒绝')
     await load()
   } catch (e) {
     error.value = e instanceof Error ? e.message : '操作失败'
@@ -133,6 +183,7 @@ async function decide(request: Request, action: 'accept' | 'reject') {
 }
 
 let addTimer: number | null = null
+let addSearchSeq = 0
 function onAddKeyword() {
   if (addTimer) window.clearTimeout(addTimer)
   addTimer = window.setTimeout(searchUsers, 320)
@@ -144,22 +195,26 @@ async function searchUsers() {
     addHits.value = []
     return
   }
+  const seq = ++addSearchSeq
   try {
     const result = await api.get<unknown>(
       `/users/search?keyword=${encodeURIComponent(kw)}&limit=20`,
     )
-    const list = Array.isArray(result) ? result : (result as { items?: unknown[] })?.items ?? []
-    addHits.value = (list as Record<string, unknown>[]).map((i) => ({
-      userId: Number(i.userId ?? i.id ?? 0),
-      nickname: String(i.nickname ?? i.username ?? '用户'),
-      username: String(i.username ?? ''),
-    }))
+    if (seq !== addSearchSeq) return // 丢弃过期响应
+    const list = Array.isArray(result) ? result : []
+    addHits.value = (list as Record<string, unknown>[])
+      .map((i) => ({
+        userId: String(i.userId ?? ''),
+        nickname: String(i.nickname ?? i.username ?? '用户'),
+        username: String(i.username ?? ''),
+      }))
+      .filter((i) => i.userId && i.userId !== '0')
   } catch {
-    addHits.value = []
+    if (seq === addSearchSeq) addHits.value = []
   }
 }
 
-async function sendRequest(hit: { userId: number; nickname: string }) {
+async function sendRequest(hit: { userId: Id; nickname: string }) {
   addBusy.value = hit.userId
   error.value = ''
   try {
@@ -167,8 +222,7 @@ async function sendRequest(hit: { userId: number; nickname: string }) {
       toUserId: hit.userId,
       message: addMessage.value.trim() || undefined,
     })
-    notice.value = `已向 ${hit.nickname} 发送好友申请`
-    setTimeout(() => (notice.value = ''), 2500)
+    flash(`已向 ${hit.nickname} 发送好友申请`)
     addOpen.value = false
     addKeyword.value = ''
     addHits.value = []
@@ -222,21 +276,22 @@ onMounted(load)
         <template v-if="tab === 'friends'">
           <div
             v-for="f in friends"
-            :key="f.userId"
+            :key="f.friendId"
             class="row spot"
-            :class="{ on: selected?.userId === f.userId }"
+            :class="{ on: sameId(selected?.friendId, f.friendId) }"
             @pointermove="spot"
             @click="selected = f"
           >
-            <AppAvatar :initials="initialsOf(f.remark || f.nickname)" :tone="toneOf(f.userId)" size="md" />
+            <span class="avatar-wrap">
+              <AppAvatar :initials="initialsOf(f.remark || f.nickname)" :tone="toneOf(f.friendId)" size="md" />
+              <span v-if="f.online" class="online-dot" title="在线" />
+            </span>
             <span class="row-main">
-              <span class="row-name">
-                {{ f.remark || f.nickname }}
-              </span>
-              <span class="row-sub">@{{ f.username || f.userId }}</span>
+              <span class="row-name">{{ f.remark || f.nickname }}</span>
+              <span class="row-sub">{{ f.nickname }} · {{ f.online ? '在线' : '离线' }}</span>
             </span>
             <input
-              v-if="editingRemark === f.userId"
+              v-if="sameId(editingRemark, f.friendId)"
               v-model="remarkDraft"
               class="remark-input"
               placeholder="备注名"
@@ -253,7 +308,7 @@ onMounted(load)
               <Pencil :size="13" :stroke-width="1.9" />
             </button>
             <button class="row-action" title="发消息" :disabled="opening !== null" @click.stop="openChat(f)">
-              <Loader2 v-if="opening === f.userId" :size="13" class="spin" />
+              <Loader2 v-if="sameId(opening, f.friendId)" :size="13" class="spin" />
               <MessageSquarePlus v-else :size="13" :stroke-width="1.9" />
             </button>
           </div>
@@ -264,13 +319,20 @@ onMounted(load)
 
         <!-- 群聊 -->
         <template v-else-if="tab === 'groups'">
-          <div v-for="g in data.groups" :key="g.groupId" class="row static spot" @pointermove="spot">
+          <div
+            v-for="g in data.groups"
+            :key="g.groupId"
+            class="row spot"
+            @pointermove="spot"
+            @click="openGroup(g)"
+          >
             <AppAvatar :initials="initialsOf(g.name)" :tone="toneOf(g.groupId)" size="md" rounded />
             <span class="row-main">
               <span class="row-name">{{ g.name }}</span>
-              <span class="row-sub">{{ g.groupId }}</span>
+              <span class="row-sub">群聊</span>
             </span>
-            <Hash :size="13" :stroke-width="1.9" style="color: var(--ink-4)" />
+            <Loader2 v-if="openingGroup === g.groupId" :size="13" class="spin" />
+            <Hash v-else :size="13" :stroke-width="1.9" style="color: var(--ink-4)" />
           </div>
           <p v-if="!data.groups.length && !loading" class="view-empty-sm">还没有加入任何群</p>
         </template>
@@ -305,19 +367,24 @@ onMounted(load)
 
     <section class="view-main">
       <div v-if="selected" class="profile-card glare">
-        <AppAvatar :initials="initialsOf(selected.remark || selected.nickname)" :tone="toneOf(selected.userId)" size="xl" />
+        <AppAvatar :initials="initialsOf(selected.remark || selected.nickname)" :tone="toneOf(selected.friendId)" size="xl" />
         <h2 class="profile-name">{{ selected.remark || selected.nickname }}</h2>
         <p class="profile-sub">
-          @{{ selected.username }} · ID {{ selected.userId }}
+          {{ selected.nickname }} · ID {{ selected.friendId }} · {{ selected.online ? '在线' : '离线' }}
         </p>
         <p v-if="selected.remark" class="profile-remark">备注：{{ selected.remark }}</p>
         <button class="primary" :disabled="opening !== null" @click="openChat(selected)">
-          <MessageSquarePlus :size="14" :stroke-width="2" />
+          <Loader2 v-if="sameId(opening, selected.friendId)" :size="14" class="spin" />
+          <MessageSquarePlus v-else :size="14" :stroke-width="2" />
           发消息
         </button>
         <button class="ghost" @click="startEditRemark(selected)">
           <Pencil :size="13" :stroke-width="2" />
           修改备注
+        </button>
+        <button class="ghost danger-text" @click="removeFriend(selected)">
+          <Trash2 :size="13" :stroke-width="2" />
+          删除好友
         </button>
       </div>
 
@@ -325,7 +392,7 @@ onMounted(load)
         <div class="empty-mark"><Users :size="22" :stroke-width="1.6" /></div>
         <h3 class="empty-title">通讯录</h3>
         <p class="empty-text">
-          左侧选择好友查看资料，行尾图标可直接发消息或改备注。右上角可以搜索用户添加好友。
+          左侧选择好友查看资料，行尾图标可直接发消息或改备注。群聊页点击群可直接进入会话，右上角可以搜索用户添加好友。
         </p>
       </div>
     </section>
@@ -366,7 +433,7 @@ onMounted(load)
                 <span class="row-sub">@{{ hit.username }}</span>
               </span>
               <button class="mini ok" :disabled="addBusy !== null" @click="sendRequest(hit)">
-                <Loader2 v-if="addBusy === hit.userId" :size="13" class="spin" />
+                <Loader2 v-if="sameId(addBusy, hit.userId)" :size="13" class="spin" />
                 <Send v-else :size="13" :stroke-width="2" />
               </button>
             </div>
@@ -392,13 +459,15 @@ onMounted(load)
 .view-scroll { flex: 1; overflow-y: auto; padding: 0 8px 18px; }
 .view-error { margin: 6px 6px; padding: 7px 10px; border-radius: var(--r-sm); background: var(--danger-soft); color: var(--danger); font-size: 11.5px; }
 .view-notice { margin: 6px 6px; padding: 7px 10px; border-radius: var(--r-sm); background: var(--accent-soft); color: var(--accent-ink); font-size: 11.5px; }
-.row { display: flex; align-items: center; gap: 9px; width: 100%; padding: 8px 8px; border-radius: var(--r-md); text-align: left; transition: background var(--dur-1) var(--ease-out); }
+.row { display: flex; align-items: center; gap: 9px; width: 100%; padding: 8px 8px; border-radius: var(--r-md); text-align: left; cursor: pointer; transition: background var(--dur-1) var(--ease-out); }
 .row:hover { background: var(--surface-hover); }
 .row.on { background: var(--accent-soft); }
 .row.static { cursor: default; }
 .row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .row-name { font-size: 13.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row-sub { font-size: 10.5px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.avatar-wrap { position: relative; flex-shrink: 0; display: inline-flex; }
+.online-dot { position: absolute; right: -1px; bottom: -1px; width: 9px; height: 9px; border-radius: 50%; background: var(--ok, #22c55e); border: 2px solid var(--surface); }
 .row-action { width: 26px; height: 26px; border-radius: var(--r-xs); display: grid; place-items: center; color: var(--ink-3); flex-shrink: 0; }
 .row-action:hover { background: var(--accent-soft); color: var(--accent); }
 .remark-input { width: 70px; height: 24px; padding: 0 6px; border-radius: var(--r-xs); border: 1px solid var(--accent); font-size: 11.5px; background: var(--surface); }
@@ -420,6 +489,7 @@ onMounted(load)
 .primary, .ghost { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 34px; padding: 0 16px; border-radius: var(--r-sm); font-size: 12.5px; font-weight: 620; width: 100%; }
 .primary { background: var(--accent-grad); color: #fff; box-shadow: 0 3px 12px -5px var(--accent); margin-top: 4px; }
 .ghost { border: 1px solid var(--line); color: var(--ink-2); background: var(--surface-2); }
+.ghost.danger-text { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 26%, transparent); }
 .mask { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 24px; background: color-mix(in srgb, var(--ink) 26%, transparent); backdrop-filter: blur(6px); }
 .dialog { width: 100%; max-width: 420px; max-height: min(560px, 82vh); display: flex; flex-direction: column; gap: 10px; padding: 16px 0 8px; border-radius: var(--r-lg); background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow-lg); animation: pop-in 200ms var(--ease-spring); }
 .dialog-head { display: flex; align-items: flex-start; justify-content: space-between; padding: 0 14px; }
