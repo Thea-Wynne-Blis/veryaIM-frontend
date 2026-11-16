@@ -238,6 +238,8 @@ export type MessageView = {
   createdAt: string
   recalled?: boolean
   recalledAt?: string | null
+  /** 发送中占位消息（乐观渲染），收到服务端确认后移除 */
+  pending?: boolean
 }
 
 export type MessagePage = {
