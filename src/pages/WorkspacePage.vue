@@ -1,77 +1,89 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import NavRail from '../components/NavRail.vue'
 import ConversationList from '../components/ConversationList.vue'
 import ChatPane from '../components/ChatPane.vue'
 import DetailPanel from '../components/DetailPanel.vue'
 import MobileWorkspace from '../components/MobileWorkspace.vue'
+import NewChatDialog from '../components/NewChatDialog.vue'
 import { useIsMobile } from '../composables/useIsMobile'
-import {
-  conversations as seed,
-  initialMessages,
-  type ChatMessage,
-  type Conversation,
-} from '../data/workspace'
+import { useChatStore } from '../stores/chat'
+import { useAuthStore } from '../stores/auth'
+import type { ChatMessage, Conversation } from '../data/workspace'
+import { clockTime, initialsOf, listTime, toneOf } from '../utils/present'
 
+const route = useRoute()
 const isMobile = useIsMobile(768)
+const chat = useChatStore()
+const auth = useAuthStore()
 
-/** 支持 ?theme=dark 直接进入深色，便于演示与截图。 */
-const initialTheme: 'light' | 'dark' =
-  new URLSearchParams(window.location.search).get('theme') === 'dark'
-    ? 'dark'
-    : 'light'
-
-const conversationList = ref<Conversation[]>(
-  seed.map((item) => ({ ...item })),
-)
-const messages = ref<Record<string, ChatMessage[]>>(
-  JSON.parse(JSON.stringify(initialMessages)),
-)
-
-const activeId = ref<string | null>(conversationList.value[0]?.id ?? null)
 const detailOpen = ref(true)
-const theme = ref<'light' | 'dark'>(initialTheme)
+const theme = ref<'light' | 'dark'>(
+  new URLSearchParams(window.location.search).get('theme') === 'dark' ? 'dark' : 'light',
+)
 const navActive = ref('chat')
+const dialogOpen = ref(false)
 
+/** 后端卡片 → 组件使用的视图模型 */
+const conversations = computed<Conversation[]>(() =>
+  chat.cards.map((card) => ({
+    id: card.conversationId,
+    name: card.title,
+    initials: initialsOf(card.title),
+    kind: card.type === 'GROUP' ? 'group' : 'direct',
+    tone: toneOf(card.conversationId),
+    presence: 'offline',
+    unread: card.unreadCount,
+    time: listTime(card.lastMessageAt ?? card.updatedAt),
+    preview: card.lastMessagePreview || '还没有消息',
+    members: card.memberCount,
+    context:
+      card.type === 'GROUP'
+        ? `群聊 · ${card.memberCount} 位成员`
+        : '单聊',
+  })),
+)
+
+const activeCard = computed(() => chat.activeCard)
 const activeConversation = computed(
-  () => conversationList.value.find((item) => item.id === activeId.value) ?? null,
+  () => conversations.value.find((item) => item.id === chat.activeId) ?? null,
+)
+
+const messages = computed<ChatMessage[]>(() =>
+  chat.activeMessages.map((item) => {
+    const mine = item.senderId === chat.myId
+    const author = mine ? '我' : activeCard.value?.title ?? '对方'
+    return {
+      id: String(item.messageId),
+      author,
+      initials: mine ? '我' : initialsOf(author),
+      tone: mine ? 'jade' : toneOf(item.senderId),
+      side: mine ? 'out' : 'in',
+      time: clockTime(item.createdAt),
+      text: item.type === 'TEXT' ? item.content : `[${item.type}]`,
+      read: false,
+    }
+  }),
 )
 
 function messagesOf(id: string): ChatMessage[] {
-  return messages.value[id] ?? []
+  if (id !== chat.activeId) return []
+  return messages.value
 }
 
-function select(id: string) {
-  activeId.value = id
-  const target = conversationList.value.find((item) => item.id === id)
-  if (target) target.unread = 0
+async function select(id: string) {
+  chat.activeId = id
+  await chat.open(id)
 }
 
 function closeMobileChat() {
-  activeId.value = null
+  chat.activeId = null
 }
 
-function send(conversationId: string, text: string) {
-  const list = messages.value[conversationId] ?? (messages.value[conversationId] = [])
-  const now = new Date()
-  const time = `${String(now.getHours()).padStart(2, '0')}:${String(
-    now.getMinutes(),
-  ).padStart(2, '0')}`
-  list.push({
-    id: `local-${Date.now()}`,
-    author: '我',
-    initials: '我',
-    tone: 'jade',
-    side: 'out',
-    time,
-    text,
-    read: false,
-  })
-  const target = conversationList.value.find((item) => item.id === conversationId)
-  if (target) {
-    target.preview = `我：${text}`
-    target.time = time
-  }
+async function send(conversationId: string, text: string) {
+  if (conversationId !== chat.activeId) chat.activeId = conversationId
+  await chat.send(text)
 }
 
 function toggleTheme() {
@@ -79,48 +91,75 @@ function toggleTheme() {
   document.documentElement.dataset.theme = theme.value
 }
 
-onMounted(() => {
+async function handleCreated(conversationId: string) {
+  dialogOpen.value = false
+  await chat.loadCards()
+  await select(conversationId)
+}
+
+onMounted(async () => {
   document.documentElement.dataset.theme = theme.value
+  await chat.loadCards()
+  const fromRoute = route.params.conversationId as string | undefined
+  const first = fromRoute ?? chat.cards[0]?.conversationId ?? null
+  if (first) await select(first)
+  chat.startPolling(4000)
 })
+
+onBeforeUnmount(() => chat.stopPolling())
 </script>
 
 <template>
   <MobileWorkspace
     v-if="isMobile"
-    :conversations="conversationList"
+    :conversations="conversations"
     :messages-of="messagesOf"
-    :active-id="activeId"
+    :active-id="chat.activeId"
+    :me="auth.user?.nickname ?? '我'"
     @select="select"
     @close="closeMobileChat"
     @send="(payload) => send(payload.conversationId, payload.text)"
+    @new-chat="dialogOpen = true"
   />
 
-  <div v-else class="shell" :class="{ 'detail-open': detailOpen }">
-    <NavRail
-      v-model:active="navActive"
-      :unread="conversationList.reduce((sum, item) => sum + item.unread, 0)"
-      :theme="theme"
-      @toggle-theme="toggleTheme"
-    />
+  <div v-else class="stage">
+    <div class="aura" aria-hidden="true"><i /><i /><i /></div>
+    <div class="grain" aria-hidden="true" />
 
-    <ConversationList
-      :conversations="conversationList"
-      :active-id="activeId"
-      @select="select"
-    />
+    <div class="frame" :class="{ 'detail-open': detailOpen }">
+      <NavRail
+        v-model:active="navActive"
+        :unread="chat.totalUnread"
+        :theme="theme"
+        @toggle-theme="toggleTheme"
+      />
 
-    <ChatPane
-      :conversation="activeConversation"
-      :messages="activeId ? messagesOf(activeId) : []"
-      :detail-open="detailOpen"
-      @send="(text) => activeId && send(activeId, text)"
-      @toggle-detail="detailOpen = !detailOpen"
-    />
+      <ConversationList
+        :conversations="conversations"
+        :active-id="chat.activeId"
+        @select="select"
+        @new-chat="dialogOpen = true"
+      />
 
-    <DetailPanel
-      v-if="detailOpen && activeConversation"
-      :conversation="activeConversation"
-      @close="detailOpen = false"
-    />
+      <ChatPane
+        :conversation="activeConversation"
+        :messages="messages"
+        :detail-open="detailOpen"
+        @send="(text) => chat.activeId && send(chat.activeId, text)"
+        @toggle-detail="detailOpen = !detailOpen"
+      />
+
+      <DetailPanel
+        v-if="detailOpen && activeConversation"
+        :conversation="activeConversation"
+        @close="detailOpen = false"
+      />
+    </div>
   </div>
+
+  <NewChatDialog
+    :open="dialogOpen"
+    @close="dialogOpen = false"
+    @created="handleCreated"
+  />
 </template>

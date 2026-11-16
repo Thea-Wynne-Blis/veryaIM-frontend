@@ -1,5 +1,5 @@
 /* ============================================================
-   Base：重置、排版、滚动条、基础动效
+   Base：重置、排版、滚动条、动效
    ============================================================ */
 
 *,
@@ -20,7 +20,7 @@ body {
   font-size: 14px;
   line-height: 1.55;
   color: var(--ink);
-  background: var(--canvas);
+  background: var(--page);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
@@ -60,6 +60,10 @@ textarea {
 input::placeholder,
 textarea::placeholder {
   color: var(--ink-3);
+}
+
+input[type="search"]::-webkit-search-cancel-button {
+  display: none;
 }
 
 a {
@@ -111,16 +115,27 @@ svg {
   background-clip: content-box;
 }
 
-/* ---------- 通用工具 ---------- */
+/* ---------- 工具类 ---------- */
 .truncate {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.tabular {
+/* BoardUI 风格：等宽数字 */
+.num {
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum";
+  letter-spacing: -0.01em;
+}
+
+/* BoardUI 风格：微型大写标签 */
+.eyebrow {
+  font-size: 10.5px;
+  font-weight: 620;
+  letter-spacing: 0.085em;
+  text-transform: uppercase;
+  color: var(--ink-3);
 }
 
 .sr-only {
@@ -159,7 +174,7 @@ svg {
 @keyframes pop-in {
   0% {
     opacity: 0;
-    transform: scale(0.94);
+    transform: scale(0.9);
   }
   100% {
     opacity: 1;
@@ -183,7 +198,7 @@ svg {
   60%,
   100% {
     transform: translateY(0);
-    opacity: 0.35;
+    opacity: 0.32;
   }
   30% {
     transform: translateY(-4px);
@@ -193,13 +208,90 @@ svg {
 
 @keyframes pulse-ring {
   0% {
-    box-shadow: 0 0 0 0 var(--accent-soft-2);
+    box-shadow: 0 0 0 0 var(--accent-ring);
   }
   70% {
-    box-shadow: 0 0 0 7px transparent;
+    box-shadow: 0 0 0 8px transparent;
   }
   100% {
     box-shadow: 0 0 0 0 transparent;
+  }
+}
+
+/* 极光缓慢漂移 */
+@keyframes aura-drift-1 {
+  0% {
+    transform: translate3d(-6%, -4%, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(10%, 6%, 0) scale(1.14);
+  }
+  100% {
+    transform: translate3d(-6%, -4%, 0) scale(1);
+  }
+}
+
+@keyframes aura-drift-2 {
+  0% {
+    transform: translate3d(8%, 6%, 0) scale(1.08);
+  }
+  50% {
+    transform: translate3d(-8%, -6%, 0) scale(0.94);
+  }
+  100% {
+    transform: translate3d(8%, 6%, 0) scale(1.08);
+  }
+}
+
+@keyframes aura-drift-3 {
+  0% {
+    transform: translate3d(0, 10%, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(-10%, -8%, 0) scale(1.16);
+  }
+  100% {
+    transform: translate3d(0, 10%, 0) scale(1);
+  }
+}
+
+/* 文字光泽扫过 */
+@keyframes shine-sweep {
+  0% {
+    background-position: -180% 0;
+  }
+  55%,
+  100% {
+    background-position: 180% 0;
+  }
+}
+
+/* 数字翻滚 */
+@keyframes count-roll {
+  0% {
+    opacity: 0;
+    transform: translateY(70%);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 发送状态环 */
+@keyframes tick-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* 骨架微光 */
+@keyframes shimmer {
+  0% {
+    background-position: -160% 0;
+  }
+  100% {
+    background-position: 260% 0;
   }
 }
 

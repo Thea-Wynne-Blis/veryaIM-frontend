@@ -1,37 +1,65 @@
 /* ============================================================
    VERYAL Design Tokens
-   参考 BoardUI 的克制与节奏 + Bencho 的微交互质感
-   墨色 + 玉色主调，暖中性底色
+   结构学 BoardUI（密度、发丝线、分段控件、等宽数字）
+   手感学 ReactBits（极光底、聚光卡片、磁吸、光泽扫过、计数翻滚）
    ============================================================ */
 
 :root {
-  /* ---------- 色板：浅色 ---------- */
+  /* ---------- 画布层级 ---------- */
   --canvas: #f5f5f2;
   --canvas-2: #efefeb;
+
+  /* 外层留白 */
+  --page: #e8e8e3;
+  --page-grain: 0.02;
+
+  /* 极光（很淡，只做空气感，不抢主体） */
+  --aura-1: rgba(18, 135, 111, 0.28);
+  --aura-2: rgba(64, 118, 214, 0.18);
+  --aura-3: rgba(204, 158, 84, 0.18);
+
+  /* ---------- 表面 ---------- */
   --surface: #ffffff;
   --surface-2: #fbfbf9;
-  --surface-3: #f4f4f1;
-  --surface-hover: rgba(22, 24, 26, 0.04);
-  --surface-active: rgba(22, 24, 26, 0.07);
+  --surface-3: #f3f3f0;
+  --surface-hover: rgba(22, 24, 26, 0.042);
+  --surface-active: rgba(22, 24, 26, 0.075);
 
-  --ink: #16181a;
-  --ink-2: #555b61;
-  --ink-3: #8a9096;
-  --ink-4: #b3b8bd;
+  /* ---------- 文字 ---------- */
+  --ink: #14161a;
+  --ink-2: #545a61;
+  --ink-3: #878e95;
+  --ink-4: #b2b7bd;
 
-  --line: #e7e7e3;
-  --line-strong: #d9d9d4;
+  /* ---------- 线 ---------- */
+  --line: #e6e6e2;
+  --line-strong: #d6d6d1;
+  --hairline: rgba(20, 22, 26, 0.07);
 
+  /* ---------- 主色 ---------- */
   --accent: #12876f;
-  --accent-hover: #0f7561;
-  --accent-soft: #e6f4ef;
-  --accent-soft-2: #d6eee6;
-  --accent-ink: #0a5c4d;
+  --accent-hover: #0e7761;
+  --accent-2: #1eb08f;
+  --accent-soft: #e5f4ef;
+  --accent-soft-2: #d3ece4;
+  --accent-ink: #075546;
+  --accent-grad: linear-gradient(135deg, #17a184 0%, #0b6d59 100%);
+  --accent-ring: rgba(18, 135, 111, 0.24);
 
   --danger: #cf4040;
-  --danger-soft: #fdeceb;
-  --warn: #b9761a;
-  --info: #2d6ecf;
+  --danger-soft: #fceceb;
+  --warn: #b37419;
+  --info: #2c6dd0;
+
+  /* ---------- 聚光 / 光泽 ---------- */
+  --spot-size: 260px;
+  --spot-color: rgba(18, 135, 111, 0.11);
+  --glare: rgba(255, 255, 255, 0.55);
+
+  /* ---------- 窗口高光与阴影 ---------- */
+  --frame-ring: inset 0 1px 0 rgba(255, 255, 255, 0.75);
+  --frame-shadow: 0 44px 96px -46px rgba(18, 20, 22, 0.4),
+    0 4px 14px -6px rgba(18, 20, 22, 0.1);
 
   /* ---------- 圆角 ---------- */
   --r-xs: 6px;
@@ -42,7 +70,7 @@
   --r-2xl: 32px;
   --r-full: 999px;
 
-  /* ---------- 阴影：低对比、多层 ---------- */
+  /* ---------- 阴影 ---------- */
   --shadow-xs: 0 1px 2px rgba(18, 20, 22, 0.05);
   --shadow-sm: 0 2px 6px -2px rgba(18, 20, 22, 0.08);
   --shadow-md: 0 10px 24px -14px rgba(18, 20, 22, 0.22);
@@ -51,7 +79,7 @@
 
   /* ---------- 动效 ---------- */
   --ease-out: cubic-bezier(0.22, 0.75, 0.2, 1);
-  --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+  --ease-spring: cubic-bezier(0.34, 1.42, 0.64, 1);
   --dur-1: 120ms;
   --dur-2: 200ms;
   --dur-3: 320ms;
@@ -63,41 +91,59 @@
 
   /* ---------- 尺寸 ---------- */
   --rail-w: 68px;
-  --list-w: 348px;
-  --detail-w: 306px;
-  --header-h: 64px;
+  --list-w: 344px;
+  --detail-w: 304px;
+  --header-h: 62px;
 
   color-scheme: light;
 }
 
-/* ---------- 色板：深色 ---------- */
 [data-theme="dark"] {
-  --canvas: #0d0f10;
-  --canvas-2: #131617;
-  --surface: #171a1c;
-  --surface-2: #1c2022;
-  --surface-3: #222627;
-  --surface-hover: rgba(255, 255, 255, 0.05);
-  --surface-active: rgba(255, 255, 255, 0.09);
+  --canvas: #0c0e10;
+  --canvas-2: #121516;
 
-  --ink: #f0f2f3;
-  --ink-2: #a6adb3;
-  --ink-3: #767d83;
-  --ink-4: #565c61;
+  --page: #060708;
+  --page-grain: 0.045;
 
-  --line: #262a2c;
-  --line-strong: #33383b;
+  --aura-1: rgba(46, 196, 160, 0.22);
+  --aura-2: rgba(88, 118, 232, 0.18);
+  --aura-3: rgba(212, 132, 92, 0.14);
+
+  --surface: #15181a;
+  --surface-2: #1a1e20;
+  --surface-3: #202527;
+  --surface-hover: rgba(255, 255, 255, 0.055);
+  --surface-active: rgba(255, 255, 255, 0.095);
+
+  --ink: #eef1f2;
+  --ink-2: #a2aab1;
+  --ink-3: #727a80;
+  --ink-4: #4f5559;
+
+  --line: #24282b;
+  --line-strong: #323739;
+  --hairline: rgba(255, 255, 255, 0.07);
 
   --accent: #2ec4a0;
-  --accent-hover: #3ad3ae;
-  --accent-soft: #14302b;
-  --accent-soft-2: #1a3d36;
-  --accent-ink: #7fe6cb;
+  --accent-hover: #3fd3ae;
+  --accent-2: #56dcbb;
+  --accent-soft: #12302a;
+  --accent-soft-2: #1a3f37;
+  --accent-ink: #8ff0d8;
+  --accent-grad: linear-gradient(135deg, #31c8a4 0%, #178b74 100%);
+  --accent-ring: rgba(46, 196, 160, 0.3);
 
   --danger: #f06a66;
-  --danger-soft: #33201f;
+  --danger-soft: #331f1e;
   --warn: #e0a44d;
   --info: #6ba4f5;
+
+  --spot-color: rgba(46, 196, 160, 0.13);
+  --glare: rgba(255, 255, 255, 0.13);
+
+  --frame-ring: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  --frame-shadow: 0 48px 110px -46px rgba(0, 0, 0, 0.92),
+    0 4px 16px -8px rgba(0, 0, 0, 0.7);
 
   --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-sm: 0 2px 8px -2px rgba(0, 0, 0, 0.5);

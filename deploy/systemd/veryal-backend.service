@@ -1,0 +1,38 @@
+[Unit]
+Description=VERYAL Backend (Spring Boot)
+Documentation=https://github.com/Thea-Wynne-Blis/veryaIM
+After=network-online.target docker.service
+Wants=network-online.target docker.service
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/veryal/backend
+
+EnvironmentFile=/opt/veryal/backend/veryal.env
+ExecStart=/usr/bin/java \
+    -Xms320m -Xmx768m \
+    -XX:+UseG1GC \
+    -XX:MaxGCPauseMillis=120 \
+    -XX:+ExitOnOutOfMemoryError \
+    -Duser.timezone=UTC \
+    -Dfile.encoding=UTF-8 \
+    -jar /opt/veryal/backend/veryal-bootstrap.jar \
+    --spring.profiles.active=prod
+
+Restart=on-failure
+RestartSec=5
+SuccessExitStatus=143
+TimeoutStopSec=40
+KillSignal=SIGTERM
+
+StandardOutput=append:/opt/veryal/logs/backend.log
+StandardError=append:/opt/veryal/logs/backend.log
+
+# 基础加固
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

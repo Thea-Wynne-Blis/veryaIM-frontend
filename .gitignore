@@ -8,3 +8,6 @@ dist/
 
 # 截图产物
 .shots/
+
+# 部署产物
+deploy/out/

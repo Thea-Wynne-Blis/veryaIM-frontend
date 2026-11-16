@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { Search, Plus, Pin, BellOff } from 'lucide-vue-next'
 import AppAvatar from './AppAvatar.vue'
+import { trackSpotlight } from '../composables/usePointerFx'
 import type { Conversation } from '../data/workspace'
 
 const props = defineProps<{
@@ -9,7 +10,10 @@ const props = defineProps<{
   activeId: string | null
 }>()
 
-const emit = defineEmits<{ (e: 'select', id: string): void }>()
+const emit = defineEmits<{
+  (e: 'select', id: string): void
+  (e: 'new-chat'): void
+}>()
 
 type Filter = 'all' | 'unread'
 const filter = ref<Filter>('all')
@@ -33,6 +37,7 @@ const visible = computed(() => {
 
 const pinned = computed(() => visible.value.filter((item) => item.pinned))
 const rest = computed(() => visible.value.filter((item) => !item.pinned))
+const filterIndex = computed(() => (filter.value === 'all' ? 0 : 1))
 </script>
 
 <template>
@@ -41,15 +46,9 @@ const rest = computed(() => visible.value.filter((item) => !item.pinned))
       <div class="list-title-row">
         <h1 class="list-title">
           消息
-          <span
-            v-if="totalUnread"
-            class="unread"
-            style="margin-left: 6px; vertical-align: 3px"
-          >
-            {{ totalUnread }}
-          </span>
+          <span v-if="totalUnread" class="list-count num">{{ totalUnread }}</span>
         </h1>
-        <button class="icon-btn" aria-label="新建会话">
+        <button class="icon-btn glide" aria-label="新建会话" @click="emit('new-chat')">
           <Plus :size="18" :stroke-width="2" />
         </button>
       </div>
@@ -65,25 +64,31 @@ const rest = computed(() => visible.value.filter((item) => !item.pinned))
         <kbd>⌘K</kbd>
       </label>
 
-      <div class="chips" role="tablist" aria-label="会话筛选">
+      <!-- Rubber Segment -->
+      <div
+        class="seg"
+        :style="{ '--idx': filterIndex }"
+        role="tablist"
+        aria-label="会话筛选"
+      >
+        <span class="seg-thumb" aria-hidden="true" />
         <button
-          class="chip"
-          :class="{ active: filter === 'all' }"
           role="tab"
+          :class="{ on: filter === 'all' }"
           :aria-selected="filter === 'all'"
           @click="filter = 'all'"
         >
           全部
+          <span class="seg-count num">{{ conversations.length }}</span>
         </button>
         <button
-          class="chip"
-          :class="{ active: filter === 'unread' }"
           role="tab"
+          :class="{ on: filter === 'unread' }"
           :aria-selected="filter === 'unread'"
           @click="filter = 'unread'"
         >
           未读
-          <template v-if="totalUnread"> · {{ totalUnread }}</template>
+          <span class="seg-count num">{{ totalUnread }}</span>
         </button>
       </div>
     </header>
@@ -94,9 +99,10 @@ const rest = computed(() => visible.value.filter((item) => !item.pinned))
         <button
           v-for="(item, index) in pinned"
           :key="item.id"
-          class="conv"
+          class="conv spot"
           :class="{ active: item.id === activeId }"
           :style="{ animationDelay: `${index * 26}ms` }"
+          @pointermove="trackSpotlight"
           @click="emit('select', item.id)"
         >
           <AppAvatar
@@ -104,28 +110,33 @@ const rest = computed(() => visible.value.filter((item) => !item.pinned))
             :tone="item.tone"
             :presence="item.presence"
             :rounded="item.kind === 'group'"
+            size="md"
           />
           <span class="conv-main">
             <span class="conv-top">
               <span class="conv-name">{{ item.name }}</span>
-              <Pin :size="11" :stroke-width="2.2" style="color: var(--ink-4)" />
+              <Pin
+                :size="10"
+                :stroke-width="2.4"
+                style="color: var(--ink-4); flex-shrink: 0"
+              />
               <BellOff
                 v-if="item.muted"
-                :size="11"
-                :stroke-width="2.2"
-                style="color: var(--ink-4)"
+                :size="10"
+                :stroke-width="2.4"
+                style="color: var(--ink-4); flex-shrink: 0"
               />
             </span>
             <span class="conv-preview">{{ item.preview }}</span>
           </span>
           <span class="conv-meta">
-            <span class="conv-time tabular">{{ item.time }}</span>
+            <span class="conv-time num">{{ item.time }}</span>
             <span
               v-if="item.unread"
               class="unread"
               :class="{ muted: item.muted }"
             >
-              {{ item.unread > 99 ? '99+' : item.unread }}
+              <span :key="item.unread">{{ item.unread > 99 ? '99+' : item.unread }}</span>
             </span>
           </span>
         </button>
@@ -137,9 +148,10 @@ const rest = computed(() => visible.value.filter((item) => !item.pinned))
       <button
         v-for="(item, index) in rest"
         :key="item.id"
-        class="conv"
+        class="conv spot"
         :class="{ active: item.id === activeId }"
         :style="{ animationDelay: `${index * 26}ms` }"
+        @pointermove="trackSpotlight"
         @click="emit('select', item.id)"
       >
         <AppAvatar
@@ -147,23 +159,27 @@ const rest = computed(() => visible.value.filter((item) => !item.pinned))
           :tone="item.tone"
           :presence="item.presence"
           :rounded="item.kind === 'group'"
+          size="md"
         />
         <span class="conv-main">
           <span class="conv-top">
             <span class="conv-name">{{ item.name }}</span>
+            <span v-if="item.kind === 'group'" class="conv-flag">
+              {{ item.members }}
+            </span>
             <BellOff
               v-if="item.muted"
-              :size="11"
-              :stroke-width="2.2"
-              style="color: var(--ink-4)"
+              :size="10"
+              :stroke-width="2.4"
+              style="color: var(--ink-4); flex-shrink: 0"
             />
           </span>
           <span class="conv-preview">{{ item.preview }}</span>
         </span>
         <span class="conv-meta">
-          <span class="conv-time tabular">{{ item.time }}</span>
+          <span class="conv-time num">{{ item.time }}</span>
           <span v-if="item.unread" class="unread" :class="{ muted: item.muted }">
-            {{ item.unread > 99 ? '99+' : item.unread }}
+            <span :key="item.unread">{{ item.unread > 99 ? '99+' : item.unread }}</span>
           </span>
         </span>
       </button>
@@ -181,5 +197,15 @@ const rest = computed(() => visible.value.filter((item) => !item.pinned))
   text-align: center;
   font-size: 12.5px;
   color: var(--ink-3);
+}
+
+/* 新建按钮：悬停轻微上浮 */
+.glide {
+  transition: background var(--dur-1) var(--ease-out),
+    color var(--dur-1) var(--ease-out), transform var(--dur-2) var(--ease-spring);
+}
+
+.glide:hover {
+  transform: translateY(-1px) rotate(90deg);
 }
 </style>
