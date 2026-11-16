@@ -63,7 +63,12 @@ export const useAuthStore = defineStore('auth', {
       return this.login(username, password)
     },
 
-    logout() {
+    async logout() {
+      try {
+        await api.post('/auth/logout')
+      } catch {
+        /* 令牌可能已失效，本地仍然清理 */
+      }
       this.token = null
       this.user = null
       clearSession()

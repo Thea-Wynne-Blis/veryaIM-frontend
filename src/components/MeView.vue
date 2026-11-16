@@ -111,9 +111,9 @@ async function savePrivacy(patch: Partial<Privacy>) {
   }
 }
 
-function logout() {
+async function logout() {
   chat.reset()
-  auth.logout()
+  await auth.logout()
   window.location.href = '/login'
 }
 

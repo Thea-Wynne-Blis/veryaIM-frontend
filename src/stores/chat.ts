@@ -19,6 +19,11 @@ type State = {
   pollTimer: number | null
 }
 
+/** 后端字段名是 sequence，前端统一用 seq */
+function normalize(raw: MessageView & { sequence?: number }): MessageView {
+  return { ...raw, seq: raw.seq ?? raw.sequence ?? 0 }
+}
+
 export const useChatStore = defineStore('chat', {
   state: (): State => ({
     cards: [],
@@ -80,7 +85,7 @@ export const useChatStore = defineStore('chat', {
           const page = await api.get<MessagePage>(
             `/conversations/${conversationId}/messages?cursor=${cursor}&limit=100`,
           )
-          collected.push(...page.messages)
+          collected.push(...page.messages.map(normalize))
           if (!page.hasMore || page.messages.length === 0) break
           cursor = page.nextCursor
         }
@@ -100,7 +105,7 @@ export const useChatStore = defineStore('chat', {
           `/conversations/${conversationId}/messages?cursor=${lastSeq}&limit=100`,
         )
         if (page.messages.length) {
-          const merged = [...list, ...page.messages]
+          const merged = [...list, ...page.messages.map(normalize)]
           const seen = new Set<number>()
           this.messages[conversationId] = merged.filter((m) =>
             seen.has(m.messageId) ? false : (seen.add(m.messageId), true),
@@ -116,22 +121,31 @@ export const useChatStore = defineStore('chat', {
       if (!conversationId || !text.trim()) return
       const clientMsgId = `w-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
       try {
-        const sent = await api.post<{ messageId: number; seq: number; createdAt: string }>(
+        // 后端返回 { message: {...}, duplicate }, 需取内层
+        const resp = await api.post<{
+          message: {
+            messageId: number
+            sequence: number
+            createdAt: string
+          }
+          duplicate: boolean
+        }>(
           `/conversations/${conversationId}/messages`,
           {
             conversationId,
-            clientMsgId,
+            clientMessageId: clientMsgId,
             type: 'TEXT',
             content: text.trim(),
           },
         )
+        const sent = resp.message
         const list = this.messages[conversationId] ?? (this.messages[conversationId] = [])
         list.push({
           messageId: sent.messageId,
           conversationId,
           senderId: this.myId,
           clientMsgId,
-          seq: sent.seq,
+          seq: sent.sequence,
           type: 'TEXT',
           content: text.trim(),
           createdAt: sent.createdAt,
@@ -140,7 +154,7 @@ export const useChatStore = defineStore('chat', {
         if (card) {
           card.lastMessagePreview = text.trim()
           card.lastMessageAt = sent.createdAt
-          card.lastSeq = sent.seq
+          card.lastSeq = sent.sequence
         }
       } catch (e) {
         this.error = e instanceof Error ? e.message : '发送失败'

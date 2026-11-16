@@ -11,3 +11,5 @@ dist/
 
 # ²¿Êğ²úÎï
 deploy/out/
+
+tools/e2e-fail.png

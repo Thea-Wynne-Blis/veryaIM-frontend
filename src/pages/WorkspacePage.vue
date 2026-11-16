@@ -123,9 +123,11 @@ onMounted(async () => {
   document.documentElement.dataset.theme = theme.value
   window.addEventListener('veryal:open-chat', onOpenChatRequest)
   await chat.loadCards()
-  const fromRoute = route.params.conversationId as string | undefined
-  const first = fromRoute ?? chat.cards[0]?.conversationId ?? null
-  if (first) await select(first)
+  if (view.value === 'chat') {
+    const fromRoute = route.params.conversationId as string | undefined
+    const first = fromRoute ?? chat.cards[0]?.conversationId ?? null
+    if (first) await select(first)
+  }
   chat.startPolling(4000)
 })
 
@@ -173,6 +175,7 @@ onBeforeUnmount(() => {
         :conversation="activeConversation"
         :messages="messages"
         :detail-open="detailOpen"
+        :error="chat.error"
         @send="(text) => chat.activeId && send(chat.activeId, text)"
         @toggle-detail="detailOpen = !detailOpen"
       />

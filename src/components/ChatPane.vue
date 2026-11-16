@@ -24,6 +24,7 @@ const props = defineProps<{
   conversation: Conversation | null
   messages: ChatMessage[]
   detailOpen: boolean
+  error?: string | null
 }>()
 
 const emit = defineEmits<{
@@ -197,6 +198,7 @@ watch(() => props.conversation?.id, scrollToBottom, { immediate: true })
       </div>
 
       <div class="composer-wrap">
+        <p v-if="error" class="send-error">{{ error }}</p>
         <div
           class="composer spot"
           style="--spot-size: 420px"
@@ -257,3 +259,14 @@ watch(() => props.conversation?.id, scrollToBottom, { immediate: true })
     </div>
   </section>
 </template>
+
+<style scoped>
+.send-error {
+  margin: 0 0 6px;
+  padding: 6px 10px;
+  border-radius: var(--r-sm);
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 11.5px;
+}
+</style>
