@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # ============================================================
 # VERYAL 运维脚本合集：start / stop / restart / status / logs
-#   安装位置: /opt/veryal/bin/veryal
+#   安装位置: /home/ubuntu/veryal/bin/veryal
 #   用法:     veryal <命令>
 # ============================================================
 set -uo pipefail
 
-APP_HOME=/opt/veryal
+APP_HOME=/home/ubuntu/veryal
 LOG="$APP_HOME/logs/backend.log"
 PORT=8899
 APP_PORT=8080
@@ -71,7 +71,35 @@ cmd_status() {
 }
 
 cmd_logs() {
-  tail -n "${2:-120}" -f "$LOG"
+  local which="${2:-info}"
+  local lines="${3:-120}"
+  local file
+  case "$which" in
+    error|err) file="$APP_HOME/logs/error.log" ;;
+    warn)      file="$APP_HOME/logs/warn.log" ;;
+    stdout|out) file="$APP_HOME/logs/stdout.log" ;;
+    info|*)    file="$APP_HOME/logs/info.log" ;;
+  esac
+  if [ ! -f "$file" ]; then
+    c_err "日志文件不存在: $file"
+    echo "可用: $(ls -1 "$APP_HOME/logs" 2>/dev/null | tr '\n' ' ')"
+    return 1
+  fi
+  c_inf "跟踪 $file"
+  tail -n "$lines" -f "$file"
+}
+
+cmd_logs_ls() {
+  echo "──────── 日志文件 ────────"
+  if [ -d "$APP_HOME/logs" ]; then
+    find "$APP_HOME/logs" -maxdepth 1 -type f -name '*.log' -printf '%-24f %8s\n' 2>/dev/null \
+      || ls -lh "$APP_HOME/logs"/*.log
+    echo
+    echo "归档: $(find "$APP_HOME/logs/archive" -type f 2>/dev/null | wc -l) 个"
+    echo "总占用: $(du -sh "$APP_HOME/logs" 2>/dev/null | cut -f1)"
+  else
+    c_err "日志目录不存在"
+  fi
 }
 
 case "${1:-status}" in
@@ -80,15 +108,23 @@ case "${1:-status}" in
   restart) cmd_restart ;;
   status)  cmd_status ;;
   logs)    cmd_logs "$@" ;;
+  logls)   cmd_logs_ls ;;
   *)
     cat <<EOF
 VERYAL 控制台
 
-  veryal start     启动后端 + nginx
-  veryal stop      停止后端
-  veryal restart   重启后端
-  veryal status    查看状态（默认）
-  veryal logs [n]  跟踪日志，默认 120 行
+  veryal start            启动后端 + nginx
+  veryal stop             停止后端
+  veryal restart          重启后端
+  veryal status           查看状态（默认）
+  veryal logs [类型] [行数]
+                          跟踪日志，类型默认 info
+                          info | warn | error | stdout
+  veryal logls            列出日志文件与占用
+
+  示例:
+    veryal logs            跟踪 info.log
+    veryal logs error 300  看最近 300 行错误
 EOF
     ;;
 esac
