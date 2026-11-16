@@ -152,6 +152,43 @@ ssh ubuntu@82.157.47.151 'rm -rf /tmp/veryal-upload && mkdir -p /tmp/veryal-uplo
 | `VERYAL_PUSH_WEB_PUSH_ENABLED` | 浏览器推送开关，开启后自动生成 VAPID 密钥 |
 | `VERYAL_LOG_PATH` | 日志目录，生产为 `/home/ubuntu/veryal/logs` |
 | `VERYAL_PLATFORM_BOOTSTRAP_*` | 运营后台初始账号 |
+| `VERYAL_RATE_LIMIT_ENABLED` | 限流总开关，默认 `true`；压测时设 `false` |
+| `VERYAL_RATE_LIMIT_MESSAGE_PERMITS` / `_REFILL` | 发消息令牌桶，默认 `30` 容量 / `15` 条每秒 |
+
+### MySQL 持久化与性能
+
+线上保持**严格持久化**：
+
+```sql
+innodb_flush_log_at_trx_commit = 1
+sync_binlog                    = 1
+```
+
+即每次提交都 fsync redo + binlog，**进程崩溃或断电都不丢已提交消息**。
+
+实测（单会话、同机压测）：改成 `2 / 1000` 只在低并发有收益（顺序发送 p50 22ms → 12ms），16 并发以上吞吐持平（约 185–210 QPS），因为 InnoDB binlog group commit 已经把 fsync 摊薄。所以**不建议为吞吐放宽**；只有在明确接受「断电丢最近约 1 秒已提交事务」时才改：
+
+```bash
+docker exec -it veryal-mysql sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" \
+  -e "SET PERSIST innodb_flush_log_at_trx_commit=2; SET PERSIST sync_binlog=1000;"'
+```
+
+验证：
+
+```bash
+docker exec -it veryal-mysql sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" -N \
+  -e "select @@innodb_flush_log_at_trx_commit, @@sync_binlog;"'
+```
+
+压测前记得关限流，否则 429 会让数据失真：
+
+```bash
+sudo mkdir -p /etc/systemd/system/veryal-backend.service.d
+printf '[Service]\nEnvironment=VERYAL_RATE_LIMIT_ENABLED=false\n' \
+  | sudo tee /etc/systemd/system/veryal-backend.service.d/zz-bench.conf >/dev/null
+sudo systemctl daemon-reload && sudo systemctl restart veryal-backend
+# 压测结束：删除该文件、daemon-reload、重启
+```
 
 ---
 
@@ -162,7 +199,7 @@ ssh ubuntu@82.157.47.151 'rm -rf /tmp/veryal-upload && mkdir -p /tmp/veryal-uplo
 3. **Nginx 为系统安装版**，容器版 `nginx:latest` 镜像已删除；`sites-enabled/default`（80 端口）也已移除。
 4. **Nginx 读取家目录**：站点 root 在 `/home/ubuntu` 下，故 `/home/ubuntu` 需保持 `o+x`（`install.sh` 已处理）。
 5. **首次启动较慢**：Flyway 迁移到 V23 约 20–30 秒，期间 `/actuator/health` 不可用属正常。
-6. **实时消息为轮询实现**：前端每 4 秒拉一次会话卡片与增量消息。WebSocket 通道已由 Nginx 代理就绪，后续切换为长连接无需改代理。
+6. **实时消息为 SSE 长连接**：前端通过 `GET /api/v1/events` 收推送（带完整消息体，大群只带 `seq` 游标），低频轮询仅作兜底；Nginx 对该路径已关闭缓冲。
 7. **中文编码**：JSON 接口未声明 charset，浏览器按 UTF-8 解析正常；非浏览器客户端（如 PowerShell 的 `Invoke-RestMethod`）可能按 Latin-1 解码出现乱码，属客户端问题。
 
 ---
