@@ -1,0 +1,109 @@
+/* ============================================================
+   VERYAL Design Tokens
+   参考 BoardUI 的克制与节奏 + Bencho 的微交互质感
+   墨色 + 玉色主调，暖中性底色
+   ============================================================ */
+
+:root {
+  /* ---------- 色板：浅色 ---------- */
+  --canvas: #f5f5f2;
+  --canvas-2: #efefeb;
+  --surface: #ffffff;
+  --surface-2: #fbfbf9;
+  --surface-3: #f4f4f1;
+  --surface-hover: rgba(22, 24, 26, 0.04);
+  --surface-active: rgba(22, 24, 26, 0.07);
+
+  --ink: #16181a;
+  --ink-2: #555b61;
+  --ink-3: #8a9096;
+  --ink-4: #b3b8bd;
+
+  --line: #e7e7e3;
+  --line-strong: #d9d9d4;
+
+  --accent: #12876f;
+  --accent-hover: #0f7561;
+  --accent-soft: #e6f4ef;
+  --accent-soft-2: #d6eee6;
+  --accent-ink: #0a5c4d;
+
+  --danger: #cf4040;
+  --danger-soft: #fdeceb;
+  --warn: #b9761a;
+  --info: #2d6ecf;
+
+  /* ---------- 圆角 ---------- */
+  --r-xs: 6px;
+  --r-sm: 9px;
+  --r-md: 13px;
+  --r-lg: 18px;
+  --r-xl: 24px;
+  --r-2xl: 32px;
+  --r-full: 999px;
+
+  /* ---------- 阴影：低对比、多层 ---------- */
+  --shadow-xs: 0 1px 2px rgba(18, 20, 22, 0.05);
+  --shadow-sm: 0 2px 6px -2px rgba(18, 20, 22, 0.08);
+  --shadow-md: 0 10px 24px -14px rgba(18, 20, 22, 0.22);
+  --shadow-lg: 0 28px 64px -28px rgba(18, 20, 22, 0.3);
+  --shadow-pop: 0 16px 40px -16px rgba(18, 20, 22, 0.24);
+
+  /* ---------- 动效 ---------- */
+  --ease-out: cubic-bezier(0.22, 0.75, 0.2, 1);
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+  --dur-1: 120ms;
+  --dur-2: 200ms;
+  --dur-3: 320ms;
+
+  /* ---------- 排版 ---------- */
+  --font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", sans-serif;
+  --mono: "SF Mono", ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
+
+  /* ---------- 尺寸 ---------- */
+  --rail-w: 68px;
+  --list-w: 348px;
+  --detail-w: 306px;
+  --header-h: 64px;
+
+  color-scheme: light;
+}
+
+/* ---------- 色板：深色 ---------- */
+[data-theme="dark"] {
+  --canvas: #0d0f10;
+  --canvas-2: #131617;
+  --surface: #171a1c;
+  --surface-2: #1c2022;
+  --surface-3: #222627;
+  --surface-hover: rgba(255, 255, 255, 0.05);
+  --surface-active: rgba(255, 255, 255, 0.09);
+
+  --ink: #f0f2f3;
+  --ink-2: #a6adb3;
+  --ink-3: #767d83;
+  --ink-4: #565c61;
+
+  --line: #262a2c;
+  --line-strong: #33383b;
+
+  --accent: #2ec4a0;
+  --accent-hover: #3ad3ae;
+  --accent-soft: #14302b;
+  --accent-soft-2: #1a3d36;
+  --accent-ink: #7fe6cb;
+
+  --danger: #f06a66;
+  --danger-soft: #33201f;
+  --warn: #e0a44d;
+  --info: #6ba4f5;
+
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-sm: 0 2px 8px -2px rgba(0, 0, 0, 0.5);
+  --shadow-md: 0 12px 28px -14px rgba(0, 0, 0, 0.65);
+  --shadow-lg: 0 32px 72px -28px rgba(0, 0, 0, 0.8);
+  --shadow-pop: 0 18px 44px -16px rgba(0, 0, 0, 0.7);
+
+  color-scheme: dark;
+}
