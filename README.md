@@ -162,9 +162,18 @@ src/
 
 ## 当前状态
 
-这是**纯前端原型**，数据来自 `src/data/workspace.ts` 的本地演示数据：
+已接入真实后端（`/api/v1`，Bearer 鉴权），不再是本地演示数据：
 
 - ✅ 已完成：Web 三栏 + 移动端布局、深浅色、会话筛选/搜索、消息发送、详情面板、微交互
-- ⏳ 未接入：真实 API、WebSocket 实时消息、登录态、Web Push 订阅、文件上传
+- ✅ 已接入：真实 API、登录态与多设备管理、文件上传、消息增量同步
+- ✅ 实时消息：`GET /api/v1/events`（SSE 长连接）
+  - 事件携带完整消息体时**直接插入列表**，不再回查消息接口
+  - 大群推送只带 `seq` 游标，按 120ms 窗口合并后增量拉取
+  - 发送采用**乐观渲染**：本地先显示占位消息，服务端确认或推送到达后替换，按 `messageId` / `clientMsgId` 去重
+  - 已读上报节流 1s；断线按 1s→15s 指数退避自动重连
+  - 轮询保留为兜底：SSE 健康时 60 秒一次全量同步，未连接时回到 3 秒
+- ⏳ 未接入：Web Push 订阅
+
+实现位置：`src/stores/chat.ts` 的 `startRealtime` / `handleRealtimeChunk` / `applyRealtimeMessage`。
 
 接口设计见后端仓库 `docs/FRONTEND-ARCHITECTURE.md`。
