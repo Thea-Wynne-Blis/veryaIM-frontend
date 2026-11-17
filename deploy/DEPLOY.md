@@ -214,7 +214,7 @@ sudo systemctl daemon-reload && sudo systemctl restart veryal-backend
 3. **Nginx 为系统安装版**，容器版 `nginx:latest` 镜像已删除；`sites-enabled/default`（80 端口）也已移除。
 4. **Nginx 读取家目录**：站点 root 在 `/home/ubuntu` 下，故 `/home/ubuntu` 需保持 `o+x`（`install.sh` 已处理）。
 5. **首次启动较慢**：Flyway 迁移到 V23 约 20–30 秒，期间 `/actuator/health` 不可用属正常。
-6. **实时消息为 SSE 长连接**：前端通过 `GET /api/v1/events` 收推送（带完整消息体，大群只带 `seq` 游标），低频轮询仅作兜底；Nginx 对该路径已关闭缓冲。
+6. **实时消息为 WebSocket 长连接**：前端先 `POST /api/v1/auth/ws-ticket` 换一次性 ticket，再连 `/ws?ticket=...&format=json`；Nginx 需对 `/ws` 开启 Upgrade 头透传与长连接超时。低频轮询仅作兜底。
 7. **中文编码**：JSON 接口未声明 charset，浏览器按 UTF-8 解析正常；非浏览器客户端（如 PowerShell 的 `Invoke-RestMethod`）可能按 Latin-1 解码出现乱码，属客户端问题。
 
 ---

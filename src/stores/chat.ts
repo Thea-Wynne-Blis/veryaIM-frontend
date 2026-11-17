@@ -16,6 +16,7 @@ import {
   type ReadReceipt,
   type UserProfile,
 } from '../api/client'
+import { RealtimeClient, type RealtimeFrame } from '../api/realtime'
 import { audioDurationOf, imageSizeOf, mediaKindOf, videoMetaOf } from '../utils/media'
 import { useAuthStore } from './auth'
 
@@ -26,8 +27,7 @@ const BACKGROUND_SYNC_MS = 60_000
 const REALTIME_COALESCE_MS = 120
 const MARK_READ_THROTTLE_MS = 1000
 
-let realtimeAbort: AbortController | null = null
-let realtimeRetryTimer: number | null = null
+let realtimeClient: RealtimeClient | null = null
 let visibilityHandler: (() => void) | null = null
 const realtimeCoalesceTimers = new Map<string, number>()
 const lastMarkReadAt = new Map<string, number>()
@@ -828,63 +828,29 @@ export const useChatStore = defineStore('chat', {
     },
 
     /**
-     * 订阅服务端 SSE 实时事件：新消息到达即增量同步，断线自动重连。
-     * 轮询保留为兜底（见 startPolling），长连接健康时降频为 30 秒一次全量同步。
+     * 订阅 Netty WebSocket 实时事件：先 HTTP 换一次性 ticket，再建立长连接。
+     * 轮询保留为兜底（见 startPolling），长连接健康时降频为 60 秒一次全量同步。
      */
     startRealtime() {
       this.stopRealtime()
-      const token = getToken()
-      if (!token) return
+      if (!getToken()) return
 
-      const controller = new AbortController()
-      realtimeAbort = controller
-      let retries = 0
-
-      const connect = async (): Promise<void> => {
-        try {
-          const response = await fetch('/api/v1/events', {
-            method: 'GET',
-            headers: {
-              Authorization: `Bearer ${token}`,
-              Accept: 'text/event-stream',
-            },
-            signal: controller.signal,
-          })
-          if (response.status === 401) return
-          if (!response.ok || !response.body) throw new Error(`realtime ${response.status}`)
-
-          retries = 0
-          this.realtimeConnected = true
-          this.realtimeLastPing = Date.now()
-          const reader = response.body.getReader()
-          const decoder = new TextDecoder()
-          let buffer = ''
-          while (!controller.signal.aborted) {
-            const { value, done } = await reader.read()
-            if (done) break
-            buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n')
-            let boundary = buffer.indexOf('\n\n')
-            while (boundary >= 0) {
-              this.handleRealtimeChunk(buffer.slice(0, boundary))
-              buffer = buffer.slice(boundary + 2)
-              boundary = buffer.indexOf('\n\n')
-            }
-          }
-        } catch {
-          /* 断线后走下面的重连 */
-        } finally {
-          this.realtimeConnected = false
-          if (!controller.signal.aborted) {
-            const delay = Math.min(1000 * 2 ** Math.min(retries, 4), 15000)
-            retries += 1
-            if (realtimeRetryTimer !== null) window.clearTimeout(realtimeRetryTimer)
-            realtimeRetryTimer = window.setTimeout(() => {
-              realtimeRetryTimer = null
-              if (!controller.signal.aborted) void connect()
-            }, delay)
-          }
-        }
-      }
+      const client = new RealtimeClient({
+        onStateChange: (connected) => {
+          this.realtimeConnected = connected
+        },
+        onError: () => {
+          /* 换票失败也会自动重试，不打断轮询兜底 */
+        },
+        onTerminated: () => {
+          // 服务端已终止会话（登出/封禁/设备下线）：回到登录页，不再重连。
+          this.stopRealtime()
+          window.dispatchEvent(new CustomEvent('veryal:unauthorized'))
+        },
+        onFrame: (frame) => this.handleRealtimeFrame(frame),
+      })
+      realtimeClient = client
+      client.start()
 
       if (visibilityHandler) document.removeEventListener('visibilitychange', visibilityHandler)
       visibilityHandler = () => {
@@ -893,43 +859,25 @@ export const useChatStore = defineStore('chat', {
         if (this.activeId) void this.refreshMessages(this.activeId)
       }
       document.addEventListener('visibilitychange', visibilityHandler)
-
-      void connect()
     },
 
     stopRealtime() {
-      if (realtimeRetryTimer !== null) {
-        window.clearTimeout(realtimeRetryTimer)
-        realtimeRetryTimer = null
-      }
       if (visibilityHandler) {
         document.removeEventListener('visibilitychange', visibilityHandler)
         visibilityHandler = null
       }
-      realtimeAbort?.abort()
-      realtimeAbort = null
+      realtimeClient?.close()
+      realtimeClient = null
       realtimeCoalesceTimers.forEach((timer) => window.clearTimeout(timer))
       realtimeCoalesceTimers.clear()
       lastMarkReadAt.clear()
       this.realtimeConnected = false
     },
 
-    handleRealtimeChunk(raw: string) {
-      let eventName = 'message'
-      const dataLines: string[] = []
-      for (const line of raw.split('\n')) {
-        if (line.startsWith(':')) continue
-        if (line.startsWith('event:')) eventName = line.slice(6).trim()
-        else if (line.startsWith('data:')) dataLines.push(line.slice(5).trimStart())
-      }
+    handleRealtimeFrame(frame: RealtimeFrame) {
       this.realtimeLastPing = Date.now()
-      if (eventName !== 'message' || !dataLines.length) return
-      let payload: RealtimePayload
-      try {
-        payload = JSON.parse(dataLines.join('\n')) as RealtimePayload
-      } catch {
-        return
-      }
+      if (frame.cmd !== 'message' || !frame.data) return
+      const payload = frame.data as RealtimePayload
       const conversationId = payload.conversationId
       if (!conversationId) return
 
