@@ -181,24 +181,45 @@ src/
 
 ---
 
-## 附件上传与图片浏览
+## 附件上传与媒体浏览
 
-图片方案的目标是「切会话不再像重新加载」：上传只传一次，展示只下载缩略图，回到会话直接命中缓存。
+目标有两个：切会话不再像重新加载；所有文件类型（图片、GIF、视频、音频、大文件、SVG/HEIC 这类不能内联的格式）都能上传并正确渲染，而不是坏图或空白气泡。
+
+### 上传
 
 | 环节 | 优化前 | 现在 |
 |---|---|---|
-| 上传反馈 | `fetch` 没有进度事件，点完只能等 | `XMLHttpRequest` 回报字节进度，输入区上方一条 2px 细线进度条（本地缩略图 / 文件名 / 大小 / 百分比 / 取消） |
+| 上传反馈 | `fetch` 没有进度事件，点完只能等 | `XMLHttpRequest` 回报字节进度，输入区上方一条 2px 细线进度条（本地缩略图 / 文件名 / 大小 / 阶段 / 取消） |
+| 大文件 | 单次 multipart，超过 20MB 直接 413 | 超过 8MB 自动切片（`uploadFile` → `uploadChunked`），服务端逐片落盘后流式合并；实测 20.4MB 视频 4 片约 7 秒，帧率稳定在 14%→26%→44%→67%→93% |
+| 进度语义 | 只有上传中 / 发送中 | `prepare`（客户端读尺寸、抓视频封面）→ `upload`（百分比）→ `send`（等服务端确认） |
 | 服务端处理 | 2.4MB PNG 也完整解码 + 重编码，约 500ms | 只读图片头判断尺寸，未超 1920px 的 PNG 原样入库；实测 470–580ms → 90–130ms |
-| 气泡里的图片 | 每条消息都下原图（2.4MB） | 先取 `/files/{id}/thumb?w=480`（约 33KB），点开才取原图 |
+
+### 按类型渲染
+
+| 附件 | 判定方式 | 气泡 |
+|---|---|---|
+| 图片 | `createImageBitmap` 能解码 | 先取 `/files/{id}/thumb?w=480`（约 33KB），点开才取原图 |
+| GIF | `.gif` / `image/gif` | 仍归 `IMAGE`，但必须走原图（`/content`），否则动图变静态首帧 |
+| SVG | `.svg` / `image/svg+xml` | 一律文件卡片：可执行脚本的 XML 文档不内联、不生成缩略图 |
+| HEIC/TIFF 等 | `createImageBitmap` 失败 | 降级为文件卡片，而不是坏图 |
+| 视频 | `video/*` 或扩展名兜底 | 封面 + 播放按钮 + 时长角标；点击后才把视频载入 `<video controls>` 内联播放 |
+| 音频 | `audio/*` 或扩展名兜底 | 自定义播放器：播放/暂停、细线进度、点击 seek、`当前 / 总时长` |
+
+视频的宽高、时长、封面全部在浏览器里生成（服务端没有 ffmpeg）：`<video>` 元数据拿宽高与时长，seek 到 10% 处用 canvas 抓一帧 JPEG（≤480px），作为普通图片文件上传后通过 `coverFileId` 挂在视频消息上。抓帧有超时兜底，解不开的容器（如部分 mkv）会退化成深色占位 + 播放按钮，不阻塞上传。
+
+### 缓存与滚动
+
+| 环节 | 优化前 | 现在 |
+|---|---|---|
 | 切走再回来 | 组件重新挂载 → 重新下载 + 解码 | object URL 按 `fileId` 缓存（LRU 48 条），直接命中，不发请求 |
 | 滚动位置 | 每次进入都强制贴底 | 按会话记住 `scrollTop`，切回来停在原处；只有首次打开才贴底 |
-| 布局跳动 | 图片加载完才撑开气泡 | 消息 `content` 记录 `width/height`，用 `aspect-ratio` 先占位（老消息回退 3:2） |
+| 布局跳动 | 图片加载完才撑开气泡 | 消息 `content` 记录 `width/height`，用 `aspect-ratio` 先占位（老消息回退 3:2），视频同理 |
 
-服务端对 `/content` 与 `/thumb` 都返回 `ETag` + `Cache-Control: private, max-age=31536000, immutable`，支持 `If-None-Match` → `304`；缩略图首次生成后落盘缓存（`<objectKey>.thumb-480.jpg`）。
+服务端对 `/content` 与 `/thumb` 都返回 `ETag` + `Cache-Control: private, max-age=31536000, immutable`，支持 `If-None-Match` → `304`；缩略图首次生成后落盘缓存（`<objectKey>.thumb-480.jpg`）。`/content` 支持 `Range`/`206`，视频拖动进度时只回传需要的区间；`?disposition=inline` 仅对音视频、图片、PDF 生效，SVG 始终按下载处理。
 
-自己刚上传的图片（≤3MB）会把本地 object URL 直接塞进缓存，气泡立即显示，不用等服务端生成缩略图；更大的图片走服务端缩略图，避免原图长期占内存。
+自己刚上传的图片（≤3MB）会把本地 object URL 直接塞进缓存，气泡立即显示，不用等服务端生成缩略图；更大的图片走服务端缩略图，避免原图长期占内存。视频封面同理，上传封面后立即 `seedFilePreview`，气泡不再回源。
 
-实现位置：`src/api/client.ts`（`uploadWithProgress` / `thumbObjectUrl` / object URL 缓存）、`src/stores/chat.ts`（`uploads` 任务、`sendAttachment`、`open()` 增量刷新）、`src/components/MessageAttachment.vue`、`src/components/ChatPane.vue`。
+实现位置：`src/utils/media.ts`（`mediaKindOf` / `videoMetaOf` / `audioDurationOf`）、`src/api/client.ts`（`uploadFile` / `uploadChunked` / `thumbObjectUrl` / object URL 缓存）、`src/stores/chat.ts`（`uploads` 任务、`sendAttachment`、`open()` 增量刷新）、`src/components/MessageAttachment.vue`、`src/components/ChatPane.vue`。
 
 ---
 

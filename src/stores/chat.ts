@@ -5,9 +5,8 @@ import {
   getToken,
   sameId,
   seedFilePreview,
-  uploadWithProgress,
+  uploadFile,
   type ConversationCard,
-  type FileRow,
   type GroupDetail,
   type Id,
   type MessagePage,
@@ -15,6 +14,7 @@ import {
   type ReadReceipt,
   type UserProfile,
 } from '../api/client'
+import { audioDurationOf, imageSizeOf, mediaKindOf, videoMetaOf } from '../utils/media'
 import { useAuthStore } from './auth'
 
 const PAGE_SIZE = 60
@@ -45,6 +45,8 @@ type RealtimePayload = {
 
 function previewOf(payload: RealtimePayload): string {
   if (payload.messageType === 'IMAGE') return '[图片]'
+  if (payload.messageType === 'VIDEO') return '[视频]'
+  if (payload.messageType === 'AUDIO') return '[语音]'
   if (payload.messageType === 'FILE') return '[文件]'
   return payload.content ?? ''
 }
@@ -57,7 +59,7 @@ export type ChatMember = {
   role?: string
 }
 
-/** 上传统计：上传中 / 发送中，供输入区渲染进度条。 */
+/** 上传统计：准备 / 上传 / 发送，供输入区渲染进度条。 */
 export type UploadTask = {
   id: string
   conversationId: string
@@ -65,11 +67,16 @@ export type UploadTask = {
   sizeBytes: number
   /** 0~1 的字节传输进度 */
   progress: number
-  phase: 'upload' | 'send'
-  /** 图片本地预览（object URL，任务结束时 revoke） */
+  /** prepare：客户端生成封面/读时长；upload：传输字节；send：等服务端确认 */
+  phase: 'prepare' | 'upload' | 'send'
+  /** 附件类型，决定进度条缩略图与提示文案 */
+  kind?: 'image' | 'gif' | 'video' | 'audio' | 'file'
+  /** 图片/视频封面本地预览（object URL，任务结束时 revoke） */
   previewUrl?: string
   width?: number
   height?: number
+  /** 视频/音频时长（秒） */
+  duration?: number
 }
 
 /** AbortController 不能进 Pinia state，放模块级 Map。 */
@@ -78,17 +85,12 @@ const uploadControllers = new Map<string, AbortController>()
 /** 超过这个大小的图片不再把本地预览塞进缓存，避免几十张原图把内存顶爆。 */
 const SEED_PREVIEW_MAX_BYTES = 3 * 1024 * 1024
 
-/** 读本地图片尺寸，用于气泡占位，避免加载完成后撑开导致跳动。 */
-async function imageSizeOf(file: File): Promise<{ width: number; height: number } | null> {
-  if (typeof createImageBitmap !== 'function') return null
-  try {
-    const bitmap = await createImageBitmap(file)
-    const size = { width: bitmap.width, height: bitmap.height }
-    bitmap.close()
-    return size
-  } catch {
-    return null
-  }
+/** `a/b.mp4` → `a/b`（封面文件命名用）。 */
+function baseNameOf(name: string): string {
+  const slash = name.lastIndexOf('/')
+  const base = slash >= 0 ? name.slice(slash + 1) : name
+  const dot = base.lastIndexOf('.')
+  return dot > 0 ? base.slice(0, dot) : base
 }
 
 type Prefs = { pinned: string[]; muted: string[]; hidden: Record<string, string[]> }
@@ -494,17 +496,22 @@ export const useChatStore = defineStore('chat', {
     },
 
     /**
-     * 先上传文件，再以 IMAGE / FILE 消息发送。
+     * 上传附件并以对应消息类型发送：图片 / GIF → IMAGE，视频 → VIDEO，
+     * 音频 → AUDIO，其余 → FILE。
      *
-     * <p>上传走 XHR 以便回报字节进度（fetch 没有上传进度事件）；
+     * <p>上传走 XHR 以回报字节进度（fetch 没有上传进度事件），超过 8MB 自动分片；
      * 任务同时写进 `uploads`，由输入区渲染细线进度条，可中途取消。</p>
+     *
+     * <p>视频的宽高、时长与封面全部在客户端生成：服务端没有 ffmpeg。
+     * 封面作为独立图片文件上传，通过 {@code coverFileId} 挂在视频消息上。</p>
      */
     async sendAttachment(file: File) {
       const conversationId = this.activeId
       if (!conversationId) throw new Error('没有选中的会话')
       this.error = null
 
-      const isImage = (file.type || '').startsWith('image/')
+      const kind = await mediaKindOf(file)
+      const isImage = kind === 'image' || kind === 'gif'
       const taskId = `u-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
       const controller = new AbortController()
       uploadControllers.set(taskId, controller)
@@ -515,38 +522,85 @@ export const useChatStore = defineStore('chat', {
         name: file.name,
         sizeBytes: file.size,
         progress: 0,
-        phase: 'upload',
+        phase: kind === 'video' ? 'prepare' : 'upload',
+        kind,
         previewUrl: isImage ? URL.createObjectURL(file) : undefined,
       }
       this.uploads.push(task)
       // 从 state 里取回响应式代理，否则直接改进度不会触发视图更新
       const live = this.uploads[this.uploads.length - 1]!
 
-      const size = isImage ? await imageSizeOf(file) : null
-      if (size) {
-        live.width = size.width
-        live.height = size.height
-      }
+      let width: number | undefined
+      let height: number | undefined
+      let duration = 0
+      let coverFileId: Id | undefined
 
       try {
-        const form = new FormData()
-        form.append('file', file)
-        form.append('conversationId', conversationId)
-        const uploaded = await uploadWithProgress<FileRow>('/files', form, {
+        if (isImage) {
+          const size = await imageSizeOf(file)
+          if (size) {
+            width = size.width
+            height = size.height
+            live.width = width
+            live.height = height
+          }
+        } else if (kind === 'video') {
+          const meta = await videoMetaOf(file)
+          if (meta) {
+            width = meta.width || undefined
+            height = meta.height || undefined
+            duration = meta.duration
+            live.width = width
+            live.height = height
+            live.duration = duration
+          }
+          if (meta?.poster) {
+            live.previewUrl = URL.createObjectURL(meta.poster)
+            try {
+              const cover = await uploadFile(
+                new File([meta.poster], `${baseNameOf(file.name)}-cover.jpg`,
+                  { type: 'image/jpeg' }),
+                conversationId,
+                { signal: controller.signal },
+              )
+              coverFileId = cover.fileId
+              // 封面已经在本机，直接塞进缓存，气泡不必再回源
+              seedFilePreview(cover.fileId, URL.createObjectURL(meta.poster))
+            } catch (e) {
+              if (e instanceof ApiError && e.code === -2) throw e
+              // 封面失败不影响视频本身，气泡会回退到深色占位
+            }
+          }
+          live.phase = 'upload'
+        } else if (kind === 'audio') {
+          duration = await audioDurationOf(file)
+          live.duration = duration
+        }
+
+        const uploaded = await uploadFile(file, conversationId, {
           signal: controller.signal,
           onProgress: (ratio) => {
             live.progress = ratio
           },
         })
 
-        const image = (file.type || uploaded.contentType || '').startsWith('image/')
-        const content = JSON.stringify({
+        const payload: Record<string, unknown> = {
           fileId: uploaded.fileId,
           fileName: uploaded.name || file.name,
           sizeBytes: uploaded.sizeBytes,
-          contentType: uploaded.contentType,
-          ...(size ? { width: size.width, height: size.height } : {}),
-        })
+          contentType: uploaded.contentType || file.type,
+        }
+        if (width && height) {
+          payload.width = width
+          payload.height = height
+        }
+        if (duration > 0) {
+          payload.durationSeconds = Math.max(1, Math.round(duration))
+        }
+        if (coverFileId) {
+          payload.coverFileId = coverFileId
+        }
+
         live.phase = 'send'
         live.progress = 1
         // 自己刚传的图片：把本地预览塞进缓存，气泡立即显示，不必等服务端缩略图
@@ -554,8 +608,22 @@ export const useChatStore = defineStore('chat', {
           seedFilePreview(uploaded.fileId, live.previewUrl)
           live.previewUrl = undefined
         }
-        const preview = image ? '[图片]' : `[文件] ${uploaded.name || file.name}`
-        return await this.sendRaw(image ? 'IMAGE' : 'FILE', content, preview, conversationId)
+
+        const type = kind === 'video'
+          ? 'VIDEO'
+          : kind === 'audio'
+            ? 'AUDIO'
+            : isImage
+              ? 'IMAGE'
+              : 'FILE'
+        const preview = kind === 'video'
+          ? '[视频]'
+          : kind === 'audio'
+            ? '[语音]'
+            : isImage
+              ? '[图片]'
+              : `[文件] ${uploaded.name || file.name}`
+        return await this.sendRaw(type, JSON.stringify(payload), preview, conversationId)
       } catch (e) {
         // code -2 = 用户取消，不当作错误提示
         const cancelled = e instanceof ApiError && e.code === -2

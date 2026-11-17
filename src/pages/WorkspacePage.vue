@@ -120,6 +120,12 @@ function attachmentOf(item: MessageView): Attachment | undefined {
   if (item.recalled) return undefined
   if (item.type === 'TEXT' || item.type === 'EMOJI' || item.type === 'SYSTEM') return undefined
   const content = decodeContent(item)
+  const kindOfType = (): Attachment['kind'] => {
+    if (item.type === 'IMAGE') return 'image'
+    if (item.type === 'VIDEO') return 'video'
+    if (item.type === 'AUDIO') return 'audio'
+    return 'file'
+  }
   try {
     const data = parseJson<{
       fileId?: Id
@@ -128,22 +134,33 @@ function attachmentOf(item: MessageView): Attachment | undefined {
       sizeBytes?: number
       width?: number
       height?: number
+      contentType?: string
+      coverFileId?: Id
+      thumbnailFileId?: Id
+      durationSeconds?: number
     }>(content)
     const fileId = data.fileId ? String(data.fileId) : undefined
     const name = data.fileName || data.name || `文件 ${fileId || ''}`.trim()
+    const kind = kindOfType()
+    const poster = data.coverFileId ?? data.thumbnailFileId
     return {
       name,
       size: humanBytes(Number(data.sizeBytes ?? 0)),
-      kind: item.type === 'IMAGE' ? 'image' : 'file',
+      kind,
       fileId,
       width: Number(data.width) || undefined,
       height: Number(data.height) || undefined,
+      posterId: poster ? String(poster) : undefined,
+      duration: Number(data.durationSeconds) || undefined,
+      contentType: data.contentType,
+      animated: kind === 'image' && (data.contentType ?? '').toLowerCase() === 'image/gif',
     }
   } catch {
+    const kind = kindOfType()
     return {
-      name: item.type === 'IMAGE' ? '图片' : '文件',
+      name: kind === 'image' ? '图片' : kind === 'video' ? '视频' : kind === 'audio' ? '语音' : '文件',
       size: '',
-      kind: item.type === 'IMAGE' ? 'image' : 'file',
+      kind,
     }
   }
 }

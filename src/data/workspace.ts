@@ -19,12 +19,20 @@ export type Conversation = {
 export type Attachment = {
   name: string
   size: string
-  kind: 'file' | 'image'
+  kind: 'file' | 'image' | 'video' | 'audio'
   /** 雪花 ID 超出 JS 安全整数，可能以 string 形式存在。 */
   fileId?: string | number
   /** 图片原始像素，用于气泡占位，避免加载后跳动 */
   width?: number
   height?: number
+  /** 视频封面文件（客户端抓帧后单独上传） */
+  posterId?: string | number
+  /** 视频/语音时长（秒） */
+  duration?: number
+  /** 服务端记录的内容类型，用于判断是否需要缩略图 */
+  contentType?: string
+  /** GIF 等动图：缩略图会退化成静态首帧，必须走原图 */
+  animated?: boolean
 }
 
 export type ChatMessage = {

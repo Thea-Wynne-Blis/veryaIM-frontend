@@ -3,7 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import {
   FileText, Download, FolderOpen, Loader2, HardDrive, RefreshCw, Upload, Trash2,
 } from 'lucide-vue-next'
-import { api, downloadFile, sameId, type FileRow, type Id } from '../api/client'
+import { api, downloadFile, sameId, uploadFile, type FileRow, type Id } from '../api/client'
 import { humanBytes, listTime, toneOf } from '../utils/present'
 
 const rows = ref<FileRow[]>([])
@@ -67,9 +67,8 @@ async function onPick(event: Event) {
   uploading.value = true
   error.value = ''
   try {
-    const form = new FormData()
-    form.append('file', file)
-    await api.upload<FileRow>('/files', form)
+    // 大文件自动分片，与聊天里的附件上传保持一致
+    await uploadFile(file, null)
     flash('上传成功')
     await load()
   } catch (e) {

@@ -37,12 +37,15 @@ function payloadOf(message: ChatMessage): { type: string; content: string; previ
   const type = message.type ?? 'TEXT'
   if (message.attachment) {
     if (!message.mine) return null
-    const name = message.attachment.name
-    return {
-      type,
-      content: message.raw,
-      preview: message.attachment.kind === 'image' ? '[图片]' : `[文件] ${name}`,
-    }
+    const { name, kind } = message.attachment
+    const preview = kind === 'image'
+      ? '[图片]'
+      : kind === 'video'
+        ? '[视频]'
+        : kind === 'audio'
+          ? '[语音]'
+          : `[文件] ${name}`
+    return { type, content: message.raw, preview }
   }
   return { type, content: message.raw, preview: message.text }
 }

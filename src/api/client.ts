@@ -327,6 +327,136 @@ export function uploadWithProgress<T>(
 }
 
 
+/* ---------- 大文件分片上传 ---------- */
+
+/** 超过这个体积改走分片：单次 multipart 上限 32MB，且只有分片才能断点续传。 */
+export const CHUNKED_UPLOAD_THRESHOLD = 8 * 1024 * 1024
+
+export type UploadSession = {
+  uploadId: Id
+  chunkSize: number
+  totalChunks: number
+  uploadedChunks: number[]
+  status: string
+  fileId: Id | null
+}
+
+/**
+ * 统一上传入口：小文件一次提交，大文件自动切片。
+ *
+ * <p>切片的另一个好处是进度按「已落盘字节」推进，25MB 视频不会出现
+ * 「99% 卡住等服务器合并」的观感。</p>
+ */
+export async function uploadFile(
+  file: File,
+  conversationId: string | null,
+  options: UploadOptions = {},
+): Promise<FileRow> {
+  if (file.size <= CHUNKED_UPLOAD_THRESHOLD) {
+    const form = new FormData()
+    form.append('file', file)
+    if (conversationId) form.append('conversationId', conversationId)
+    return uploadWithProgress<FileRow>('/files', form, options)
+  }
+  return uploadChunked(file, conversationId, options)
+}
+
+async function uploadChunked(
+  file: File,
+  conversationId: string | null,
+  options: UploadOptions,
+): Promise<FileRow> {
+  const { signal, onProgress } = options
+  const session = await request<UploadSession>('/files/uploads', {
+    method: 'POST',
+    body: JSON.stringify({
+      filename: file.name,
+      contentType: file.type || 'application/octet-stream',
+      sizeBytes: file.size,
+      conversationId: conversationId ?? undefined,
+    }),
+  })
+  const chunkSize = Math.max(1, Number(session.chunkSize) || CHUNKED_UPLOAD_THRESHOLD)
+  const totalChunks = Number(session.totalChunks) || Math.ceil(file.size / chunkSize)
+  const uploaded = new Set((session.uploadedChunks ?? []).map((index) => Number(index)))
+  const chunkLength = (index: number) =>
+    index === totalChunks - 1 ? file.size - chunkSize * index : chunkSize
+
+  let uploadedBytes = 0
+  for (const index of uploaded) uploadedBytes += chunkLength(index)
+  onProgress?.(Math.min(1, uploadedBytes / Math.max(1, file.size)))
+
+  try {
+    for (let index = 0; index < totalChunks; index++) {
+      if (uploaded.has(index)) continue
+      const start = index * chunkSize
+      const blob = file.slice(start, start + chunkLength(index))
+      await putChunk(session.uploadId, index, blob, {
+        signal,
+        onProgress: (loaded) => {
+          onProgress?.(Math.min(1, (uploadedBytes + loaded) / Math.max(1, file.size)))
+        },
+      })
+      uploadedBytes += chunkLength(index)
+      onProgress?.(Math.min(1, uploadedBytes / Math.max(1, file.size)))
+    }
+    return await request<FileRow>(`/files/uploads/${session.uploadId}/complete`, {
+      method: 'POST',
+    })
+  } catch (error) {
+    // 只有主动取消才丢弃暂存分片；网络抖动时保留，重试可以续传
+    if (signal?.aborted) {
+      void request(`/files/uploads/${session.uploadId}`, { method: 'DELETE' }).catch(() => {})
+    }
+    throw error
+  }
+}
+
+function putChunk(
+  uploadId: Id,
+  index: number,
+  blob: Blob,
+  options: { signal?: AbortSignal; onProgress?: (loaded: number) => void },
+): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open('PUT', `${BASE}/files/uploads/${uploadId}/chunks/${index}`, true)
+    const token = getToken()
+    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+    xhr.setRequestHeader('Content-Type', 'application/octet-stream')
+    xhr.responseType = 'text'
+
+    xhr.upload.onprogress = (event) => options.onProgress?.(event.loaded)
+
+    xhr.onload = () => {
+      if (xhr.status === 401) onUnauthorized()
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve()
+        return
+      }
+      let message = `分片上传失败 (${xhr.status})`
+      try {
+        const body = parseBody<unknown>(xhr.status, xhr.responseText)
+        if (body?.message) message = body.message
+      } catch {
+        /* 忽略解析失败 */
+      }
+      reject(new ApiError(xhr.status, xhr.status, message))
+    }
+    xhr.onerror = () => reject(new ApiError(0, -1, '网络连接失败，请检查网络'))
+    xhr.onabort = () => reject(new ApiError(0, -2, '已取消'))
+
+    if (options.signal) {
+      if (options.signal.aborted) {
+        reject(new ApiError(0, -2, '已取消'))
+        return
+      }
+      options.signal.addEventListener('abort', () => xhr.abort(), { once: true })
+    }
+    xhr.send(blob)
+  })
+}
+
 export const api = {
   get: <T>(path: string) => request<T>(path),
   post: <T>(path: string, body?: unknown) =>

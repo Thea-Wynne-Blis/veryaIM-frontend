@@ -442,6 +442,8 @@ function previewText(message: MessageView): string {
   if (message.recalled) return '消息已撤回'
   if (message.type === 'TEXT') return message.content
   if (message.type === 'IMAGE') return '[图片]'
+  if (message.type === 'VIDEO') return '[视频]'
+  if (message.type === 'AUDIO') return '[语音]'
   if (message.type === 'FILE') return '[文件]'
   return `[${message.type}]`
 }
@@ -639,7 +641,8 @@ watch(() => props.messages.length, () => scrollToBottom())
                 <span class="upload-name truncate">{{ task.name }}</span>
                 <span class="upload-size num">{{ humanBytes(task.sizeBytes) }}</span>
                 <span class="upload-pct num">
-                  <template v-if="task.phase === 'send'">发送中</template>
+                  <template v-if="task.phase === 'prepare'">处理中</template>
+                  <template v-else-if="task.phase === 'send'">发送中</template>
                   <template v-else>{{ Math.round(task.progress * 100) }}%</template>
                 </span>
               </span>
@@ -697,7 +700,7 @@ watch(() => props.messages.length, () => scrollToBottom())
             <button class="icon-btn sm" aria-label="表情" @click="emojiOpen = !emojiOpen">
               <Smile :size="15" :stroke-width="1.9" />
             </button>
-            <button class="icon-btn sm" aria-label="图片" @click="pickAttachment('image')">
+            <button class="icon-btn sm" aria-label="图片、视频或音频" @click="pickAttachment('image')">
               <ImageIcon :size="15" :stroke-width="1.9" />
             </button>
             <button class="icon-btn sm" aria-label="语音" @click="showNotice('语音消息暂未开放')">
@@ -712,7 +715,7 @@ watch(() => props.messages.length, () => scrollToBottom())
             <input
               ref="imageInput"
               type="file"
-              accept="image/*"
+              accept="image/*,video/*,audio/*"
               hidden
               @change="onFilePicked"
             />
@@ -732,7 +735,7 @@ watch(() => props.messages.length, () => scrollToBottom())
           <div class="composer-bar">
             <span class="composer-hint">
               <Sparkles :size="10" :stroke-width="2.2" />
-              支持发送图片与文件
+              支持发送图片、视频与文件
             </span>
             <button
               class="send-btn"
