@@ -143,6 +143,10 @@ const transfer = (userId: string | number) =>
   run(`transfer-${userId}`, () => groupsApi.transfer(props.groupId!, userId), '群主已转让')
 
 async function leave() {
+  if (isOwner.value) {
+    error.value = '你是群主，不能直接退出：请先转让群主，或解散群聊。'
+    return
+  }
   if (!confirmLeave.value) {
     confirmLeave.value = true
     window.setTimeout(() => (confirmLeave.value = false), 3000)
@@ -153,7 +157,10 @@ async function leave() {
     await groupsApi.leave(props.groupId!)
     emit('removed')
   } catch (e) {
-    error.value = e instanceof Error ? e.message : '退出失败'
+    const msg = e instanceof Error ? e.message : '退出失败'
+    error.value = /owner cannot leave/i.test(msg)
+      ? '你是群主，不能直接退出：请先转让群主，或解散群聊。'
+      : msg
   } finally {
     busy.value = ''
   }
@@ -332,8 +339,13 @@ watch(
           <!-- 危险区 -->
           <section class="block danger-zone">
             <p class="block-label" style="margin: 0">危险操作</p>
+            <p v-if="isOwner" class="danger-hint">
+              你是群主，不能直接退出。请先在成员右侧点
+              <Crown :size="11" :stroke-width="2.4" class="danger-hint-icon" />
+              转让群主，或直接解散群聊。
+            </p>
             <div class="danger-actions">
-              <button class="danger-btn" :disabled="Boolean(busy)" @click="leave">
+              <button v-if="!isOwner" class="danger-btn" :disabled="Boolean(busy)" @click="leave">
                 <LogOut :size="13" :stroke-width="2" />
                 {{ confirmLeave ? '再点一次确认退出' : '退出群聊' }}
               </button>
@@ -406,6 +418,8 @@ watch(
 .icon-mini.danger:hover:not(:disabled) { background: var(--danger-soft); color: var(--danger); }
 .icon-mini:disabled { opacity: 0.35; cursor: not-allowed; }
 .danger-zone { border-top: 1px solid var(--line); padding-top: 12px; }
+.danger-hint { display: flex; align-items: center; flex-wrap: wrap; gap: 3px; margin: 0; font-size: 11px; line-height: 1.6; color: var(--ink-3); }
+.danger-hint-icon { color: var(--accent-ink); }
 .danger-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .danger-btn { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 14px; border-radius: var(--r-sm); font-size: 12px; font-weight: 600; border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent); background: var(--danger-soft); color: var(--danger); }
 .danger-btn.solid { background: var(--danger); color: #fff; border-color: transparent; }
