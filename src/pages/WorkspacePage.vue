@@ -174,6 +174,25 @@ function authorOf(item: MessageView): string {
   return activeCard.value?.title ?? '对方'
 }
 
+/** 引用块显示被引用消息的发送者：单聊里只有「我 / 对方」。 */
+function senderNameOf(id: Id): string {
+  if (sameId(id, chat.myId)) return '我'
+  if (activeCard.value?.type === 'GROUP') {
+    return activeMembers.value.find((member) => sameId(member.userId, id))?.nickname
+      ?? `成员 ${id}`
+  }
+  return activeCard.value?.title ?? '对方'
+}
+
+function replyOf(item: MessageView): ChatMessage['replyTo'] {
+  if (!item.replyToId || !item.replyPreview) return null
+  return {
+    messageId: String(item.replyToId),
+    author: senderNameOf(item.replySenderId ?? ''),
+    preview: item.replyPreview,
+  }
+}
+
 const messages = computed<ChatMessage[]>(() =>
   chat.activeMessages.map((item) => {
     const mine = sameId(item.senderId, chat.myId)
@@ -194,12 +213,14 @@ const messages = computed<ChatMessage[]>(() =>
       recalled: !!item.recalled,
       messageId: String(item.messageId),
       clientMsgId: item.clientMsgId ?? null,
+      senderId: String(item.senderId),
       type: item.type,
       raw: decodeContent(item),
       seq: item.seq,
       mine,
       createdAt: item.createdAt,
       pending: item.pending,
+      replyTo: replyOf(item),
     }
   }),
 )
@@ -229,9 +250,13 @@ async function closeMobileChat() {
   chat.activeId = null
 }
 
-async function send(conversationId: string, text: string) {
+async function send(
+  conversationId: string,
+  text: string,
+  reply?: { messageId: string; senderId: string; preview: string } | null,
+) {
   if (conversationId !== chat.activeId) chat.activeId = conversationId
-  await chat.send(text)
+  await chat.send(text, reply)
 }
 
 async function attach(conversationId: string, file: File) {
@@ -344,8 +369,9 @@ onBeforeUnmount(() => {
     :loading="chat.loadingMessages"
     @select="select"
     @close="closeMobileChat"
-    @send="(payload) => send(payload.conversationId, payload.text)"
+    @send="(payload) => send(payload.conversationId, payload.text, payload.reply)"
     @attach="(payload) => attach(payload.conversationId, payload.file)"
+    @forward="onForward"
     @new-chat="dialogOpen = true"
   />
 
@@ -378,7 +404,7 @@ onBeforeUnmount(() => {
         :error="chat.error"
         :members="activeMembers"
         :loading="chat.loadingMessages"
-        @send="(text) => chat.activeId && send(chat.activeId, text)"
+        @send="(text, reply) => chat.activeId && send(chat.activeId, text, reply)"
         @attach="(file) => chat.activeId && attach(chat.activeId, file)"
         @toggle-detail="detailOpen = !detailOpen"
         @forward="onForward"

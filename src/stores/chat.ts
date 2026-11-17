@@ -41,6 +41,9 @@ type RealtimePayload = {
   content?: string | null
   contentEncoding?: string | null
   createdAt?: string | null
+  replyToId?: string | null
+  replySenderId?: string | null
+  replyPreview?: string | null
 }
 
 function previewOf(payload: RealtimePayload): string {
@@ -375,7 +378,14 @@ export const useChatStore = defineStore('chat', {
       }
     },
 
-    async sendRaw(type: string, content: string, preview: string, targetId?: string) {
+    /** 引用信息：只带原消息 id；发送者和原文快照由服务端回查后写入。 */
+    async sendRaw(
+      type: string,
+      content: string,
+      preview: string,
+      targetId?: string,
+      reply?: { messageId: string; senderId: string; preview: string } | null,
+    ) {
       const conversationId = targetId ?? this.activeId
       if (!conversationId) throw new Error('没有选中的会话')
       const clientMessageId = `w-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
@@ -391,6 +401,9 @@ export const useChatStore = defineStore('chat', {
         content,
         contentEncoding: type === 'TEXT' ? 'utf8' : 'base64',
         createdAt: new Date().toISOString(),
+        replyToId: reply?.messageId ?? null,
+        replySenderId: reply?.senderId ?? null,
+        replyPreview: reply?.preview ?? null,
         pending: true,
       }
       const optimisticList = this.messages[conversationId]
@@ -406,6 +419,7 @@ export const useChatStore = defineStore('chat', {
           clientMessageId,
           type,
           content,
+          ...(reply?.messageId ? { replyToId: reply.messageId } : {}),
         })
         const sent = normalize({ ...resp.message, clientMsgId: clientMessageId })
         const list = this.messages[conversationId] ?? (this.messages[conversationId] = [])
@@ -437,10 +451,10 @@ export const useChatStore = defineStore('chat', {
       }
     },
 
-    async send(text: string) {
+    async send(text: string, reply?: { messageId: string; senderId: string; preview: string } | null) {
       const value = text.trim()
       if (!this.activeId || !value) return
-      return this.sendRaw('TEXT', value, value)
+      return this.sendRaw('TEXT', value, value, undefined, reply)
     },
 
     /**
@@ -827,6 +841,9 @@ export const useChatStore = defineStore('chat', {
           content: payload.content ?? '',
           contentEncoding: payload.contentEncoding ?? undefined,
           createdAt: payload.createdAt ?? new Date().toISOString(),
+          replyToId: payload.replyToId ?? null,
+          replySenderId: payload.replySenderId ?? null,
+          replyPreview: payload.replyPreview ?? null,
         })
         list.push(view)
         list.sort((a, b) => a.seq - b.seq)
@@ -840,6 +857,9 @@ export const useChatStore = defineStore('chat', {
         existing.content = payload.content ?? existing.content
         existing.contentEncoding = payload.contentEncoding ?? existing.contentEncoding
         existing.createdAt = payload.createdAt ?? existing.createdAt
+        existing.replyToId = payload.replyToId ?? existing.replyToId
+        existing.replySenderId = payload.replySenderId ?? existing.replySenderId
+        existing.replyPreview = payload.replyPreview ?? existing.replyPreview
         existing.clientMsgId = existing.clientMsgId ?? clientMsgId ?? undefined
         existing.pending = false
         list.sort((a, b) => a.seq - b.seq)

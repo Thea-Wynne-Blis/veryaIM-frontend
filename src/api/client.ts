@@ -500,6 +500,12 @@ export type MessageView = {
   createdAt: string
   recalled?: boolean
   recalledAt?: string | null
+  /** 引用的原消息 ID，未引用时为空 */
+  replyToId?: Id | null
+  /** 被引用消息的发送者 ID */
+  replySenderId?: Id | null
+  /** 被引用消息的文本快照（发送时生成，原消息撤回后仍可读） */
+  replyPreview?: string | null
   /** 发送中占位消息（乐观渲染），收到服务端确认后移除 */
   pending?: boolean
 }
@@ -602,4 +608,17 @@ export function deviceHeaders() {
 export function resetDeviceId(): void {
   cachedDeviceId = `web-${Math.random().toString(36).slice(2, 10)}`
   localStorage.setItem(DEVICE_KEY, cachedDeviceId)
+}
+
+/* ---------- 翻译 ---------- */
+
+export type TranslateResult = {
+  from: string
+  to: string
+  text: string
+}
+
+/** 服务端代理百度翻译，密钥不出后端；相同原文与目标语言会命中服务端缓存。 */
+export function translateText(text: string, to: string): Promise<TranslateResult> {
+  return api.post<TranslateResult>('/translate', { text, to })
 }

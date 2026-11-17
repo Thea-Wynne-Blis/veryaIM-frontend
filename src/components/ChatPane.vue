@@ -28,9 +28,10 @@ import {
 import AppAvatar from './AppAvatar.vue'
 import MessageAttachment from './MessageAttachment.vue'
 import { resetMagnet, trackMagnet, trackSpotlight } from '../composables/usePointerFx'
+import { useTranslatePrefs } from '../composables/useTranslatePrefs'
 import { useChatStore } from '../stores/chat'
 import type { ChatMessage, Conversation } from '../data/workspace'
-import type { MessageView } from '../api/client'
+import { translateText, type MessageView } from '../api/client'
 import { clockTime, humanBytes } from '../utils/present'
 
 const props = defineProps<{
@@ -43,7 +44,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  (e: 'send', text: string): void
+  (e: 'send', text: string, reply?: { messageId: string; senderId: string; preview: string }): void
   (e: 'attach', file: File): void
   (e: 'toggle-detail'): void
   (e: 'forward', message: ChatMessage): void
@@ -339,10 +340,119 @@ function forwardMessage(message: ChatMessage) {
   emit('forward', message)
 }
 
+/* ---------- 引用 ---------- */
+type ReplyDraft = { messageId: string; senderId: string; author: string; preview: string }
+
+const replyTo = ref<ReplyDraft | null>(null)
+
+/** 引用快照：文本截断、附件转成占位词，与后端 replyPreview 保持一致。 */
+function quotePreviewOf(message: ChatMessage): string {
+  if (message.recalled) return '消息已撤回'
+  if (message.attachment) {
+    const kind = message.attachment.kind
+    if (kind === 'image') return '[图片]'
+    if (kind === 'video') return '[视频]'
+    if (kind === 'audio') return '[语音]'
+    return '[文件]'
+  }
+  const text = message.text.replace(/\s+/g, ' ').trim()
+  if (!text) return '消息'
+  return text.length <= 120 ? text : `${text.slice(0, 120)}…`
+}
+
+function canQuote(message: ChatMessage): boolean {
+  return !message.recalled && !message.pending
+}
+
+function quoteMessage(message: ChatMessage) {
+  closeMenu()
+  if (!canQuote(message)) {
+    showNotice('这条消息不能引用')
+    return
+  }
+  const senderId = String(message.mine ? chat.myId : (message.senderId ?? ''))
+  replyTo.value = {
+    messageId: String(message.messageId ?? message.id),
+    senderId,
+    author: message.author,
+    preview: quotePreviewOf(message),
+  }
+  nextTick(() => document.getElementById('composer-input')?.focus())
+}
+
+function cancelQuote() {
+  replyTo.value = null
+}
+
+/** 点击引用块定位原消息；不在已加载范围时给出提示。 */
+function locateMessage(messageId: string) {
+  const el = scroller.value?.querySelector<HTMLElement>(`[data-mid="${messageId}"]`)
+  if (!el) {
+    showNotice('原消息不在当前已加载的记录里')
+    return
+  }
+  el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  el.classList.add('flash')
+  window.setTimeout(() => el.classList.remove('flash'), 1200)
+}
+
+/* ---------- 翻译 ---------- */
+const { target: translateTarget, label: translateLabel } = useTranslatePrefs()
+
+/** 译文按消息 id 存；切换会话不清空，回来还能看到。 */
+const translations = ref<Record<string, { text: string; to: string }>>({})
+const translatingId = ref<string | null>(null)
+
+function midOf(message: ChatMessage): string {
+  return String(message.messageId ?? message.id)
+}
+
+function translationOf(message: ChatMessage) {
+  return translations.value[midOf(message)]
+}
+
+async function translateMessage(message: ChatMessage) {
+  closeMenu()
+  const id = midOf(message)
+  if (translations.value[id]) {
+    const next = { ...translations.value }
+    delete next[id]
+    translations.value = next
+    return
+  }
+  if (message.recalled) {
+    showNotice('已撤回的消息不能翻译')
+    return
+  }
+  if (message.attachment) {
+    showNotice('暂不支持翻译附件消息')
+    return
+  }
+  const text = message.text.trim()
+  if (!text) return
+  translatingId.value = id
+  try {
+    const result = await translateText(text, translateTarget.value)
+    translations.value = { ...translations.value, [id]: { text: result.text, to: result.to } }
+  } catch (e) {
+    showNotice(e instanceof Error ? e.message : '翻译失败')
+  } finally {
+    translatingId.value = null
+  }
+}
+
 function send() {
   if (!canSend.value) return
   disarmEnter()
-  emit('send', draft.value.trim())
+  const reply = replyTo.value
+    ? {
+        messageId: replyTo.value.messageId,
+        senderId: replyTo.value.senderId,
+        preview: replyTo.value.preview,
+      }
+    : undefined
+  emit('send', draft.value.trim(), reply)
+  replyTo.value = null
   draft.value = ''
   emojiOpen.value = false
   autoGrow()
@@ -657,6 +767,17 @@ watch(() => props.messages.length, () => scrollToBottom())
                 <Check v-if="isSelected(message)" :size="11" :stroke-width="3.2" />
               </span>
 
+              <button
+                v-if="message.replyTo"
+                class="quote-block"
+                type="button"
+                :title="`定位到 ${message.replyTo.author} 的消息`"
+                @click.stop="locateMessage(message.replyTo.messageId)"
+              >
+                <span class="quote-block-author">{{ message.replyTo.author }}</span>
+                <span class="quote-block-text">{{ message.replyTo.preview }}</span>
+              </button>
+
               <MessageAttachment
                 v-if="message.attachment"
                 :attachment="message.attachment"
@@ -665,6 +786,18 @@ watch(() => props.messages.length, () => scrollToBottom())
               <div v-else-if="message.recalled" class="bubble recalled">消息已撤回</div>
 
               <div v-else class="bubble">{{ message.text }}</div>
+
+              <div v-if="translationOf(message)" class="bubble translation">
+                <span class="translation-head">
+                  <Languages :size="11" :stroke-width="2" />
+                  译文 · {{ translateLabel }}
+                </span>
+                <span class="translation-text">{{ translationOf(message)?.text }}</span>
+              </div>
+              <div v-else-if="translatingId === midOf(message)" class="bubble translation pending">
+                <Loader2 :size="12" class="spin" />
+                翻译中…
+              </div>
 
               <div class="msg-foot">
                 <span class="num">{{ message.time }}</span>
@@ -745,6 +878,17 @@ watch(() => props.messages.length, () => scrollToBottom())
             @click="insertEmoji(emoji)"
           >
             {{ emoji }}
+          </button>
+        </div>
+
+        <div v-if="replyTo" class="quote-bar">
+          <Quote :size="13" :stroke-width="2" />
+          <span class="quote-bar-main">
+            <span class="quote-bar-author">引用 {{ replyTo.author }}</span>
+            <span class="quote-bar-text">{{ replyTo.preview }}</span>
+          </span>
+          <button class="icon-btn sm" type="button" aria-label="取消引用" @click="cancelQuote">
+            <X :size="13" :stroke-width="2" />
           </button>
         </div>
 
@@ -844,13 +988,14 @@ watch(() => props.messages.length, () => scrollToBottom())
           复制
         </button>
         <button
-          class="msg-menu-item off"
+          class="msg-menu-item"
           role="menuitem"
-          @click="showNotice('翻译需要接入翻译服务，后端暂无此接口')"
+          :disabled="menu.message.recalled || !!menu.message.attachment"
+          @click="translateMessage(menu.message)"
         >
           <Languages :size="14" :stroke-width="1.9" />
-          翻译
-          <span class="msg-menu-tag">后端未接入</span>
+          {{ translationOf(menu.message) ? '收起译文' : '翻译' }}
+          <span class="msg-menu-tag">{{ translateLabel }}</span>
         </button>
         <button class="msg-menu-item" role="menuitem" @click="forwardMessage(menu.message)">
           <Share2 :size="14" :stroke-width="1.9" />
@@ -861,13 +1006,13 @@ watch(() => props.messages.length, () => scrollToBottom())
           多选
         </button>
         <button
-          class="msg-menu-item off"
+          class="msg-menu-item"
           role="menuitem"
-          @click="showNotice('引用需要消息表增加 reply 字段，后端暂无此能力')"
+          :disabled="!canQuote(menu.message)"
+          @click="quoteMessage(menu.message)"
         >
           <Quote :size="14" :stroke-width="1.9" />
           引用
-          <span class="msg-menu-tag">后端未接入</span>
         </button>
         <div class="msg-menu-sep" />
         <button
@@ -901,6 +1046,130 @@ watch(() => props.messages.length, () => scrollToBottom())
   background: var(--surface-3);
   color: var(--ink-2);
   font-size: 11.5px;
+}
+
+/* ---------- 引用 ---------- */
+.quote-bar {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0 6px 6px;
+  padding: 6px 9px;
+  border-radius: var(--r-sm);
+  border-left: 2px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  color: var(--ink-3);
+}
+
+.quote-bar-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.quote-bar-author {
+  font-size: 10.5px;
+  font-weight: 640;
+  color: var(--ink-2);
+}
+
+.quote-bar-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+}
+
+.quote-block {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-width: 100%;
+  margin-bottom: 4px;
+  padding: 5px 9px;
+  border: 0;
+  border-left: 2px solid var(--accent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--ink) 4%, transparent);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--dur-1) var(--ease-out);
+}
+
+.quote-block:hover {
+  background: color-mix(in srgb, var(--ink) 7%, transparent);
+}
+
+.quote-block-author {
+  font-size: 10.5px;
+  font-weight: 640;
+  color: var(--ink-2);
+}
+
+.quote-block-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  color: var(--ink-3);
+}
+
+/* 定位原消息时闪一下描边，不动画布局。 */
+.msg.flash .msg-main {
+  border-radius: 14px;
+  animation: msg-flash 1.1s var(--ease-out);
+}
+
+@keyframes msg-flash {
+  0% {
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 2px transparent;
+  }
+}
+
+/* ---------- 译文 ---------- */
+.bubble.translation {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 4px;
+  border-style: dashed;
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+}
+
+.translation-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  color: var(--ink-4);
+}
+
+.translation-text {
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.bubble.translation.pending {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-3);
+  font-size: 11.5px;
+}
+
+.msg-menu-item:disabled {
+  color: var(--ink-4);
+  cursor: not-allowed;
+}
+
+.msg-menu-item:disabled:hover {
+  background: transparent;
+  color: var(--ink-4);
 }
 
 .msg-loading,

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { LogOut, Save, Shield, Smartphone, Loader2, Trash2, User } from 'lucide-vue-next'
+import { LogOut, Save, Shield, Smartphone, Loader2, Trash2, User, Languages } from 'lucide-vue-next'
 import AppAvatar from './AppAvatar.vue'
 import {
   api,
@@ -10,10 +10,16 @@ import {
 } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import { useChatStore } from '../stores/chat'
+import { useTranslatePrefs } from '../composables/useTranslatePrefs'
 import { initialsOf, relativeTime } from '../utils/present'
 
 const auth = useAuthStore()
 const chat = useChatStore()
+const {
+  target: translateTarget,
+  languages: translateLanguages,
+  setTarget: setTranslateTarget,
+} = useTranslatePrefs()
 
 const profile = ref<UserProfile | null>(null)
 const privacy = ref<UserPrivacy | null>(null)
@@ -99,6 +105,11 @@ async function savePrivacy(patch: Partial<UserPrivacy>) {
   } finally {
     privacyBusy.value = false
   }
+}
+
+function chooseTranslateTarget(event: Event) {
+  setTranslateTarget((event.target as HTMLSelectElement).value)
+  flash('翻译语言已更新')
 }
 
 async function logout() {
@@ -237,6 +248,19 @@ onMounted(load)
           </div>
 
           <div class="me-card spot" @pointermove="spot">
+            <p class="card-label"><Languages :size="11" :stroke-width="2.4" /> 翻译</p>
+            <label class="switch-row">
+              <span>译文目标语言</span>
+              <select class="select" :value="translateTarget" @change="chooseTranslateTarget">
+                <option v-for="lang in translateLanguages" :key="lang.code" :value="lang.code">
+                  {{ lang.label }}
+                </option>
+              </select>
+            </label>
+            <p class="card-hint">在聊天里右键消息选「翻译」，译文按这里的语言显示。</p>
+          </div>
+
+          <div class="me-card spot" @pointermove="spot">
             <p class="card-label"><Smartphone :size="11" :stroke-width="2.4" /> 登录设备 · {{ devices.length }}</p>
             <div v-for="d in devices" :key="d.deviceId" class="device-row">
               <span class="device-main">
@@ -286,6 +310,7 @@ onMounted(load)
 .hero-name { font-size: 17px; font-weight: 680; letter-spacing: -0.3px; }
 .hero-sub { font-size: 11.5px; color: var(--ink-3); }
 .card-label { display: flex; align-items: center; gap: 6px; font-size: 10px; font-weight: 660; letter-spacing: 0.09em; text-transform: uppercase; color: var(--ink-3); }
+.card-hint { margin: 0; font-size: 11px; line-height: 1.5; color: var(--ink-4); }
 .field { display: flex; flex-direction: column; gap: 5px; }
 .field-label { font-size: 10.5px; font-weight: 640; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); }
 .field-input { height: 36px; padding: 0 11px; border-radius: var(--r-sm); background: var(--surface-3); border: 1px solid transparent; font-size: 13.5px; }

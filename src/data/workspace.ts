@@ -49,6 +49,8 @@ export type ChatMessage = {
   recalled?: boolean
   /** 以下字段供右键菜单（复制 / 转发 / 删除）使用 */
   messageId?: string
+  /** 发送者 ID（引用时回填 senderId，避免依赖昵称反查） */
+  senderId?: string
   type?: string
   /** 服务端存储的原始 content：文本为明文，附件为 JSON 字符串 */
   raw?: string
@@ -58,6 +60,12 @@ export type ChatMessage = {
   mine?: boolean
   createdAt?: string
   pending?: boolean
+  /** 引用块：原消息 id、发送者昵称、文本快照 */
+  replyTo?: {
+    messageId: string
+    author: string
+    preview: string
+  } | null
 }
 
 export const conversations: Conversation[] = [

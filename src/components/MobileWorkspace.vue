@@ -11,17 +11,28 @@ import {
   Paperclip,
   Smile,
   Send,
-  MoreHorizontal,
   CheckCheck,
   Check,
   Loader2,
+  MoreHorizontal,
+  Copy,
+  Languages,
+  Quote,
+  Share2,
+  Trash2,
+  X,
 } from 'lucide-vue-next'
 import AppAvatar from './AppAvatar.vue'
 import ContactsView from './ContactsView.vue'
 import FilesView from './FilesView.vue'
 import MeView from './MeView.vue'
 import MessageAttachment from './MessageAttachment.vue'
+import { useTranslatePrefs } from '../composables/useTranslatePrefs'
+import { useChatStore } from '../stores/chat'
+import { translateText } from '../api/client'
 import type { ChatMessage, Conversation } from '../data/workspace'
+
+type ReplyRef = { messageId: string; senderId: string; preview: string }
 
 const props = defineProps<{
   conversations: Conversation[]
@@ -34,11 +45,14 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'select', id: string): void
-  (e: 'send', payload: { conversationId: string; text: string }): void
+  (e: 'send', payload: { conversationId: string; text: string; reply?: ReplyRef }): void
   (e: 'attach', payload: { conversationId: string; file: File }): void
+  (e: 'forward', message: ChatMessage): void
   (e: 'close'): void
   (e: 'new-chat'): void
 }>()
+
+const chat = useChatStore()
 
 type Tab = 'chat' | 'contacts' | 'files' | 'me'
 
@@ -114,6 +128,7 @@ function onFilePicked(event: Event) {
 function open(id: string) {
   emit('select', id)
   draft.value = ''
+  replyTo.value = null
 }
 
 function close() {
@@ -123,7 +138,15 @@ function close() {
 function send() {
   if (!canSend.value || !props.activeId) return
   disarmEnter()
-  emit('send', { conversationId: props.activeId, text: draft.value.trim() })
+  const reply = replyTo.value
+    ? {
+        messageId: replyTo.value.messageId,
+        senderId: replyTo.value.senderId,
+        preview: replyTo.value.preview,
+      }
+    : undefined
+  emit('send', { conversationId: props.activeId, text: draft.value.trim(), reply })
+  replyTo.value = null
   draft.value = ''
   stickToBottom.value = true
   scrollBottom(true)
@@ -201,8 +224,6 @@ watch(
   },
 )
 
-onBeforeUnmount(disarmEnter)
-
 function onBodyScroll(event: Event) {
   const el = event.target as HTMLElement
   bodyScrolled.value = el.scrollTop > 6
@@ -225,6 +246,258 @@ function grouping(messages: ChatMessage[]) {
     return { message, grouped, key, enterOrder: index, pending: message.pending }
   })
 }
+
+/* ---------- 长按菜单（移动端没有右键） ---------- */
+type MenuState = { x: number; y: number; message: ChatMessage }
+
+const MENU_WIDTH = 176
+const MENU_HEIGHT = 244
+const RECALL_WINDOW_MS = 2 * 60 * 1000
+
+const menu = ref<MenuState | null>(null)
+const notice = ref('')
+let noticeTimer: number | null = null
+
+function showNotice(text: string) {
+  notice.value = text
+  if (noticeTimer !== null) window.clearTimeout(noticeTimer)
+  noticeTimer = window.setTimeout(() => (notice.value = ''), 2200)
+}
+
+function openMenuAt(x: number, y: number, message: ChatMessage) {
+  menu.value = {
+    x: Math.max(8, Math.min(x, window.innerWidth - MENU_WIDTH - 8)),
+    y: Math.max(8, Math.min(y, window.innerHeight - MENU_HEIGHT - 8)),
+    message,
+  }
+}
+
+function closeMenu() {
+  menu.value = null
+}
+
+/**
+ * 长按 480ms 弹出菜单；手指滑动超过 10px 视为滚动，取消长按。
+ * 用 pointer 事件统一鼠标与触摸，避免 click 与 contextmenu 各来一次。
+ */
+type PressState = {
+  x: number
+  y: number
+  startX: number
+  startY: number
+  timer: number
+}
+
+let press: PressState | null = null
+
+function cancelPress() {
+  if (!press) return
+  window.clearTimeout(press.timer)
+  press = null
+}
+
+function beginPress(event: PointerEvent, message: ChatMessage) {
+  if (event.pointerType === 'mouse' && event.button !== 0) return
+  cancelPress()
+  const state: PressState = {
+    x: event.clientX,
+    y: event.clientY,
+    startX: event.clientX,
+    startY: event.clientY,
+    timer: 0,
+  }
+  state.timer = window.setTimeout(() => {
+    press = null
+    if (navigator.vibrate) navigator.vibrate(12)
+    openMenuAt(state.x, state.y, message)
+  }, 480)
+  press = state
+}
+
+function movePress(event: PointerEvent) {
+  if (!press) return
+  if (Math.hypot(event.clientX - press.startX, event.clientY - press.startY) > 10) {
+    cancelPress()
+  }
+}
+
+function onDocPointerDown(event: PointerEvent) {
+  if (!menu.value) return
+  const target = event.target as HTMLElement | null
+  if (target?.closest('.msg-menu')) return
+  closeMenu()
+}
+
+function midOf(message: ChatMessage): string {
+  return String(message.messageId ?? message.id)
+}
+
+/* ---------- 复制 / 删除 ---------- */
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text)
+    return true
+  } catch {
+    try {
+      const area = document.createElement('textarea')
+      area.value = text
+      area.style.position = 'fixed'
+      area.style.top = '-1000px'
+      area.style.opacity = '0'
+      document.body.appendChild(area)
+      area.select()
+      const ok = document.execCommand('copy')
+      area.remove()
+      return ok
+    } catch {
+      return false
+    }
+  }
+}
+
+function copyMessage(message: ChatMessage) {
+  closeMenu()
+  if (message.recalled) {
+    showNotice('这条消息没有可复制的内容')
+    return
+  }
+  const text = message.attachment
+    ? message.attachment.size
+      ? `${message.attachment.name} (${message.attachment.size})`
+      : message.attachment.name
+    : message.text
+  void copyText(text).then((ok) => showNotice(ok ? '已复制' : '复制失败'))
+}
+
+function canRecall(message: ChatMessage): boolean {
+  if (!message.mine || message.recalled || message.pending) return false
+  const createdAt = message.createdAt ? new Date(message.createdAt).getTime() : 0
+  return !!createdAt && Date.now() - createdAt <= RECALL_WINDOW_MS
+}
+
+async function deleteMessage(message: ChatMessage) {
+  closeMenu()
+  const conversationId = props.activeId
+  if (!conversationId) return
+  if (message.pending) {
+    showNotice('消息还在发送中')
+    return
+  }
+  const messageId = midOf(message)
+  if (canRecall(message)) {
+    try {
+      await chat.recallMessage(conversationId, messageId)
+      showNotice('已撤回')
+    } catch (e) {
+      showNotice(e instanceof Error ? e.message : '撤回失败')
+    }
+    return
+  }
+  chat.hideMessage(conversationId, messageId)
+  showNotice('已从本机删除')
+}
+
+/* ---------- 引用 ---------- */
+const replyTo = ref<(ReplyRef & { author: string }) | null>(null)
+
+function quotePreviewOf(message: ChatMessage): string {
+  if (message.recalled) return '消息已撤回'
+  if (message.attachment) {
+    const kind = message.attachment.kind
+    if (kind === 'image') return '[图片]'
+    if (kind === 'video') return '[视频]'
+    if (kind === 'audio') return '[语音]'
+    return '[文件]'
+  }
+  const text = message.text.replace(/\s+/g, ' ').trim()
+  if (!text) return '消息'
+  return text.length <= 120 ? text : `${text.slice(0, 120)}…`
+}
+
+function canQuote(message: ChatMessage): boolean {
+  return !message.recalled && !message.pending
+}
+
+function quoteMessage(message: ChatMessage) {
+  closeMenu()
+  if (!canQuote(message)) {
+    showNotice('这条消息不能引用')
+    return
+  }
+  replyTo.value = {
+    messageId: midOf(message),
+    senderId: String(message.mine ? chat.myId : (message.senderId ?? '')),
+    author: message.author,
+    preview: quotePreviewOf(message),
+  }
+}
+
+function cancelQuote() {
+  replyTo.value = null
+}
+
+function locateMessage(messageId: string) {
+  const el = scroller.value?.querySelector<HTMLElement>(`[data-mid="${messageId}"]`)
+  if (!el) {
+    showNotice('原消息不在当前已加载的记录里')
+    return
+  }
+  el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  el.classList.add('flash')
+  window.setTimeout(() => el.classList.remove('flash'), 1200)
+}
+
+/* ---------- 翻译 ---------- */
+const { target: translateTarget, label: translateLabel } = useTranslatePrefs()
+const translations = ref<Record<string, { text: string; to: string }>>({})
+const translatingId = ref<string | null>(null)
+
+function translationOf(message: ChatMessage) {
+  return translations.value[midOf(message)]
+}
+
+async function translateMessage(message: ChatMessage) {
+  closeMenu()
+  const id = midOf(message)
+  if (translations.value[id]) {
+    const next = { ...translations.value }
+    delete next[id]
+    translations.value = next
+    return
+  }
+  if (message.recalled) {
+    showNotice('已撤回的消息不能翻译')
+    return
+  }
+  if (message.attachment) {
+    showNotice('暂不支持翻译附件消息')
+    return
+  }
+  const text = message.text.trim()
+  if (!text) return
+  translatingId.value = id
+  try {
+    const result = await translateText(text, translateTarget.value)
+    translations.value = { ...translations.value, [id]: { text: result.text, to: result.to } }
+  } catch (e) {
+    showNotice(e instanceof Error ? e.message : '翻译失败')
+  } finally {
+    translatingId.value = null
+  }
+}
+
+function forwardMessage(message: ChatMessage) {
+  closeMenu()
+  emit('forward', message)
+}
+
+onBeforeUnmount(() => {
+  cancelPress()
+  if (noticeTimer !== null) window.clearTimeout(noticeTimer)
+  document.removeEventListener('pointerdown', onDocPointerDown, true)
+})
+
+document.addEventListener('pointerdown', onDocPointerDown, true)
 </script>
 
 <template>
@@ -343,6 +616,12 @@ function grouping(messages: ChatMessage[]) {
             v-enter="{ order: enterOrder, skip: pending }"
             class="msg"
             :class="{ out: message.side === 'out', grouped }"
+            :data-mid="message.id"
+            @pointerdown="beginPress($event, message)"
+            @pointerup="cancelPress"
+            @pointermove="movePress"
+            @pointercancel="cancelPress"
+            @contextmenu.prevent
           >
             <span v-if="!grouped && message.side === 'in'" class="msg-author">
               {{ message.author }}
@@ -357,12 +636,27 @@ function grouping(messages: ChatMessage[]) {
                 />
               </div>
               <div class="msg-main">
+                <div v-if="message.replyTo" class="m-quote" @click.stop="locateMessage(message.replyTo.messageId)">
+                  <span class="m-quote-author">{{ message.replyTo.author }}</span>
+                  <span class="m-quote-text">{{ message.replyTo.preview }}</span>
+                </div>
                 <MessageAttachment
                   v-if="message.attachment && !message.recalled"
                   :attachment="message.attachment"
                 />
                 <div v-else class="bubble" :class="{ recalled: message.recalled }">
                   {{ message.text }}
+                </div>
+                <div v-if="translationOf(message)" class="bubble m-translation">
+                  <span class="m-translation-head">
+                    <Languages :size="10" :stroke-width="2.2" />
+                    译文 · {{ translateLabel }}
+                  </span>
+                  <span>{{ translationOf(message)?.text }}</span>
+                </div>
+                <div v-else-if="translatingId === midOf(message)" class="bubble m-translation pending">
+                  <Loader2 :size="11" class="spin" />
+                  翻译中…
                 </div>
                 <div class="msg-foot">
                   <span class="num">{{ message.time }}</span>
@@ -385,6 +679,17 @@ function grouping(messages: ChatMessage[]) {
         </div>
 
         <div class="m-composer-wrap">
+          <p v-if="notice" class="m-notice">{{ notice }}</p>
+          <div v-if="replyTo" class="m-quote-bar">
+            <Quote :size="13" :stroke-width="2" />
+            <span class="m-quote-bar-main">
+              <span class="m-quote-bar-author">引用 {{ replyTo.author }}</span>
+              <span class="m-quote-bar-text">{{ replyTo.preview }}</span>
+            </span>
+            <button class="icon-btn" type="button" aria-label="取消引用" @click="cancelQuote">
+              <X :size="14" :stroke-width="2" />
+            </button>
+          </div>
           <div class="m-composer">
             <button class="icon-btn" aria-label="表情">
               <Smile :size="20" :stroke-width="1.9" />
@@ -408,6 +713,51 @@ function grouping(messages: ChatMessage[]) {
         </div>
       </section>
     </Transition>
+
+    <Teleport to="body">
+      <div
+        v-if="menu"
+        class="msg-menu"
+        role="menu"
+        :style="{ left: `${menu.x}px`, top: `${menu.y}px` }"
+        @contextmenu.prevent
+        @pointerdown.stop
+      >
+        <button class="msg-menu-item" role="menuitem" @click="copyMessage(menu.message)">
+          <Copy :size="15" :stroke-width="1.9" />
+          复制
+        </button>
+        <button
+          class="msg-menu-item"
+          role="menuitem"
+          :disabled="menu.message.recalled || !!menu.message.attachment"
+          @click="translateMessage(menu.message)"
+        >
+          <Languages :size="15" :stroke-width="1.9" />
+          {{ translationOf(menu.message) ? '收起译文' : '翻译' }}
+          <span class="msg-menu-tag">{{ translateLabel }}</span>
+        </button>
+        <button class="msg-menu-item" role="menuitem" @click="forwardMessage(menu.message)">
+          <Share2 :size="15" :stroke-width="1.9" />
+          转发
+        </button>
+        <button
+          class="msg-menu-item"
+          role="menuitem"
+          :disabled="!canQuote(menu.message)"
+          @click="quoteMessage(menu.message)"
+        >
+          <Quote :size="15" :stroke-width="1.9" />
+          引用
+        </button>
+        <div class="msg-menu-sep" />
+        <button class="msg-menu-item danger" role="menuitem" @click="deleteMessage(menu.message)">
+          <Trash2 :size="15" :stroke-width="1.9" />
+          删除
+          <span v-if="!canRecall(menu.message)" class="msg-menu-tag">仅本机</span>
+        </button>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -443,6 +793,129 @@ function grouping(messages: ChatMessage[]) {
   color: var(--ink-3);
   font-size: 11.5px;
   font-style: italic;
+}
+
+.m-quote {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-width: 100%;
+  margin-bottom: 4px;
+  padding: 4px 8px;
+  border-left: 2px solid var(--accent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
+}
+
+.m-quote-author {
+  font-size: 10px;
+  font-weight: 640;
+  color: var(--ink-2);
+}
+
+.m-quote-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--ink-3);
+}
+
+/* 长按选中时不弹系统文本选择菜单 */
+.m-chat .msg {
+  -webkit-touch-callout: none;
+  user-select: none;
+}
+
+.msg.flash .msg-main {
+  border-radius: 14px;
+  animation: msg-flash 1.1s var(--ease-out);
+}
+
+@keyframes msg-flash {
+  0% {
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 2px transparent;
+  }
+}
+
+.m-quote-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 10px 6px;
+  padding: 6px 8px;
+  border-radius: var(--r-sm);
+  border-left: 2px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  color: var(--ink-3);
+}
+
+.m-quote-bar-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.m-quote-bar-author {
+  font-size: 10px;
+  font-weight: 640;
+  color: var(--ink-2);
+}
+
+.m-quote-bar-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+
+.m-notice {
+  margin: 0 12px 6px;
+  padding: 5px 9px;
+  border-radius: var(--r-sm);
+  background: var(--surface-3);
+  color: var(--ink-2);
+  font-size: 11px;
+}
+
+.bubble.m-translation {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 4px;
+  border-style: dashed;
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+  font-size: 13px;
+}
+
+.bubble.m-translation.pending {
+  flex-direction: row;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--ink-3);
+}
+
+.m-translation-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 9.5px;
+  color: var(--ink-4);
+}
+
+.msg-menu-item:disabled {
+  color: var(--ink-4);
+  cursor: not-allowed;
+}
+
+.msg-menu-item:disabled:hover {
+  background: transparent;
+  color: var(--ink-4);
 }
 
 .spin {
