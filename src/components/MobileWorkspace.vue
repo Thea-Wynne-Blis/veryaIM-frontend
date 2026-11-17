@@ -159,7 +159,9 @@ function onBodyScroll(event: Event) {
   bodyScrolled.value = el.scrollTop > 6
 }
 
+/** 消息不播逐条入场动画（同 ChatPane），只给每条一个稳定 key：乐观占位确认后复用同一节点 */
 function grouping(messages: ChatMessage[]) {
+  const usedKeys = new Set<string>()
   return messages.map((message, index) => {
     const prev = messages[index - 1]
     const grouped =
@@ -168,7 +170,10 @@ function grouping(messages: ChatMessage[]) {
       prev.author === message.author &&
       !prev.attachment &&
       !message.attachment
-    return { message, grouped }
+    let key = message.clientMsgId ? `c:${message.clientMsgId}` : `s:${message.id}`
+    if (usedKeys.has(key)) key = `s:${message.id}:${index}`
+    usedKeys.add(key)
+    return { message, grouped, key }
   })
 }
 </script>
@@ -284,11 +289,10 @@ function grouping(messages: ChatMessage[]) {
           <p v-if="error" class="m-error">{{ error }}</p>
           <p class="day-divider">今天</p>
           <div
-            v-for="({ message, grouped }, index) in grouping(currentMessages)"
-            :key="message.id"
+            v-for="({ message, grouped, key }) in grouping(currentMessages)"
+            :key="key"
             class="msg"
             :class="{ out: message.side === 'out', grouped }"
-            :style="{ animationDelay: `${Math.min(index * 22, 200)}ms` }"
           >
             <span v-if="!grouped && message.side === 'in'" class="msg-author">
               {{ message.author }}

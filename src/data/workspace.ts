@@ -52,6 +52,8 @@ export type ChatMessage = {
   type?: string
   /** 服务端存储的原始 content：文本为明文，附件为 JSON 字符串 */
   raw?: string
+  /** 发送方生成的幂等 id：乐观占位与服务端消息共用，用作列表 key 保持节点不重建 */
+  clientMsgId?: string | null
   seq?: number
   mine?: boolean
   createdAt?: string

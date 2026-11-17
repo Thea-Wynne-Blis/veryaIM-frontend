@@ -193,6 +193,7 @@ const messages = computed<ChatMessage[]>(() =>
       read: mine && !!peerReadSeq && item.seq <= peerReadSeq,
       recalled: !!item.recalled,
       messageId: String(item.messageId),
+      clientMsgId: item.clientMsgId ?? null,
       type: item.type,
       raw: decodeContent(item),
       seq: item.seq,

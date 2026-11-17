@@ -106,8 +106,14 @@ const onlineCount = computed(() =>
     : 0,
 )
 
-const grouping = computed(() =>
-  props.messages.map((message, index) => {
+/**
+ * 消息气泡不做逐条入场动画：新消息（尤其是自己发的）应该在按下回车的下一帧就出现。
+ * 这里只负责分组，以及给每条消息一个稳定 key —— 乐观占位与服务端消息共用
+ * clientMsgId，确认到达时 Vue 复用同一个节点，不会重建重排。
+ */
+const grouping = computed(() => {
+  const usedKeys = new Set<string>()
+  return props.messages.map((message, index) => {
     const prev = props.messages[index - 1]
     const grouped =
       !!prev &&
@@ -115,9 +121,12 @@ const grouping = computed(() =>
       prev.author === message.author &&
       !prev.attachment &&
       !message.attachment
-    return { message, grouped }
-  }),
-)
+    let key = message.clientMsgId ? `c:${message.clientMsgId}` : `s:${message.id}`
+    if (usedKeys.has(key)) key = `s:${message.id}:${index}`
+    usedKeys.add(key)
+    return { message, grouped, key }
+  })
+})
 
 function showNotice(text: string) {
   notice.value = text
@@ -562,12 +571,11 @@ watch(() => props.messages.length, () => scrollToBottom())
         </div>
 
         <div
-          v-for="({ message, grouped }, index) in grouping"
-          :key="message.id"
+          v-for="({ message, grouped, key }) in grouping"
+          :key="key"
           class="msg"
           :class="{ out: message.side === 'out', grouped, selecting, selected: isSelected(message) }"
           :data-mid="message.id"
-          :style="{ animationDelay: `${Math.min(index * 24, 260)}ms` }"
           @contextmenu.prevent="openMenu($event, message)"
           @click="selecting && toggleSelect(message)"
         >

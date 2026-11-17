@@ -408,13 +408,18 @@ export const useChatStore = defineStore('chat', {
           content,
         })
         const sent = normalize({ ...resp.message, clientMsgId: clientMessageId })
-        const list = (this.messages[conversationId] ?? [])
-          .filter((item) => item.clientMsgId !== clientMessageId)
-        if (!list.some((item) => sameId(item.messageId, sent.messageId))) {
+        const list = this.messages[conversationId] ?? (this.messages[conversationId] = [])
+        // 原地确认乐观占位：数组里始终留着这条消息，列表节点不会被销毁重建
+        // （否则气泡会先消失再重新播放入场动画，看起来“卡一下”）
+        const placeholder = list.find((item) => item.clientMsgId === clientMessageId)
+        if (placeholder) {
+          Object.assign(placeholder, sent)
+          placeholder.pending = false
+          list.sort((a, b) => a.seq - b.seq)
+        } else if (!list.some((item) => sameId(item.messageId, sent.messageId))) {
           list.push(sent)
           list.sort((a, b) => a.seq - b.seq)
         }
-        this.messages[conversationId] = list
         const card = this.cards.find((item) => item.conversationId === conversationId)
         if (card) {
           card.lastMessagePreview = preview
@@ -806,12 +811,12 @@ export const useChatStore = defineStore('chat', {
       const clientMsgId = payload.clientMsgId ?? undefined
       const mine = sameId(payload.senderId ?? '', this.myId)
       const list = this.messages[conversationId] ?? (this.messages[conversationId] = [])
-      const duplicated = list.some(
+      const existing = list.find(
         (item) =>
           sameId(item.messageId, messageId)
           || (!!clientMsgId && item.clientMsgId === clientMsgId),
       )
-      if (!duplicated) {
+      if (!existing) {
         const view = normalize({
           messageId,
           conversationId,
@@ -825,12 +830,20 @@ export const useChatStore = defineStore('chat', {
         })
         list.push(view)
         list.sort((a, b) => a.seq - b.seq)
+      } else if (existing.pending) {
+        // 推送先于发送响应到达：直接把乐观占位升级成服务端消息，
+        // 不要先删掉再插入，否则这条气泡会闪一下（节点重建会重播入场动画）。
+        existing.messageId = messageId
+        existing.seq = payload.seq ?? existing.seq
+        existing.senderId = payload.senderId ?? existing.senderId
+        existing.type = payload.messageType ?? existing.type
+        existing.content = payload.content ?? existing.content
+        existing.contentEncoding = payload.contentEncoding ?? existing.contentEncoding
+        existing.createdAt = payload.createdAt ?? existing.createdAt
+        existing.clientMsgId = existing.clientMsgId ?? clientMsgId ?? undefined
+        existing.pending = false
+        list.sort((a, b) => a.seq - b.seq)
       }
-      // 服务端确认到达：移除同 clientMsgId 的乐观占位
-      const cleaned = clientMsgId
-        ? list.filter((item) => !(item.pending && item.clientMsgId === clientMsgId))
-        : list
-      if (cleaned !== list) this.messages[conversationId] = cleaned
 
       const card = this.cards.find((item) => item.conversationId === conversationId)
       if (card) {

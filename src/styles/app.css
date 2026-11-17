@@ -964,7 +964,6 @@
   max-width: 100%;
   /* 底部预留时间 / 已读位置（原来在文档流内，现在绝对定位） */
   padding: 2px 0 19px;
-  animation: bubble-in var(--dur-3) var(--ease-out) backwards;
 }
 
 .msg.grouped {
