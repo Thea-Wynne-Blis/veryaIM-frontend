@@ -1901,7 +1901,82 @@
   padding: 9px 16px;
   width: 100%;
   text-align: left;
-  transition: background var(--dur-1) var(--ease-out);
+  background: var(--canvas);
+  touch-action: pan-y;
+  user-select: none;
+  -webkit-user-select: none;
+  transition:
+    background var(--dur-1) var(--ease-out),
+    transform 220ms var(--ease-out);
+  position: relative;
+  z-index: 1;
+}
+
+/* 跟手时不播过渡，松手后才有回弹/吸附 */
+.m-conv.swiping {
+  transition: none;
+}
+
+.m-swipe {
+  position: relative;
+  overflow: hidden;
+}
+
+.m-swipe-actions {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: stretch;
+  z-index: 0;
+}
+
+.m-swipe-actions.armed {
+  left: 0;
+}
+
+.m-swipe-btn {
+  width: 66px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1.2;
+  color: #fff;
+  text-align: center;
+}
+
+.m-swipe-btn:active {
+  filter: brightness(0.92);
+}
+
+.m-swipe-btn.unread {
+  background: color-mix(in srgb, var(--accent) 88%, #000);
+}
+
+.m-swipe-btn.hide {
+  background: #6b7280;
+}
+
+.m-swipe-btn.danger {
+  background: var(--danger);
+}
+
+/* 二级确认：整行铺满，避免「清空记录同时不显示聊天」被截断 */
+.m-swipe-btn.wide {
+  width: 100%;
+  flex-direction: row;
+  gap: 8px;
+  font-size: 12.5px;
+  padding: 0 16px;
+}
+
+.m-swipe-btn.wide:active {
+  background: #b93636;
 }
 
 .m-conv:active {

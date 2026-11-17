@@ -484,6 +484,20 @@ export type ConversationCard = {
   lastMessagePreview: string
   lastMessageAt: string | null
   updatedAt: string
+  /** 当前用户是否置顶了该会话 */
+  pinned: boolean
+  /** 当前用户是否对会话开启了消息免打扰 */
+  muted: boolean
+  /** 当前用户是否把会话设为「不显示」（收到新消息后会自动恢复） */
+  hidden: boolean
+}
+
+/** 会话列表项设置：只提交要改的那一项。 */
+export type ConversationPrefs = {
+  pinned?: boolean
+  muted?: boolean
+  hidden?: boolean
+  unread?: boolean
 }
 
 export type MessageView = {
@@ -621,4 +635,22 @@ export type TranslateResult = {
 /** 服务端代理百度翻译，密钥不出后端；相同原文与目标语言会命中服务端缓存。 */
 export function translateText(text: string, to: string): Promise<TranslateResult> {
   return api.post<TranslateResult>('/translate', { text, to })
+}
+
+/* ---------- 会话列表项设置 ---------- */
+
+/** 置顶 / 免打扰 / 不显示 / 手动未读，只影响当前用户。 */
+export function updateConversationPrefs(
+  conversationId: string,
+  prefs: ConversationPrefs,
+): Promise<void> {
+  return api.put<void>(`/conversations/${conversationId}/prefs`, prefs)
+}
+
+/**
+ * 删除聊天记录：清空自己这边的记录并设为不显示。
+ * 消息仍保留在服务端，会话另一方的记录不受影响。
+ */
+export function clearConversation(conversationId: string): Promise<void> {
+  return api.post<void>(`/conversations/${conversationId}/clear`)
 }

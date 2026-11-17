@@ -2,9 +2,11 @@ import { defineStore } from 'pinia'
 import {
   ApiError,
   api,
+  clearConversation,
   getToken,
   sameId,
   seedFilePreview,
+  updateConversationPrefs,
   uploadFile,
   type ConversationCard,
   type GroupDetail,
@@ -200,6 +202,10 @@ export const useChatStore = defineStore('chat', {
     totalUnread(state): number {
       return state.cards.reduce((sum, item) => sum + item.unreadCount, 0)
     },
+    /** 会话列表：跳过自己设为「不显示」的会话（新消息到达时服务端会把它带回）。 */
+    visibleCards(state): ConversationCard[] {
+      return state.cards.filter((item) => !item.hidden)
+    },
     isPinned: (state) => (conversationId: string) => state.pinnedIds.includes(conversationId),
     isMuted: (state) => (conversationId: string) => state.mutedIds.includes(conversationId),
     /** 对方（群聊为已读人数最多的成员）已读到的最大 seq。 */
@@ -232,24 +238,123 @@ export const useChatStore = defineStore('chat', {
       this.savePrefs()
     },
 
+    /** 置顶 / 免打扰 / 不显示：写服务端，本地先乐观更新，失败回滚。 */
+    async setPinned(conversationId: string, pinned: boolean) {
+      await this.applyPrefs(conversationId, { pinned }, () => {
+        this.pinnedIds = pinned
+          ? [...new Set([...this.pinnedIds, conversationId])]
+          : this.pinnedIds.filter((id) => id !== conversationId)
+      }, () => {
+        this.pinnedIds = !pinned
+          ? [...new Set([...this.pinnedIds, conversationId])]
+          : this.pinnedIds.filter((id) => id !== conversationId)
+      })
+    },
+
+    async setMuted(conversationId: string, muted: boolean) {
+      await this.applyPrefs(conversationId, { muted }, () => {
+        this.mutedIds = muted
+          ? [...new Set([...this.mutedIds, conversationId])]
+          : this.mutedIds.filter((id) => id !== conversationId)
+      }, () => {
+        this.mutedIds = !muted
+          ? [...new Set([...this.mutedIds, conversationId])]
+          : this.mutedIds.filter((id) => id !== conversationId)
+      })
+    },
+
+    /** 「不显示」：从列表里移除，收到新消息后会由服务端重新带回。 */
+    async hideConversation(conversationId: string) {
+      const card = this.cards.find((item) => item.conversationId === conversationId)
+      if (card) card.hidden = true
+      try {
+        await updateConversationPrefs(conversationId, { hidden: true })
+      } catch (e) {
+        if (card) card.hidden = false
+        this.error = e instanceof Error ? e.message : '操作失败'
+        throw e
+      }
+    },
+
+    /** 标为未读：服务端记标记，本地立刻把未读数顶到 1。 */
+    async markUnread(conversationId: string) {
+      const card = this.cards.find((item) => item.conversationId === conversationId)
+      const previous = card?.unreadCount ?? 0
+      if (card) card.unreadCount = Math.max(1, previous)
+      try {
+        await updateConversationPrefs(conversationId, { unread: true })
+      } catch (e) {
+        if (card) card.unreadCount = previous
+        this.error = e instanceof Error ? e.message : '操作失败'
+        throw e
+      }
+    },
+
+    /**
+     * 删除聊天记录：只清空自己这边，对方不受影响。
+     * 服务端抬高本人可见水位并设为不显示，本地同步清掉消息缓存。
+     */
+    async deleteConversation(conversationId: string) {
+      await clearConversation(conversationId)
+      delete this.messages[conversationId]
+      const card = this.cards.find((item) => item.conversationId === conversationId)
+      if (card) {
+        card.hidden = true
+        card.pinned = false
+        card.unreadCount = 0
+        card.lastMessagePreview = ''
+      }
+      this.pinnedIds = this.pinnedIds.filter((id) => id !== conversationId)
+      if (this.activeId === conversationId) this.activeId = null
+    },
+
+    async applyPrefs(
+      conversationId: string,
+      prefs: { pinned?: boolean; muted?: boolean; hidden?: boolean },
+      apply: () => void,
+      rollback: () => void,
+    ) {
+      apply()
+      const card = this.cards.find((item) => item.conversationId === conversationId)
+      const previousCard = card
+        ? { pinned: card.pinned, muted: card.muted, hidden: card.hidden }
+        : null
+      if (card) {
+        if (prefs.pinned !== undefined) card.pinned = prefs.pinned
+        if (prefs.muted !== undefined) card.muted = prefs.muted
+        if (prefs.hidden !== undefined) card.hidden = prefs.hidden
+      }
+      try {
+        await updateConversationPrefs(conversationId, prefs)
+        this.savePrefs()
+      } catch (e) {
+        rollback()
+        if (card && previousCard) {
+          card.pinned = previousCard.pinned
+          card.muted = previousCard.muted
+          card.hidden = previousCard.hidden
+        }
+        this.error = e instanceof Error ? e.message : '操作失败'
+        throw e
+      }
+    },
+
+    /** 快捷方式：详情面板的置顶 / 免打扰按钮。 */
     togglePin(conversationId: string) {
-      this.pinnedIds = this.pinnedIds.includes(conversationId)
-        ? this.pinnedIds.filter((id) => id !== conversationId)
-        : [...this.pinnedIds, conversationId]
-      this.savePrefs()
+      void this.setPinned(conversationId, !this.pinnedIds.includes(conversationId))
     },
 
     toggleMute(conversationId: string) {
-      this.mutedIds = this.mutedIds.includes(conversationId)
-        ? this.mutedIds.filter((id) => id !== conversationId)
-        : [...this.mutedIds, conversationId]
-      this.savePrefs()
+      void this.setMuted(conversationId, !this.mutedIds.includes(conversationId))
     },
 
     async loadCards() {
       this.loadingCards = true
       try {
         this.cards = await api.get<ConversationCard[]>('/conversations/cards')
+        // 置顶 / 免打扰以服务端为准，换设备登录也能保持一致。
+        this.pinnedIds = this.cards.filter((item) => item.pinned).map((item) => item.conversationId)
+        this.mutedIds = this.cards.filter((item) => item.muted).map((item) => item.conversationId)
         if (this.error === '加载会话失败') this.error = null
       } catch (e) {
         this.error = e instanceof Error ? e.message : '加载会话失败'
@@ -872,6 +977,8 @@ export const useChatStore = defineStore('chat', {
           card.lastMessageAt = payload.createdAt ?? card.lastMessageAt
           card.lastMessageType = payload.messageType ?? card.lastMessageType
           card.lastMessagePreview = previewOf(payload)
+          // 新消息比「不显示」的时间更晚：会话重新出现，与服务端卡片接口的判定一致。
+          card.hidden = false
         }
         if (conversationId === this.activeId) {
           card.unreadCount = 0

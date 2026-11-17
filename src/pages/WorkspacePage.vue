@@ -71,7 +71,7 @@ function timeOfCard(card: { lastMessageAt: string | null; updatedAt: string }): 
 }
 
 const sortedCards = computed(() =>
-  [...chat.cards].sort((a, b) => {
+  [...chat.visibleCards].sort((a, b) => {
     const pinnedA = chat.pinnedIds.includes(a.conversationId) ? 1 : 0
     const pinnedB = chat.pinnedIds.includes(b.conversationId) ? 1 : 0
     if (pinnedA !== pinnedB) return pinnedB - pinnedA
@@ -315,6 +315,43 @@ function onToggleMute() {
   if (chat.activeId) chat.toggleMute(chat.activeId)
 }
 
+/* ---------- 会话列表右键 / 左滑操作 ---------- */
+function onConvPin(id: string, pinned: boolean) {
+  void chat.setPinned(id, pinned).catch(reportActionError)
+}
+
+function onConvMute(id: string, muted: boolean) {
+  void chat.setMuted(id, muted).catch(reportActionError)
+}
+
+function onConvUnread(id: string) {
+  void chat.markUnread(id).catch(reportActionError)
+}
+
+function onConvHide(id: string) {
+  if (chat.activeId === id) {
+    chat.activeId = null
+    if (route.params.conversationId) router.replace({ name: 'chat' })
+  }
+  void chat.hideConversation(id).catch(reportActionError)
+}
+
+async function onConvDelete(id: string) {
+  if (chat.activeId === id) {
+    chat.activeId = null
+    if (route.params.conversationId) router.replace({ name: 'chat' })
+  }
+  try {
+    await chat.deleteConversation(id)
+  } catch (e) {
+    reportActionError(e)
+  }
+}
+
+function reportActionError(e: unknown) {
+  chat.error = e instanceof Error ? e.message : '操作失败'
+}
+
 watch(
   () => route.params.conversationId as string | undefined,
   (id) => {
@@ -329,9 +366,9 @@ watch(
     const fromRoute = route.params.conversationId as string | undefined
     if (fromRoute && fromRoute !== chat.activeId) {
       select(fromRoute, false)
-    } else if (!isMobile.value && !chat.activeId && chat.cards[0]) {
+    } else if (!isMobile.value && !chat.activeId && chat.visibleCards[0]) {
       // 移动端进入消息页应先看到会话列表，而不是自动打开第一个会话。
-      select(chat.cards[0].conversationId)
+      select(chat.visibleCards[0].conversationId)
     }
   },
 )
@@ -343,7 +380,7 @@ onMounted(async () => {
   await Promise.allSettled([chat.loadCards(), auth.refresh()])
   if (view.value === 'chat') {
     const fromRoute = route.params.conversationId as string | undefined
-    const first = fromRoute ?? (isMobile.value ? null : chat.cards[0]?.conversationId ?? null)
+    const first = fromRoute ?? (isMobile.value ? null : chat.visibleCards[0]?.conversationId ?? null)
     if (first) await select(first, false)
   }
   chat.startPolling(3000)
@@ -373,6 +410,9 @@ onBeforeUnmount(() => {
     @attach="(payload) => attach(payload.conversationId, payload.file)"
     @forward="onForward"
     @new-chat="dialogOpen = true"
+    @mark-unread="onConvUnread"
+    @hide="onConvHide"
+    @delete="onConvDelete"
   />
 
   <div v-else class="stage">
@@ -395,6 +435,11 @@ onBeforeUnmount(() => {
         @select="select"
         @new-chat="dialogOpen = true"
         @new-group="createGroupOpen = true"
+        @pin="onConvPin"
+        @unread="onConvUnread"
+        @mute="onConvMute"
+        @hide="onConvHide"
+        @remove="onConvDelete"
       />
 
       <ChatPane

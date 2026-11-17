@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { Search, Plus, Pin, BellOff, UserPlus, Users } from 'lucide-vue-next'
+import { Search, Plus, Pin, Bell, BellOff, UserPlus, Users, MailOpen, EyeOff, Trash2, PinOff } from 'lucide-vue-next'
 import AppAvatar from './AppAvatar.vue'
 import { trackSpotlight } from '../composables/usePointerFx'
 import type { Conversation } from '../data/workspace'
@@ -16,6 +16,11 @@ const emit = defineEmits<{
   (e: 'select', id: string): void
   (e: 'new-chat'): void
   (e: 'new-group'): void
+  (e: 'pin', id: string, pinned: boolean): void
+  (e: 'unread', id: string): void
+  (e: 'mute', id: string, muted: boolean): void
+  (e: 'hide', id: string): void
+  (e: 'remove', id: string): void
 }>()
 
 type Filter = 'all' | 'unread'
@@ -46,8 +51,69 @@ function closeMenu() {
   menuOpen.value = false
 }
 
-onMounted(() => document.addEventListener('click', closeMenu))
-onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
+/* ---------- 会话右键菜单 ---------- */
+type ConvMenuState = { x: number; y: number; item: Conversation }
+
+const MENU_WIDTH = 172
+const MENU_HEIGHT = 5 * 34 + 8
+const convMenu = ref<ConvMenuState | null>(null)
+/** 待确认删除的会话：删除会清空自己这边的聊天记录 */
+const deleteTarget = ref<Conversation | null>(null)
+
+function openConvMenu(event: MouseEvent, item: Conversation) {
+  event.preventDefault()
+  menuOpen.value = false
+  convMenu.value = {
+    x: Math.max(8, Math.min(event.clientX, window.innerWidth - MENU_WIDTH - 8)),
+    y: Math.max(8, Math.min(event.clientY, window.innerHeight - MENU_HEIGHT - 8)),
+    item,
+  }
+}
+
+function closeConvMenu() {
+  convMenu.value = null
+}
+
+function onDocPointerDown(event: PointerEvent) {
+  const target = event.target as HTMLElement | null
+  if (target?.closest('.conv-menu')) return
+  closeConvMenu()
+}
+
+function pick(action: (item: Conversation) => void) {
+  const item = convMenu.value?.item
+  convMenu.value = null
+  if (item) action(item)
+}
+
+function askDelete() {
+  const item = convMenu.value?.item
+  convMenu.value = null
+  if (item) deleteTarget.value = item
+}
+
+function confirmDelete() {
+  const item = deleteTarget.value
+  deleteTarget.value = null
+  if (item) emit('remove', item.id)
+}
+
+function onKeydown(event: KeyboardEvent) {
+  if (event.key !== 'Escape') return
+  convMenu.value = null
+  deleteTarget.value = null
+}
+
+onMounted(() => {
+  document.addEventListener('click', closeMenu)
+  document.addEventListener('keydown', onKeydown)
+  document.addEventListener('pointerdown', onDocPointerDown, true)
+})
+onBeforeUnmount(() => {
+  document.removeEventListener('click', closeMenu)
+  document.removeEventListener('keydown', onKeydown)
+  document.removeEventListener('pointerdown', onDocPointerDown, true)
+})
 </script>
 
 <template>
@@ -140,6 +206,7 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
           :style="{ animationDelay: `${index * 26}ms` }"
           @pointermove="trackSpotlight"
           @click="emit('select', item.id)"
+          @contextmenu.prevent="openConvMenu($event, item)"
         >
           <AppAvatar
             :initials="item.initials"
@@ -189,6 +256,7 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
         :style="{ animationDelay: `${index * 26}ms` }"
         @pointermove="trackSpotlight"
         @click="emit('select', item.id)"
+        @contextmenu.prevent="openConvMenu($event, item)"
       >
         <AppAvatar
           :initials="item.initials"
@@ -224,6 +292,58 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
         没有匹配的会话，换个关键词试试。
       </p>
     </div>
+
+    <!-- 会话右键菜单 -->
+    <Teleport to="body">
+      <div
+        v-if="convMenu"
+        class="conv-menu"
+        role="menu"
+        :style="{ left: `${convMenu.x}px`, top: `${convMenu.y}px` }"
+        @contextmenu.prevent
+        @pointerdown.stop
+      >
+        <button class="conv-menu-item" role="menuitem" @click.stop="pick((item) => emit('pin', item.id, !item.pinned))">
+          <PinOff v-if="convMenu.item.pinned" :size="14" :stroke-width="1.9" />
+          <Pin v-else :size="14" :stroke-width="1.9" />
+          {{ convMenu.item.pinned ? '取消置顶' : '置顶' }}
+        </button>
+        <button class="conv-menu-item" role="menuitem" @click.stop="pick((item) => emit('unread', item.id))">
+          <MailOpen :size="14" :stroke-width="1.9" />
+          标为未读
+        </button>
+        <button class="conv-menu-item" role="menuitem" @click.stop="pick((item) => emit('mute', item.id, !item.muted))">
+          <Bell v-if="convMenu.item.muted" :size="14" :stroke-width="1.9" />
+          <BellOff v-else :size="14" :stroke-width="1.9" />
+          {{ convMenu.item.muted ? '允许消息通知' : '消息免打扰' }}
+        </button>
+        <button class="conv-menu-item" role="menuitem" @click.stop="pick((item) => emit('hide', item.id))">
+          <EyeOff :size="14" :stroke-width="1.9" />
+          不显示
+        </button>
+        <div class="conv-menu-sep" />
+        <button class="conv-menu-item danger" role="menuitem" @click.stop="askDelete">
+          <Trash2 :size="14" :stroke-width="1.9" />
+          删除
+        </button>
+      </div>
+    </Teleport>
+
+    <!-- 删除确认 -->
+    <Teleport to="body">
+      <div v-if="deleteTarget" class="confirm-veil" @click.self="deleteTarget = null">
+        <div class="confirm-card" role="dialog" aria-modal="true" aria-labelledby="conv-del-title">
+          <h2 id="conv-del-title" class="confirm-title">
+            删除与“{{ deleteTarget.name }}”的聊天？
+          </h2>
+          <p class="confirm-text">删除聊天后，聊天记录也将被清空。</p>
+          <div class="confirm-actions">
+            <button class="confirm-btn danger" @click="confirmDelete">删除</button>
+            <button class="confirm-btn" @click="deleteTarget = null">取消</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </section>
 </template>
 
@@ -271,6 +391,131 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenu))
 .fade-enter-from,
 .fade-leave-to {
   opacity: 0;
+}
+
+/* ---------- 会话右键菜单 ---------- */
+.conv-menu {
+  position: fixed;
+  z-index: 60;
+  min-width: 172px;
+  padding: 4px;
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-pop);
+  animation: pop-in 140ms var(--ease-spring);
+}
+
+.conv-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 34px;
+  padding: 0 9px;
+  border-radius: var(--r-xs);
+  font-size: 12.5px;
+  font-weight: 550;
+  color: var(--ink-2);
+  text-align: left;
+}
+
+.conv-menu-item:hover {
+  background: var(--surface-hover);
+  color: var(--ink);
+}
+
+.conv-menu-item.danger {
+  color: var(--danger);
+}
+
+.conv-menu-item.danger:hover {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.conv-menu-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--line);
+}
+
+/* ---------- 删除确认 ---------- */
+.confirm-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(14, 16, 18, 0.34);
+  backdrop-filter: blur(2px);
+  animation: fade-in 160ms var(--ease-out);
+}
+
+.confirm-card {
+  width: min(340px, 100%);
+  padding: 20px 20px 16px;
+  border-radius: var(--r-md);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-pop);
+  animation: pop-in 180ms var(--ease-spring);
+}
+
+.confirm-title {
+  margin: 0 0 8px;
+  font-size: 14.5px;
+  font-weight: 640;
+  color: var(--ink);
+  text-align: center;
+}
+
+.confirm-text {
+  margin: 0 0 18px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--ink-3);
+  text-align: center;
+}
+
+.confirm-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.confirm-btn {
+  height: 34px;
+  border-radius: var(--r-sm);
+  background: var(--surface-3);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.confirm-btn:hover {
+  background: var(--surface-hover);
+  color: var(--ink);
+}
+
+.confirm-btn.danger {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.confirm-btn.danger:hover {
+  background: var(--danger);
+  color: #fff;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 .empty-text {
   padding: 40px 12px;
