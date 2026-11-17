@@ -959,9 +959,11 @@
 
 .msg {
   display: flex;
-  gap: 9px;
+  flex-direction: column;
+  gap: 3px;
   max-width: 100%;
-  padding: 2px 0;
+  /* 底部预留时间 / 已读位置（原来在文档流内，现在绝对定位） */
+  padding: 2px 0 19px;
   animation: bubble-in var(--dur-3) var(--ease-out) backwards;
 }
 
@@ -969,25 +971,34 @@
   padding-top: 1px;
 }
 
-.msg.out {
-  flex-direction: row-reverse;
-}
-
 .msg-avatar-slot {
   width: 32px;
   flex-shrink: 0;
-  align-self: flex-end;
+  /* 头像与气泡垂直居中对齐（气泡外侧） */
+  align-self: center;
 }
 
 .msg-body {
   display: flex;
-  flex-direction: column;
-  gap: 3px;
-  max-width: min(540px, 68%);
+  align-items: center;
+  gap: 9px;
+  max-width: 100%;
   min-width: 0;
 }
 
 .msg.out .msg-body {
+  flex-direction: row-reverse;
+}
+
+.msg-main {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  max-width: min(540px, 68%);
+}
+
+.msg.out .msg-main {
   align-items: flex-end;
 }
 
@@ -997,6 +1008,8 @@
   color: var(--ink-3);
   padding-left: 3px;
   letter-spacing: 0.01em;
+  /* 与气泡左缘对齐：32px 头像 + 9px 间距 */
+  margin-left: 41px;
 }
 
 .bubble {
@@ -1041,6 +1054,9 @@
 }
 
 .msg-foot {
+  position: absolute;
+  top: calc(100% + 3px);
+  left: 0;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -1059,6 +1075,8 @@
 }
 
 .msg.out .msg-foot {
+  left: auto;
+  right: 0;
   flex-direction: row-reverse;
 }
 
@@ -1784,7 +1802,7 @@
   -webkit-overflow-scrolling: touch;
 }
 
-.m-chat .msg-body {
+.m-chat .msg-main {
   max-width: 76%;
 }
 

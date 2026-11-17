@@ -335,37 +335,39 @@ watch(
           :data-mid="message.id"
           :style="{ animationDelay: `${Math.min(index * 24, 260)}ms` }"
         >
-          <div class="msg-avatar-slot">
-            <AppAvatar
-              v-if="!grouped"
-              :initials="message.initials"
-              :tone="message.tone"
-              size="sm"
-            />
-          </div>
+          <span v-if="!grouped && message.side === 'in'" class="msg-author">
+            {{ message.author }}
+          </span>
 
           <div class="msg-body">
-            <span v-if="!grouped && message.side === 'in'" class="msg-author">
-              {{ message.author }}
-            </span>
+            <div class="msg-avatar-slot">
+              <AppAvatar
+                v-if="!grouped"
+                :initials="message.initials"
+                :tone="message.tone"
+                size="sm"
+              />
+            </div>
 
-            <MessageAttachment
-              v-if="message.attachment"
-              :attachment="message.attachment"
-            />
+            <div class="msg-main">
+              <MessageAttachment
+                v-if="message.attachment"
+                :attachment="message.attachment"
+              />
 
-            <div v-else-if="message.recalled" class="bubble recalled">消息已撤回</div>
+              <div v-else-if="message.recalled" class="bubble recalled">消息已撤回</div>
 
-            <div v-else class="bubble">{{ message.text }}</div>
+              <div v-else class="bubble">{{ message.text }}</div>
 
-            <div class="msg-foot">
-              <span class="num">{{ message.time }}</span>
-              <template v-if="message.side === 'out'">
-                <span class="tick" :class="message.read ? 'read' : 'sent'">
-                  <CheckCheck v-if="message.read" :size="12" :stroke-width="2.4" />
-                  <Check v-else :size="12" :stroke-width="2.4" />
-                </span>
-              </template>
+              <div class="msg-foot">
+                <span class="num">{{ message.time }}</span>
+                <template v-if="message.side === 'out'">
+                  <span class="tick" :class="message.read ? 'read' : 'sent'">
+                    <CheckCheck v-if="message.read" :size="12" :stroke-width="2.4" />
+                    <Check v-else :size="12" :stroke-width="2.4" />
+                  </span>
+                </template>
+              </div>
             </div>
           </div>
         </div>
