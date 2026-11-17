@@ -434,14 +434,16 @@
 .list-count {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  min-width: 20px;
   height: 19px;
-  padding: 0 7px;
+  padding: 0 6px;
   border-radius: var(--r-full);
-  background: var(--accent-soft);
-  color: var(--accent-ink);
-  font-size: 10.5px;
-  font-weight: 680;
-  letter-spacing: 0.02em;
+  background: var(--unread);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
   font-variant-numeric: tabular-nums;
 }
 
@@ -728,22 +730,23 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 5px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
   border-radius: var(--r-full);
-  background: var(--accent-grad);
+  background: var(--unread);
   color: #fff;
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 700;
-  line-height: 18px;
+  line-height: 20px;
   font-variant-numeric: tabular-nums;
   overflow: hidden;
-  box-shadow: 0 2px 7px -3px var(--accent);
+  box-shadow: none;
 }
 
+/* 免打扰只是不提示，角标本身仍是红色，避免看起来像「没有未读」 */
 .unread.muted {
-  background: var(--ink-4);
+  background: color-mix(in srgb, var(--unread) 88%, #000);
   box-shadow: none;
 }
 
@@ -1933,7 +1936,8 @@
 }
 
 .m-swipe-actions.armed {
-  left: 0;
+  left: auto;
+  width: 198px;
 }
 
 .m-swipe-btn {
@@ -1954,7 +1958,8 @@
   filter: brightness(0.92);
 }
 
-.m-swipe-btn.unread {
+/* 注意：不要用 .unread，避免和未读角标的 .unread 样式串味 */
+.m-swipe-btn.mark {
   background: color-mix(in srgb, var(--accent) 88%, #000);
 }
 
@@ -1966,13 +1971,14 @@
   background: var(--danger);
 }
 
-/* 二级确认：整行铺满，避免「清空记录同时不显示聊天」被截断 */
+/* 二级确认：只占三个操作按钮的宽度，不铺满整行 */
 .m-swipe-btn.wide {
-  width: 100%;
-  flex-direction: row;
-  gap: 8px;
-  font-size: 12.5px;
-  padding: 0 16px;
+  width: 198px;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  line-height: 1.4;
+  padding: 0 10px;
 }
 
 .m-swipe-btn.wide:active {
@@ -2077,7 +2083,7 @@
   height: 15px;
   padding: 0 4px;
   border-radius: var(--r-full);
-  background: var(--danger);
+  background: var(--unread);
   color: #fff;
   font-size: 9.5px;
   font-weight: 700;

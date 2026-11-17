@@ -17,7 +17,7 @@ import { useIsMobile } from '../composables/useIsMobile'
 import { useChatStore } from '../stores/chat'
 import { useAuthStore } from '../stores/auth'
 import type { Attachment, ChatMessage, Conversation } from '../data/workspace'
-import { parseJson, sameId, type Id, type MessageView } from '../api/client'
+import { parseJson, sameId, type ConversationCard, type Id, type MessageView } from '../api/client'
 import { clockTime, humanBytes, initialsOf, listTime, toneOf } from '../utils/present'
 
 const THEME_KEY = 'veryal.theme'
@@ -79,8 +79,8 @@ const sortedCards = computed(() =>
   }),
 )
 
-const conversations = computed<Conversation[]>(() =>
-  sortedCards.value.map((card) => ({
+function toConversation(card: ConversationCard): Conversation {
+  return {
     id: card.conversationId,
     name: card.title,
     initials: initialsOf(card.title),
@@ -94,12 +94,27 @@ const conversations = computed<Conversation[]>(() =>
     context: card.type === 'GROUP' ? `群聊 · ${card.memberCount} 位成员` : '单聊',
     pinned: chat.pinnedIds.includes(card.conversationId),
     muted: chat.mutedIds.includes(card.conversationId),
-  })),
-)
+  }
+}
+
+const conversations = computed<Conversation[]>(() => sortedCards.value.map(toConversation))
+
+/**
+ * 当前打开但被「不显示」的会话：聊天列表里没有它，
+ * 但通讯录里点「发消息」后仍要能正常进入聊天页。
+ */
+const activeHiddenConversation = computed<Conversation | null>(() => {
+  const id = chat.activeId
+  if (!id || conversations.value.some((item) => item.id === id)) return null
+  const card = chat.cards.find((item) => item.conversationId === id)
+  return card ? toConversation(card) : null
+})
 
 const activeCard = computed(() => chat.activeCard)
 const activeConversation = computed(
-  () => conversations.value.find((item) => item.id === chat.activeId) ?? null,
+  () =>
+    // 被「不显示」的会话不在列表，但通讯录/搜索进来后仍要能看历史和发消息
+    conversations.value.find((item) => item.id === chat.activeId) ?? activeHiddenConversation.value,
 )
 const activeMembers = computed(() =>
   chat.activeId ? chat.members[chat.activeId] ?? [] : [],
@@ -399,6 +414,7 @@ onBeforeUnmount(() => {
   <MobileWorkspace
     v-if="isMobile"
     :conversations="conversations"
+    :active-conversation="activeHiddenConversation"
     :messages-of="messagesOf"
     :active-id="chat.activeId"
     :me="auth.user?.nickname ?? '我'"

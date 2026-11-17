@@ -546,6 +546,8 @@ export const useChatStore = defineStore('chat', {
           card.lastMessageAt = sent.createdAt
           card.lastSeq = sent.seq
           card.lastReadSeq = sent.seq
+          // 从通讯录打开「不显示」的会话并发出消息后，会话回到聊天列表
+          card.hidden = false
         }
         return sent
       } catch (e) {
@@ -597,6 +599,7 @@ export const useChatStore = defineStore('chat', {
         card.lastMessageAt = sent.createdAt
         card.lastSeq = sent.seq
         card.lastReadSeq = sent.seq
+        card.hidden = false
       }
       return sent
     },

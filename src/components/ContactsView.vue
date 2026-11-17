@@ -5,6 +5,7 @@ import {
   Check, X, Pencil, Inbox, Hash, Send, Trash2,
 } from 'lucide-vue-next'
 import AppAvatar from './AppAvatar.vue'
+import { useIsMobile } from '../composables/useIsMobile'
 import { api, sameId, type Id } from '../api/client'
 import { useChatStore } from '../stores/chat'
 import { initialsOf, relativeTime, toneOf } from '../utils/present'
@@ -32,6 +33,7 @@ type Request = {
 }
 
 const chat = useChatStore()
+const isMobile = useIsMobile(768)
 const data = ref<Contacts>({ friends: [], groups: [], pendingRequests: 0 })
 const requests = ref<Request[]>([])
 const loading = ref(false)
@@ -117,12 +119,34 @@ async function openChat(friend: Friend) {
     const conversationId = await chat.createPrivate(friend.friendId)
     await chat.loadCards()
     await chat.open(conversationId)
+    // 从「添加好友」搜索结果里点进来时，顺带关掉弹窗
+    addOpen.value = false
     window.dispatchEvent(new CustomEvent('veryal:open-chat', { detail: conversationId }))
   } catch (e) {
     error.value = e instanceof Error ? e.message : '发起会话失败'
   } finally {
     opening.value = null
   }
+}
+
+/**
+ * 桌面端点好友行只是选中；移动端没有右侧详情栏，
+ * 点整行就直接进入聊天，和「发消息」按钮等价。
+ */
+function pickFriend(friend: Friend) {
+  selected.value = friend
+  if (!isMobile.value || opening.value !== null) return
+  void openChat(friend)
+}
+
+/** 搜索命中的用户如果已经是好友，直接给「发消息」，不用再发好友申请。 */
+function friendOf(userId: Id): Friend | null {
+  return data.value.friends.find((f) => sameId(f.friendId, userId)) ?? null
+}
+
+function chatWithHit(hit: { userId: Id; nickname: string }) {
+  const friend = friendOf(hit.userId)
+  if (friend) void openChat(friend)
 }
 
 async function openGroup(group: GroupItem) {
@@ -280,7 +304,7 @@ onMounted(load)
             class="row spot"
             :class="{ on: sameId(selected?.friendId, f.friendId) }"
             @pointermove="spot"
-            @click="selected = f"
+            @click="pickFriend(f)"
           >
             <span class="avatar-wrap">
               <AppAvatar :initials="initialsOf(f.remark || f.nickname)" :tone="toneOf(f.friendId)" size="md" />
@@ -430,9 +454,21 @@ onMounted(load)
               <AppAvatar :initials="initialsOf(hit.nickname)" :tone="toneOf(hit.userId)" size="md" />
               <span class="row-main">
                 <span class="row-name">{{ hit.nickname }}</span>
-                <span class="row-sub">@{{ hit.username }}</span>
+                <span class="row-sub">
+                  @{{ hit.username }}<template v-if="friendOf(hit.userId)"> · 已是好友</template>
+                </span>
               </span>
-              <button class="mini ok" :disabled="addBusy !== null" @click="sendRequest(hit)">
+              <button
+                v-if="friendOf(hit.userId)"
+                class="mini ok"
+                title="发消息"
+                :disabled="opening !== null"
+                @click="chatWithHit(hit)"
+              >
+                <Loader2 v-if="sameId(opening, hit.userId)" :size="13" class="spin" />
+                <MessageSquarePlus v-else :size="13" :stroke-width="1.9" />
+              </button>
+              <button v-else class="mini ok" :disabled="addBusy !== null" @click="sendRequest(hit)">
                 <Loader2 v-if="sameId(addBusy, hit.userId)" :size="13" class="spin" />
                 <Send v-else :size="13" :stroke-width="2" />
               </button>

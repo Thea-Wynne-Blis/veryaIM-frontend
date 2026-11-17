@@ -38,6 +38,8 @@ type ReplyRef = { messageId: string; senderId: string; preview: string }
 
 const props = defineProps<{
   conversations: Conversation[]
+  /** 被「不显示」但当前正在打开的会话（通讯录点进来时），列表里没有它 */
+  activeConversation?: Conversation | null
   messagesOf: (id: string) => ChatMessage[]
   activeId: string | null
   me?: string
@@ -98,9 +100,13 @@ const list = computed(() => {
   )
 })
 
-const current = computed(
-  () => props.conversations.find((item) => item.id === props.activeId) ?? null,
-)
+const current = computed(() => {
+  if (!props.activeId) return null
+  const visible = props.conversations.find((item) => item.id === props.activeId)
+  if (visible) return visible
+  // 「不显示」的会话不在列表里，但仍可以从通讯录打开
+  return props.activeConversation?.id === props.activeId ? props.activeConversation : null
+})
 
 const currentMessages = computed(() =>
   props.activeId ? props.messagesOf(props.activeId) : [],
@@ -530,7 +536,7 @@ function rowStyle(id: string): Record<string, string> | undefined {
     return { transform: `translateX(${dragOffset.value}px)` }
   }
   if (deleteArmedId.value === id) {
-    return { transform: 'translateX(-100%)' }
+    return { transform: `translateX(-${SWIPE_WIDTH}px)` }
   }
   if (swipeId.value === id) {
     return { transform: `translateX(-${SWIPE_WIDTH}px)` }
@@ -672,7 +678,7 @@ document.addEventListener('pointerdown', onDocPointerDown, true)
               </button>
             </template>
             <template v-else>
-              <button class="m-swipe-btn unread" @click.stop="swipeUnread(item.id)">
+              <button class="m-swipe-btn mark" @click.stop="swipeUnread(item.id)">
                 <MailOpen :size="17" :stroke-width="1.9" />
                 标为未读
               </button>

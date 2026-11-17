@@ -50,6 +50,8 @@
   --danger-soft: #fceceb;
   --warn: #b37419;
   --info: #2c6dd0;
+  /* 未读角标：微信式红色，和主色区分开，一眼能看到 */
+  --unread: #fa5151;
 
   /* ---------- 聚光 / 光泽 ---------- */
   --spot-size: 260px;
@@ -135,6 +137,7 @@
 
   --danger: #f06a66;
   --danger-soft: #331f1e;
+  --unread: #fa5151;
   --warn: #e0a44d;
   --info: #6ba4f5;
 
