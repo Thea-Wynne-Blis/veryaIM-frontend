@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch, type ObjectDirective } from 'vue'
 import {
   MessageCircle,
   Users,
@@ -122,6 +122,7 @@ function close() {
 
 function send() {
   if (!canSend.value || !props.activeId) return
+  disarmEnter()
   emit('send', { conversationId: props.activeId, text: draft.value.trim() })
   draft.value = ''
   stickToBottom.value = true
@@ -145,21 +146,68 @@ function onMessageScroll() {
 }
 
 watch(() => currentMessages.value.length, () => scrollBottom())
+
+/* ---------- 切换会话的入场动效（与桌面端同一套语义） ---------- */
+let enterArmed = false
+let enterTimer: number | null = null
+
+function armEnter() {
+  enterArmed = true
+  if (enterTimer !== null) window.clearTimeout(enterTimer)
+  enterTimer = window.setTimeout(disarmEnter, 1200)
+}
+
+function disarmEnter() {
+  enterArmed = false
+  if (enterTimer !== null) {
+    window.clearTimeout(enterTimer)
+    enterTimer = null
+  }
+}
+
+const vEnter: ObjectDirective<HTMLElement, { order?: number; skip?: boolean }> = {
+  mounted(el, binding) {
+    if (!enterArmed || binding.value?.skip) return
+    el.style.setProperty('--enter-order', String(binding.value?.order ?? 0))
+    el.classList.add('enter')
+  },
+}
+
 watch(
   () => props.activeId,
-  () => {
+  (id) => {
     stickToBottom.value = true
     scrollBottom(true)
+    if (!id) {
+      disarmEnter()
+      return
+    }
+    armEnter()
+    // 缓存的会话同步渲染；异步加载由下面的长度监听收门控
+    nextTick(() => {
+      if (currentMessages.value.length) disarmEnter()
+    })
   },
   { immediate: true },
 )
+
+watch(
+  () => currentMessages.value.length,
+  (len) => {
+    if (!enterArmed || !len) return
+    // 指令的 mounted 在 post 队列里，等整个 flush 结束再关门控
+    nextTick(disarmEnter)
+  },
+)
+
+onBeforeUnmount(disarmEnter)
 
 function onBodyScroll(event: Event) {
   const el = event.target as HTMLElement
   bodyScrolled.value = el.scrollTop > 6
 }
 
-/** 消息不播逐条入场动画（同 ChatPane），只给每条一个稳定 key：乐观占位确认后复用同一节点 */
+/** 消息不播「新消息」入场动画（同 ChatPane），只给每条一个稳定 key：乐观占位确认后复用同一节点 */
 function grouping(messages: ChatMessage[]) {
   const usedKeys = new Set<string>()
   return messages.map((message, index) => {
@@ -173,7 +221,7 @@ function grouping(messages: ChatMessage[]) {
     let key = message.clientMsgId ? `c:${message.clientMsgId}` : `s:${message.id}`
     if (usedKeys.has(key)) key = `s:${message.id}:${index}`
     usedKeys.add(key)
-    return { message, grouped, key }
+    return { message, grouped, key, enterOrder: index, pending: message.pending }
   })
 }
 </script>
@@ -271,7 +319,7 @@ function grouping(messages: ChatMessage[]) {
           <button class="icon-btn" aria-label="返回" @click="close">
             <ArrowLeft :size="20" :stroke-width="2" />
           </button>
-          <div class="m-chat-title">
+          <div :key="current.id" class="m-chat-title enter">
             <span class="m-chat-name">{{ current.name }}</span>
             <span class="m-chat-sub">{{ current.context }}</span>
           </div>
@@ -289,8 +337,9 @@ function grouping(messages: ChatMessage[]) {
           <p v-if="error" class="m-error">{{ error }}</p>
           <p class="day-divider">今天</p>
           <div
-            v-for="({ message, grouped, key }) in grouping(currentMessages)"
+            v-for="({ message, grouped, key, enterOrder, pending }) in grouping(currentMessages)"
             :key="key"
+            v-enter="{ order: enterOrder, skip: pending }"
             class="msg"
             :class="{ out: message.side === 'out', grouped }"
           >
@@ -326,10 +375,12 @@ function grouping(messages: ChatMessage[]) {
               </div>
             </div>
           </div>
-          <p v-if="loading && !currentMessages.length" class="m-loading">
+          <p v-if="loading && !currentMessages.length" :key="`l-${current.id}`" class="m-loading enter">
             <Loader2 :size="15" class="spin" /> 正在加载消息…
           </p>
-          <p v-else-if="!currentMessages.length" class="m-loading">还没有消息，发一条试试</p>
+          <p v-else-if="!currentMessages.length" :key="`e-${current.id}`" class="m-loading enter">
+            还没有消息，发一条试试
+          </p>
         </div>
 
         <div class="m-composer-wrap">

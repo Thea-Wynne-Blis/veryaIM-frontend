@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type ObjectDirective } from 'vue'
 import {
   Search,
   Phone,
@@ -106,10 +106,45 @@ const onlineCount = computed(() =>
     : 0,
 )
 
+/* ---------- 切换会话的入场动效 ---------- */
 /**
- * 消息气泡不做逐条入场动画：新消息（尤其是自己发的）应该在按下回车的下一帧就出现。
- * 这里只负责分组，以及给每条消息一个稳定 key —— 乐观占位与服务端消息共用
+ * 消息节点「首次挂载」时才决定要不要播入场动画：
+ * - 切换会话后的一小段时间内、且不是发送中的占位消息 → 播；
+ * - 自己发消息、以及之后到达的实时消息 → 直接出现，不做动画。
+ * 用指令而不是 class 绑定，动画跑起来之后门控关掉也不会把 class 摘掉。
+ */
+let enterArmed = false
+let enterTimer: number | null = null
+
+function armEnter() {
+  enterArmed = true
+  if (enterTimer !== null) window.clearTimeout(enterTimer)
+  // 空会话或加载很慢时兜底：超过 1.2s 到达的消息按普通实时消息处理
+  enterTimer = window.setTimeout(disarmEnter, 1200)
+}
+
+function disarmEnter() {
+  enterArmed = false
+  if (enterTimer !== null) {
+    window.clearTimeout(enterTimer)
+    enterTimer = null
+  }
+}
+
+/** 只负责在节点挂载时打上 enter 类，并通过 --enter-order 给 stagger 预设排先后。 */
+const vEnter: ObjectDirective<HTMLElement, { order?: number; skip?: boolean }> = {
+  mounted(el, binding) {
+    if (!enterArmed || binding.value?.skip) return
+    el.style.setProperty('--enter-order', String(binding.value?.order ?? 0))
+    el.classList.add('enter')
+  },
+}
+
+/**
+ * 消息气泡本身不做「新消息」入场动画：自己发的消息应该在按下回车的下一帧就出现。
+ * 这里负责分组，以及给每条消息一个稳定 key —— 乐观占位与服务端消息共用
  * clientMsgId，确认到达时 Vue 复用同一个节点，不会重建重排。
+ * enterOrder 只用于 stagger 预设排序，是否真的播动画由 v-enter 指令的门控决定。
  */
 const grouping = computed(() => {
   const usedKeys = new Set<string>()
@@ -124,7 +159,7 @@ const grouping = computed(() => {
     let key = message.clientMsgId ? `c:${message.clientMsgId}` : `s:${message.id}`
     if (usedKeys.has(key)) key = `s:${message.id}:${index}`
     usedKeys.add(key)
-    return { message, grouped, key }
+    return { message, grouped, key, enterOrder: index, pending: message.pending }
   })
 })
 
@@ -307,6 +342,7 @@ function forwardMessage(message: ChatMessage) {
 
 function send() {
   if (!canSend.value) return
+  disarmEnter()
   emit('send', draft.value.trim())
   draft.value = ''
   emojiOpen.value = false
@@ -413,6 +449,7 @@ onBeforeUnmount(() => {
   resizeObserver?.disconnect()
   resizeObserver = null
   if (noticeTimer) window.clearTimeout(noticeTimer)
+  disarmEnter()
 })
 
 function toggleSearch() {
@@ -464,10 +501,30 @@ watch(
     rememberScroll(oldId)
     closeMenu()
     exitSelect()
-    if (newId) restoreScroll(newId)
+    if (!newId) {
+      disarmEnter()
+      return
+    }
+    armEnter()
+    restoreScroll(newId)
+    // 有缓存的会话是同步渲染的：这一帧结束就收掉门控，避免把下一帧的实时消息也带上动画
+    nextTick(() => {
+      if (props.messages.length) disarmEnter()
+    })
   },
   { immediate: true },
 )
+
+// 需要异步加载的会话：等首批消息真正渲染完再收门控
+watch(
+  () => props.messages.length,
+  (len) => {
+    if (!enterArmed || !len) return
+    // 指令的 mounted 在 post 队列里，必须等整个 flush 结束（nextTick）再关门控
+    nextTick(disarmEnter)
+  },
+)
+
 watch(() => props.messages.length, () => scrollToBottom())
 </script>
 
@@ -476,13 +533,15 @@ watch(() => props.messages.length, () => scrollToBottom())
     <template v-if="conversation">
       <header class="chat-head">
         <AppAvatar
+          :key="conversation.id"
+          class="enter"
           :initials="conversation.initials"
           :tone="conversation.tone"
           :presence="conversation.presence"
           :rounded="conversation.kind === 'group'"
           size="sm"
         />
-        <div class="chat-head-main">
+        <div :key="conversation.id" class="chat-head-main enter">
           <h2 class="chat-title">
             {{ conversation.name }}
             <span v-if="conversation.kind === 'group'" class="stat-chip">
@@ -565,14 +624,15 @@ watch(() => props.messages.length, () => scrollToBottom())
       >
         <p class="day-divider">聊天记录</p>
 
-        <div v-if="loading && !messages.length" class="msg-loading">
+        <div v-if="loading && !messages.length" :key="conversation.id" class="msg-loading enter">
           <Loader2 :size="16" class="spin" />
           正在加载消息…
         </div>
 
         <div
-          v-for="({ message, grouped, key }) in grouping"
+          v-for="({ message, grouped, key, enterOrder, pending }) in grouping"
           :key="key"
+          v-enter="{ order: enterOrder, skip: pending }"
           class="msg"
           :class="{ out: message.side === 'out', grouped, selecting, selected: isSelected(message) }"
           :data-mid="message.id"
@@ -620,7 +680,11 @@ watch(() => props.messages.length, () => scrollToBottom())
           </div>
         </div>
 
-        <p v-if="!loading && !messages.length" class="messages-empty">
+        <p
+          v-if="!loading && !messages.length"
+          :key="conversation.id"
+          class="messages-empty enter"
+        >
           还没有消息，发一句问候吧。
         </p>
       </div>

@@ -931,6 +931,52 @@
   gap: 2px;
 }
 
+/* ===========================================================
+   切换会话：入场动效预设（<html data-motion> 由「我 → 动效」切换）
+   只作用于切换后的首批消息与标题；发消息的占位气泡不参与。
+   =========================================================== */
+:root {
+  --enter-anim: surface-rise;
+  --enter-dur: 300ms;
+  --enter-shift: 8px;
+  --enter-step: 0ms;
+}
+
+[data-motion="fade"] {
+  --enter-anim: surface-fade;
+  --enter-dur: 240ms;
+}
+
+[data-motion="slide"] {
+  --enter-anim: surface-slide;
+  --enter-dur: 300ms;
+  --enter-shift: 18px;
+}
+
+[data-motion="stagger"] {
+  --enter-anim: surface-rise;
+  --enter-dur: 280ms;
+  --enter-step: 10ms;
+}
+
+[data-motion="none"] {
+  --enter-anim: none;
+}
+
+.msg.enter,
+.chat-head-main.enter,
+.chat-head > .avatar.enter,
+.m-chat-title.enter,
+.messages-empty.enter,
+.msg-loading.enter,
+.m-loading.enter {
+  animation-name: var(--enter-anim);
+  animation-duration: var(--enter-dur);
+  animation-timing-function: var(--ease-out);
+  animation-fill-mode: both;
+  animation-delay: min(calc(var(--enter-order, 0) * var(--enter-step)), 100ms);
+}
+
 /* 日期分隔：两侧渐隐发丝线 */
 .day-divider {
   display: flex;

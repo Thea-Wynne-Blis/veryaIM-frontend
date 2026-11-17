@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
-import { LogOut, Save, Shield, Smartphone, Loader2, Trash2, User } from 'lucide-vue-next'
+import { computed, onMounted, ref } from 'vue'
+import { LogOut, RotateCw, Save, Shield, Smartphone, Loader2, Trash2, User, Wand2 } from 'lucide-vue-next'
 import AppAvatar from './AppAvatar.vue'
 import {
   api,
@@ -8,6 +8,7 @@ import {
   type UserPrivacy,
   type UserProfile,
 } from '../api/client'
+import { MOTION_PRESETS, useMotion } from '../composables/useMotion'
 import { useAuthStore } from '../stores/auth'
 import { useChatStore } from '../stores/chat'
 import { initialsOf, relativeTime } from '../utils/present'
@@ -30,6 +31,17 @@ const policyLabel: Record<string, string> = {
   REJECT: '拒绝所有人',
   VERIFY: '需要验证',
   DIRECT: '直接通过',
+}
+
+/* ---------- 切换会话动效 ---------- */
+const { preset, setPreset } = useMotion()
+const previewTick = ref(0)
+const motionHint = computed(
+  () => MOTION_PRESETS.find((item) => item.value === preset.value)?.hint ?? '',
+)
+
+function replayPreview() {
+  previewTick.value += 1
 }
 
 function spot(event: PointerEvent) {
@@ -237,6 +249,44 @@ onMounted(load)
           </div>
 
           <div class="me-card spot" @pointermove="spot">
+            <p class="card-label"><Wand2 :size="11" :stroke-width="2.4" /> 切换动效</p>
+            <p class="motion-hint">切换会话时的过渡只播一次；发消息直接出现，不做动画。</p>
+            <div class="motion-chips" role="radiogroup" aria-label="切换会话动效">
+              <button
+                v-for="option in MOTION_PRESETS"
+                :key="option.value"
+                class="motion-chip"
+                :class="{ on: preset === option.value }"
+                role="radio"
+                :aria-checked="preset === option.value"
+                @click="setPreset(option.value)"
+              >
+                {{ option.label }}
+              </button>
+            </div>
+            <div class="motion-stage" aria-hidden="true">
+              <div :key="previewTick" class="mp-list">
+                <div class="mp-msg in enter" style="--enter-order: 0">
+                  <span class="mp-bubble">在吗？看看这个动效</span>
+                </div>
+                <div class="mp-msg in enter" style="--enter-order: 1">
+                  <span class="mp-bubble">切换会话时轻轻出现</span>
+                </div>
+                <div class="mp-msg out enter" style="--enter-order: 2">
+                  <span class="mp-bubble">发消息不做动画</span>
+                </div>
+              </div>
+            </div>
+            <div class="motion-foot">
+              <span class="motion-desc">{{ motionHint }}</span>
+              <button class="motion-replay" @click="replayPreview">
+                <RotateCw :size="11" :stroke-width="2.2" />
+                重播
+              </button>
+            </div>
+          </div>
+
+          <div class="me-card spot" @pointermove="spot">
             <p class="card-label"><Smartphone :size="11" :stroke-width="2.4" /> 登录设备 · {{ devices.length }}</p>
             <div v-for="d in devices" :key="d.deviceId" class="device-row">
               <span class="device-main">
@@ -312,5 +362,22 @@ onMounted(load)
 .danger { background: var(--danger-soft); color: var(--danger); border: 1px solid color-mix(in srgb, var(--danger) 26%, transparent); }
 .toast-ok { font-size: 11.5px; color: var(--accent-ink); background: var(--accent-soft); padding: 7px 10px; border-radius: var(--r-sm); }
 .toast-err { font-size: 11.5px; color: var(--danger); background: var(--danger-soft); padding: 7px 10px; border-radius: var(--r-sm); }
+/* 切换动效 */
+.motion-hint { font-size: 11.5px; line-height: 1.6; color: var(--ink-3); }
+.motion-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.motion-chip { height: 27px; padding: 0 10px; border-radius: var(--r-full); font-size: 11.5px; font-weight: 580; color: var(--ink-2); background: var(--surface-3); border: 1px solid transparent; transition: background var(--dur-2) var(--ease-out), color var(--dur-2) var(--ease-out), border-color var(--dur-2) var(--ease-out); }
+.motion-chip:hover { background: var(--surface-hover); }
+.motion-chip.on { color: var(--accent-ink); background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
+.motion-stage { padding: 12px; border-radius: var(--r-sm); background: var(--surface-2); border: 1px solid var(--line); overflow: hidden; }
+.mp-list { display: flex; flex-direction: column; gap: 6px; }
+.mp-msg { display: flex; }
+.mp-msg.out { justify-content: flex-end; }
+.mp-bubble { max-width: 76%; padding: 6px 10px; border-radius: 11px; font-size: 11.5px; line-height: 1.5; color: var(--ink-2); background: var(--surface); border: 1px solid var(--line); }
+.mp-msg.out .mp-bubble { color: var(--accent-ink); background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 22%, transparent); }
+.mp-msg.enter { animation-name: var(--enter-anim); animation-duration: var(--enter-dur); animation-timing-function: var(--ease-out); animation-fill-mode: both; animation-delay: min(calc(var(--enter-order, 0) * var(--enter-step)), 100ms); }
+.motion-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.motion-desc { font-size: 11px; color: var(--ink-4); }
+.motion-replay { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; border-radius: var(--r-xs); font-size: 11px; color: var(--ink-3); background: var(--surface-3); flex-shrink: 0; }
+.motion-replay:hover { color: var(--ink); background: var(--surface-hover); }
 .spin { animation: tick-spin 900ms linear infinite; }
 </style>
