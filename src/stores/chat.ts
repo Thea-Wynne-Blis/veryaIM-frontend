@@ -54,19 +54,23 @@ export type ChatMember = {
   role?: string
 }
 
-type Prefs = { pinned: string[]; muted: string[] }
+type Prefs = { pinned: string[]; muted: string[]; hidden: Record<string, string[]> }
 
 function loadPrefs(): Prefs {
   try {
     const raw = localStorage.getItem(PREFS_KEY)
-    if (!raw) return { pinned: [], muted: [] }
+    if (!raw) return { pinned: [], muted: [], hidden: {} }
     const parsed = JSON.parse(raw) as Partial<Prefs>
     return {
       pinned: Array.isArray(parsed.pinned) ? parsed.pinned : [],
       muted: Array.isArray(parsed.muted) ? parsed.muted : [],
+      hidden:
+        parsed.hidden && typeof parsed.hidden === 'object' && !Array.isArray(parsed.hidden)
+          ? parsed.hidden
+          : {},
     }
   } catch {
-    return { pinned: [], muted: [] }
+    return { pinned: [], muted: [], hidden: {} }
   }
 }
 
@@ -86,6 +90,8 @@ type State = {
   lastSync: number
   pinnedIds: string[]
   mutedIds: string[]
+  /** 仅本机删除（服务端无删除接口），按会话记录被隐藏的消息 id */
+  hiddenIds: Record<string, string[]>
 }
 
 /** 后端字段名是 sequence，前端统一用 seq */
@@ -122,6 +128,7 @@ export const useChatStore = defineStore('chat', {
       lastSync: 0,
       pinnedIds: prefs.pinned,
       mutedIds: prefs.muted,
+      hiddenIds: prefs.hidden,
     }
   },
 
@@ -134,11 +141,15 @@ export const useChatStore = defineStore('chat', {
     },
     activeMessages(state): MessageView[] {
       const list = state.activeId ? state.messages[state.activeId] ?? [] : []
-      if (!list.some((item) => item.pending)) return list
+      const hidden = state.activeId ? state.hiddenIds[state.activeId] ?? [] : []
+      const visible = hidden.length
+        ? list.filter((item) => item.pending || !hidden.includes(String(item.messageId)))
+        : list
+      if (!visible.some((item) => item.pending)) return visible
       // 发送中的占位消息固定排在末尾，避免 seq=0 把顺序打乱
       return [
-        ...list.filter((item) => !item.pending),
-        ...list.filter((item) => item.pending),
+        ...visible.filter((item) => !item.pending),
+        ...visible.filter((item) => item.pending),
       ]
     },
     totalUnread(state): number {
@@ -160,8 +171,20 @@ export const useChatStore = defineStore('chat', {
     savePrefs() {
       localStorage.setItem(
         PREFS_KEY,
-        JSON.stringify({ pinned: this.pinnedIds, muted: this.mutedIds }),
+        JSON.stringify({
+          pinned: this.pinnedIds,
+          muted: this.mutedIds,
+          hidden: this.hiddenIds,
+        }),
       )
+    },
+
+    /** 本机删除单条消息（服务端仍保留，重新登录或清缓存后可见）。 */
+    hideMessage(conversationId: string, messageId: string) {
+      const list = this.hiddenIds[conversationId] ?? (this.hiddenIds[conversationId] = [])
+      const key = String(messageId)
+      if (!list.includes(key)) list.push(key)
+      this.savePrefs()
     },
 
     togglePin(conversationId: string) {
@@ -368,6 +391,63 @@ export const useChatStore = defineStore('chat', {
       const value = text.trim()
       if (!this.activeId || !value) return
       return this.sendRaw('TEXT', value, value)
+    },
+
+    /**
+     * 转发：把原消息的 type + 原始 content 再发到目标会话。
+     * 后端没有独立转发接口，复用发送消息（幂等由新的 clientMessageId 保证）。
+     * 附件消息会携带原 fileId，后端只允许引用发送者自己的文件，
+     * 因此转发别人的图片/文件会失败，调用方需先拦截。
+     */
+    async forwardMessage(
+      conversationId: string,
+      type: string,
+      content: string,
+      preview: string,
+    ) {
+      const clientMessageId = `f-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+      const resp = await api.post<{
+        message: MessageView & { sequence?: number }
+        duplicate: boolean
+      }>(`/conversations/${conversationId}/messages`, {
+        conversationId,
+        clientMessageId,
+        type,
+        content,
+      })
+      const sent = normalize({ ...resp.message, clientMsgId: clientMessageId })
+      const list = this.messages[conversationId]
+      if (list && !list.some((item) => sameId(item.messageId, sent.messageId))) {
+        list.push(sent)
+        list.sort((a, b) => a.seq - b.seq)
+      }
+      const card = this.cards.find((item) => item.conversationId === conversationId)
+      if (card) {
+        card.lastMessagePreview = preview
+        card.lastMessageType = type
+        card.lastMessageAt = sent.createdAt
+        card.lastSeq = sent.seq
+        card.lastReadSeq = sent.seq
+      }
+      return sent
+    },
+
+    /** 撤回：仅发送者本人、2 分钟窗口内，服务端保留占位。 */
+    async recallMessage(conversationId: string, messageId: string) {
+      const resp = await api.post<MessageView>(
+        `/conversations/${conversationId}/messages/${messageId}/recall`,
+      )
+      const list = this.messages[conversationId]
+      const target = list?.find((item) => sameId(item.messageId, messageId))
+      if (target) {
+        target.recalled = true
+        target.recalledAt = resp?.recalledAt ?? new Date().toISOString()
+      }
+      const card = this.cards.find((item) => item.conversationId === conversationId)
+      if (card && target && card.lastSeq === target.seq) {
+        card.lastMessagePreview = '[消息已撤回]'
+      }
+      return resp
     },
 
     /** 先上传文件，再以 IMAGE / FILE 消息发送。 */

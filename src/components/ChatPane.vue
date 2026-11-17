@@ -17,6 +17,12 @@ import {
   Users,
   Loader2,
   X,
+  Copy,
+  Languages,
+  Share2,
+  ListChecks,
+  Quote,
+  Trash2,
 } from 'lucide-vue-next'
 import AppAvatar from './AppAvatar.vue'
 import MessageAttachment from './MessageAttachment.vue'
@@ -39,6 +45,7 @@ const emit = defineEmits<{
   (e: 'send', text: string): void
   (e: 'attach', file: File): void
   (e: 'toggle-detail'): void
+  (e: 'forward', message: ChatMessage): void
 }>()
 
 const chat = useChatStore()
@@ -106,6 +113,177 @@ function showNotice(text: string) {
   noticeTimer = window.setTimeout(() => (notice.value = ''), 2600)
 }
 
+/* ---------- 消息右键菜单 / 多选 ---------- */
+type MenuState = { x: number; y: number; message: ChatMessage }
+
+const MENU_WIDTH = 178
+const MENU_HEIGHT = 232
+/** 后端撤回窗口：发送者本人 2 分钟内 */
+const RECALL_WINDOW_MS = 2 * 60 * 1000
+
+const menu = ref<MenuState | null>(null)
+const selecting = ref(false)
+const selected = ref<string[]>([])
+
+const selectedMessages = computed(() =>
+  props.messages.filter((message) => selected.value.includes(message.id)),
+)
+
+function openMenu(event: MouseEvent, message: ChatMessage) {
+  if (selecting.value) return
+  const x = Math.max(8, Math.min(event.clientX, window.innerWidth - MENU_WIDTH - 8))
+  const y = Math.max(8, Math.min(event.clientY, window.innerHeight - MENU_HEIGHT - 8))
+  menu.value = { x, y, message }
+}
+
+function closeMenu() {
+  menu.value = null
+}
+
+function onGlobalPointerDown(event: PointerEvent) {
+  if (!menu.value) return
+  const target = event.target as HTMLElement | null
+  if (target?.closest('.msg-menu')) return
+  closeMenu()
+}
+
+function onGlobalKeydown(event: KeyboardEvent) {
+  if (event.key !== 'Escape') return
+  closeMenu()
+  if (selecting.value) exitSelect()
+}
+
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text)
+    return true
+  } catch {
+    try {
+      const area = document.createElement('textarea')
+      area.value = text
+      area.style.position = 'fixed'
+      area.style.top = '-1000px'
+      area.style.opacity = '0'
+      document.body.appendChild(area)
+      area.select()
+      const ok = document.execCommand('copy')
+      area.remove()
+      return ok
+    } catch {
+      return false
+    }
+  }
+}
+
+function copyTextOf(message: ChatMessage): string {
+  if (message.recalled) return ''
+  if (message.attachment) {
+    const { name, size } = message.attachment
+    return size ? `${name} (${size})` : name
+  }
+  return message.text
+}
+
+async function copyMessage(message: ChatMessage) {
+  closeMenu()
+  const text = copyTextOf(message)
+  if (!text) {
+    showNotice('这条消息没有可复制的内容')
+    return
+  }
+  showNotice((await copyText(text)) ? '已复制' : '复制失败，请手动选择文本')
+}
+
+function startSelect(message: ChatMessage) {
+  selecting.value = true
+  selected.value = [message.id]
+  closeMenu()
+}
+
+function isSelected(message: ChatMessage) {
+  return selected.value.includes(message.id)
+}
+
+function toggleSelect(message: ChatMessage) {
+  selected.value = isSelected(message)
+    ? selected.value.filter((id) => id !== message.id)
+    : [...selected.value, message.id]
+}
+
+function exitSelect() {
+  selecting.value = false
+  selected.value = []
+}
+
+async function copySelected() {
+  const text = selectedMessages.value.map(copyTextOf).filter(Boolean).join('\n')
+  if (!text) {
+    showNotice('所选消息没有可复制的内容')
+    return
+  }
+  const count = selectedMessages.value.length
+  const ok = await copyText(text)
+  exitSelect()
+  showNotice(ok ? `已复制 ${count} 条` : '复制失败，请手动选择文本')
+}
+
+/**
+ * 能否走服务端撤回：自己的消息、未撤回、未在发送中、且 2 分钟窗口内。
+ */
+function canRecall(message: ChatMessage): boolean {
+  if (!message.mine || message.recalled || message.pending) return false
+  const createdAt = message.createdAt ? new Date(message.createdAt).getTime() : 0
+  return !!createdAt && Date.now() - createdAt <= RECALL_WINDOW_MS
+}
+
+/**
+ * 删除：自己的消息先尝试服务端撤回（2 分钟内），
+ * 其余情况（超出窗口 / 别人的消息 / 已撤回）只在本机隐藏。
+ */
+async function deleteMessage(message: ChatMessage) {
+  closeMenu()
+  const conversationId = props.conversation?.id
+  if (!conversationId) return
+  if (message.pending) {
+    showNotice('消息还在发送中，请稍后再删除')
+    return
+  }
+  const messageId = String(message.messageId ?? message.id)
+
+  if (canRecall(message)) {
+    try {
+      await chat.recallMessage(conversationId, messageId)
+      showNotice('已撤回')
+    } catch (e) {
+      showNotice(e instanceof Error ? e.message : '撤回失败')
+    }
+    return
+  }
+
+  chat.hideMessage(conversationId, messageId)
+  showNotice('已从本机删除')
+}
+
+async function deleteSelected() {
+  const list = selectedMessages.value.filter((message) => !message.pending)
+  const skipped = selectedMessages.value.length - list.length
+  if (!list.length) {
+    exitSelect()
+    showNotice(skipped ? '发送中的消息不能删除' : '没有可删除的消息')
+    return
+  }
+  exitSelect()
+  for (const message of list) await deleteMessage(message)
+  showNotice(
+    skipped ? `已删除 ${list.length} 条，${skipped} 条发送中已跳过` : `已删除 ${list.length} 条`,
+  )
+}
+
+function forwardMessage(message: ChatMessage) {
+  closeMenu()
+  emit('forward', message)
+}
+
 function send() {
   if (!canSend.value) return
   emit('send', draft.value.trim())
@@ -154,6 +332,7 @@ function scrollToBottom(force = false) {
 function onScroll() {
   const el = scroller.value
   if (!el) return
+  closeMenu()
   stickToBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight <= 48
 }
 
@@ -165,6 +344,10 @@ function onContentLoad() {
 let resizeObserver: ResizeObserver | null = null
 
 onMounted(() => {
+  document.addEventListener('pointerdown', onGlobalPointerDown, true)
+  document.addEventListener('keydown', onGlobalKeydown)
+  window.addEventListener('blur', closeMenu)
+
   const el = scroller.value
   if (!el || typeof ResizeObserver === 'undefined') return
   resizeObserver = new ResizeObserver(() => scrollToBottom(false))
@@ -172,6 +355,9 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  document.removeEventListener('pointerdown', onGlobalPointerDown, true)
+  document.removeEventListener('keydown', onGlobalKeydown)
+  window.removeEventListener('blur', closeMenu)
   resizeObserver?.disconnect()
   resizeObserver = null
   if (noticeTimer) window.clearTimeout(noticeTimer)
@@ -221,6 +407,8 @@ watch(() => props.messages.length, () => scrollToBottom())
 watch(
   () => props.conversation?.id,
   () => {
+    closeMenu()
+    exitSelect()
     stickToBottom.value = true
     scrollToBottom(true)
   },
@@ -331,9 +519,11 @@ watch(
           v-for="({ message, grouped }, index) in grouping"
           :key="message.id"
           class="msg"
-          :class="{ out: message.side === 'out', grouped }"
+          :class="{ out: message.side === 'out', grouped, selecting, selected: isSelected(message) }"
           :data-mid="message.id"
           :style="{ animationDelay: `${Math.min(index * 24, 260)}ms` }"
+          @contextmenu.prevent="openMenu($event, message)"
+          @click="selecting && toggleSelect(message)"
         >
           <span v-if="!grouped && message.side === 'in'" class="msg-author">
             {{ message.author }}
@@ -350,6 +540,10 @@ watch(
             </div>
 
             <div class="msg-main">
+              <span v-if="selecting" class="msg-check">
+                <Check v-if="isSelected(message)" :size="11" :stroke-width="3.2" />
+              </span>
+
               <MessageAttachment
                 v-if="message.attachment"
                 :attachment="message.attachment"
@@ -378,6 +572,14 @@ watch(
       </div>
 
       <div class="composer-wrap">
+        <div v-if="selecting" class="msg-select-bar">
+          <span>已选 <strong>{{ selected.length }}</strong> 条</span>
+          <span class="spacer" />
+          <button class="select-btn" @click="copySelected">复制</button>
+          <button class="select-btn danger" @click="deleteSelected">删除</button>
+          <button class="select-btn" @click="exitSelect">取消</button>
+        </div>
+
         <p v-if="error" class="send-error">{{ error }}</p>
         <p v-if="notice" class="send-notice">{{ notice }}</p>
 
@@ -475,6 +677,57 @@ watch(
       <h3 class="empty-title">选择一个会话</h3>
       <p class="empty-text">从左侧列表挑一个对话，或者新建一个开始聊天。</p>
     </div>
+
+    <Teleport to="body">
+      <div
+        v-if="menu"
+        class="msg-menu"
+        role="menu"
+        :style="{ left: `${menu.x}px`, top: `${menu.y}px` }"
+        @contextmenu.prevent
+      >
+        <button class="msg-menu-item" role="menuitem" @click="copyMessage(menu.message)">
+          <Copy :size="14" :stroke-width="1.9" />
+          复制
+        </button>
+        <button
+          class="msg-menu-item off"
+          role="menuitem"
+          @click="showNotice('翻译需要接入翻译服务，后端暂无此接口')"
+        >
+          <Languages :size="14" :stroke-width="1.9" />
+          翻译
+          <span class="msg-menu-tag">后端未接入</span>
+        </button>
+        <button class="msg-menu-item" role="menuitem" @click="forwardMessage(menu.message)">
+          <Share2 :size="14" :stroke-width="1.9" />
+          转发
+        </button>
+        <button class="msg-menu-item" role="menuitem" @click="startSelect(menu.message)">
+          <ListChecks :size="14" :stroke-width="1.9" />
+          多选
+        </button>
+        <button
+          class="msg-menu-item off"
+          role="menuitem"
+          @click="showNotice('引用需要消息表增加 reply 字段，后端暂无此能力')"
+        >
+          <Quote :size="14" :stroke-width="1.9" />
+          引用
+          <span class="msg-menu-tag">后端未接入</span>
+        </button>
+        <div class="msg-menu-sep" />
+        <button
+          class="msg-menu-item danger"
+          role="menuitem"
+          @click="deleteMessage(menu.message)"
+        >
+          <Trash2 :size="14" :stroke-width="1.9" />
+          删除
+          <span v-if="!canRecall(menu.message)" class="msg-menu-tag">仅本机</span>
+        </button>
+      </div>
+    </Teleport>
   </section>
 </template>
 

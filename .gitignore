@@ -13,3 +13,4 @@ dist/
 deploy/out/
 
 tools/e2e-fail.png
+dist.tar.gz

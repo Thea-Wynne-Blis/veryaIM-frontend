@@ -12,6 +12,7 @@ import MeView from '../components/MeView.vue'
 import NewChatDialog from '../components/NewChatDialog.vue'
 import CreateGroupDialog from '../components/CreateGroupDialog.vue'
 import GroupManageDialog from '../components/GroupManageDialog.vue'
+import ForwardDialog from '../components/ForwardDialog.vue'
 import { useIsMobile } from '../composables/useIsMobile'
 import { useChatStore } from '../stores/chat'
 import { useAuthStore } from '../stores/auth'
@@ -35,6 +36,8 @@ const theme = ref<'light' | 'dark'>(
 const dialogOpen = ref(false)
 const createGroupOpen = ref(false)
 const manageOpen = ref(false)
+/** 右键「转发」选中的消息 */
+const forwardTarget = ref<ChatMessage | null>(null)
 
 /** 建群成功后直接进入该群会话 */
 async function onGroupCreated(groupId: string) {
@@ -168,6 +171,13 @@ const messages = computed<ChatMessage[]>(() =>
       image: attachment?.kind === 'image',
       read: mine && !!peerReadSeq && item.seq <= peerReadSeq,
       recalled: !!item.recalled,
+      messageId: String(item.messageId),
+      type: item.type,
+      raw: decodeContent(item),
+      seq: item.seq,
+      mine,
+      createdAt: item.createdAt,
+      pending: item.pending,
     }
   }),
 )
@@ -209,6 +219,10 @@ async function attach(conversationId: string, file: File) {
   } catch {
     /* 错误已在 store 中展示 */
   }
+}
+
+function onForward(message: ChatMessage) {
+  forwardTarget.value = message
 }
 
 function navigate(target: string) {
@@ -345,6 +359,7 @@ onBeforeUnmount(() => {
         @send="(text) => chat.activeId && send(chat.activeId, text)"
         @attach="(file) => chat.activeId && attach(chat.activeId, file)"
         @toggle-detail="detailOpen = !detailOpen"
+        @forward="onForward"
       />
 
       <DetailPanel
@@ -393,5 +408,12 @@ onBeforeUnmount(() => {
     @close="manageOpen = false"
     @changed="onGroupChanged"
     @removed="onGroupRemoved"
+  />
+
+  <ForwardDialog
+    :open="!!forwardTarget"
+    :message="forwardTarget"
+    @close="forwardTarget = null"
+    @forwarded="forwardTarget = null"
   />
 </template>

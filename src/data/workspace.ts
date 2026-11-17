@@ -36,6 +36,15 @@ export type ChatMessage = {
   image?: boolean
   read?: boolean
   recalled?: boolean
+  /** 以下字段供右键菜单（复制 / 转发 / 删除）使用 */
+  messageId?: string
+  type?: string
+  /** 服务端存储的原始 content：文本为明文，附件为 JSON 字符串 */
+  raw?: string
+  seq?: number
+  mine?: boolean
+  createdAt?: string
+  pending?: boolean
 }
 
 export const conversations: Conversation[] = [
