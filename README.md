@@ -221,6 +221,8 @@ src/
 
 实现位置：`src/utils/media.ts`（`mediaKindOf` / `videoMetaOf` / `audioDurationOf`）、`src/api/client.ts`（`uploadFile` / `uploadChunked` / `thumbObjectUrl` / object URL 缓存）、`src/stores/chat.ts`（`uploads` 任务、`sendAttachment`、`open()` 增量刷新）、`src/components/MessageAttachment.vue`、`src/components/ChatPane.vue`。
 
+已知取舍：`/content` 需要 Bearer 头，`<video src>` 带不上，所以播放时先 `fetch` 成 object URL 再交给 `<video>`——慢网络下 20MB 视频要等整份下载完成（实测 600KB/s 约 33 秒）。要改成边下边播，需要后端为本地存储补一个短时效签名直链（`presignedUrl` 目前只对 MinIO/OSS 生效），再让 `<video src>` 直接指向它，由浏览器按 `Range` 拉流。
+
 ---
 
 ## 当前状态
