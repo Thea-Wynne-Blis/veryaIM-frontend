@@ -171,35 +171,15 @@ svg {
   }
 }
 
-/* ---------- 切换会话的入场（由 --enter-* 变量控制强度） ---------- */
+/* ---------- 切换会话的入场 ---------- */
 @keyframes surface-rise {
   from {
     opacity: 0;
-    transform: translateY(var(--enter-shift, 8px));
+    transform: translateY(8px);
   }
   to {
     opacity: 1;
     transform: translateY(0);
-  }
-}
-
-@keyframes surface-fade {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
-
-@keyframes surface-slide {
-  from {
-    opacity: 0;
-    transform: translateX(var(--enter-shift, 18px));
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
   }
 }
 

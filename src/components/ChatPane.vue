@@ -131,7 +131,7 @@ function disarmEnter() {
   }
 }
 
-/** 只负责在节点挂载时打上 enter 类，并通过 --enter-order 给 stagger 预设排先后。 */
+/** 只在节点挂载时打上 enter 类，并按序号触发一次「逐条流动」。 */
 const vEnter: ObjectDirective<HTMLElement, { order?: number; skip?: boolean }> = {
   mounted(el, binding) {
     if (!enterArmed || binding.value?.skip) return
@@ -144,7 +144,6 @@ const vEnter: ObjectDirective<HTMLElement, { order?: number; skip?: boolean }> =
  * 消息气泡本身不做「新消息」入场动画：自己发的消息应该在按下回车的下一帧就出现。
  * 这里负责分组，以及给每条消息一个稳定 key —— 乐观占位与服务端消息共用
  * clientMsgId，确认到达时 Vue 复用同一个节点，不会重建重排。
- * enterOrder 只用于 stagger 预设排序，是否真的播动画由 v-enter 指令的门控决定。
  */
 const grouping = computed(() => {
   const usedKeys = new Set<string>()

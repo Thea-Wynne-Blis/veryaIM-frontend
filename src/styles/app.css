@@ -932,37 +932,10 @@
 }
 
 /* ===========================================================
-   切换会话：入场动效预设（<html data-motion> 由「我 → 动效」切换）
-   只作用于切换后的首批消息与标题；发消息的占位气泡不参与。
+   切换会话：首批消息与标题做一次「逐条流动」
+   每条错开 10ms（封顶 100ms），约 280ms 收尾
+   发消息的占位气泡不参与（见 ChatPane / MobileWorkspace 的门控）
    =========================================================== */
-:root {
-  --enter-anim: surface-rise;
-  --enter-dur: 300ms;
-  --enter-shift: 8px;
-  --enter-step: 0ms;
-}
-
-[data-motion="fade"] {
-  --enter-anim: surface-fade;
-  --enter-dur: 240ms;
-}
-
-[data-motion="slide"] {
-  --enter-anim: surface-slide;
-  --enter-dur: 300ms;
-  --enter-shift: 18px;
-}
-
-[data-motion="stagger"] {
-  --enter-anim: surface-rise;
-  --enter-dur: 280ms;
-  --enter-step: 10ms;
-}
-
-[data-motion="none"] {
-  --enter-anim: none;
-}
-
 .msg.enter,
 .chat-head-main.enter,
 .chat-head > .avatar.enter,
@@ -970,11 +943,12 @@
 .messages-empty.enter,
 .msg-loading.enter,
 .m-loading.enter {
-  animation-name: var(--enter-anim);
-  animation-duration: var(--enter-dur);
-  animation-timing-function: var(--ease-out);
-  animation-fill-mode: both;
-  animation-delay: min(calc(var(--enter-order, 0) * var(--enter-step)), 100ms);
+  animation: surface-rise 280ms var(--ease-out) both;
+}
+
+/* 标题、空态、加载态没有 --enter-order，默认 0 即不动 */
+.msg.enter {
+  animation-delay: min(calc(var(--enter-order, 0) * 10ms), 100ms);
 }
 
 /* 日期分隔：两侧渐隐发丝线 */

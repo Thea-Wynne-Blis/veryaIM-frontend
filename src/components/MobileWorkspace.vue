@@ -165,6 +165,7 @@ function disarmEnter() {
   }
 }
 
+/** 只在节点挂载时打上 enter 类，并按序号触发一次「逐条流动」。 */
 const vEnter: ObjectDirective<HTMLElement, { order?: number; skip?: boolean }> = {
   mounted(el, binding) {
     if (!enterArmed || binding.value?.skip) return
