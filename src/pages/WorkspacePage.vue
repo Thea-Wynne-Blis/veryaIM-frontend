@@ -126,6 +126,8 @@ function attachmentOf(item: MessageView): Attachment | undefined {
       fileName?: string
       name?: string
       sizeBytes?: number
+      width?: number
+      height?: number
     }>(content)
     const fileId = data.fileId ? String(data.fileId) : undefined
     const name = data.fileName || data.name || `文件 ${fileId || ''}`.trim()
@@ -134,6 +136,8 @@ function attachmentOf(item: MessageView): Attachment | undefined {
       size: humanBytes(Number(data.sizeBytes ?? 0)),
       kind: item.type === 'IMAGE' ? 'image' : 'file',
       fileId,
+      width: Number(data.width) || undefined,
+      height: Number(data.height) || undefined,
     }
   } catch {
     return {

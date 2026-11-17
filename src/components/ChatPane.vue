@@ -17,6 +17,7 @@ import {
   Users,
   Loader2,
   X,
+  FileText,
   Copy,
   Languages,
   Share2,
@@ -30,7 +31,7 @@ import { resetMagnet, trackMagnet, trackSpotlight } from '../composables/usePoin
 import { useChatStore } from '../stores/chat'
 import type { ChatMessage, Conversation } from '../data/workspace'
 import type { MessageView } from '../api/client'
-import { clockTime } from '../utils/present'
+import { clockTime, humanBytes } from '../utils/present'
 
 const props = defineProps<{
   conversation: Conversation | null
@@ -72,6 +73,17 @@ const stickToBottom = ref(true)
 const attachmentInput = ref<HTMLInputElement | null>(null)
 const imageInput = ref<HTMLInputElement | null>(null)
 const canSend = computed(() => draft.value.trim().length > 0)
+
+/** 当前会话正在上传/发送的附件任务 */
+const activeUploads = computed(() => {
+  const id = props.conversation?.id
+  if (!id) return []
+  return chat.uploads.filter((task) => task.conversationId === id)
+})
+
+function cancelUpload(taskId: string) {
+  chat.cancelUpload(taskId)
+}
 const notice = ref('')
 let noticeTimer: number | null = null
 
@@ -319,6 +331,37 @@ function insertEmoji(emoji: string) {
   autoGrow()
 }
 
+/**
+ * 每个会话记住自己的滚动位置：切走再切回来应该停在原处，
+ * 而不是重新拉到最底部（那会看起来像整页重新加载）。
+ */
+const scrollMemory = new Map<string, { top: number; stick: boolean }>()
+
+function rememberScroll(conversationId?: string | null) {
+  const el = scroller.value
+  if (!conversationId || !el) return
+  scrollMemory.set(conversationId, { top: el.scrollTop, stick: stickToBottom.value })
+  if (scrollMemory.size > 60) {
+    const oldest = scrollMemory.keys().next().value
+    if (oldest !== undefined) scrollMemory.delete(oldest)
+  }
+}
+
+function restoreScroll(conversationId: string) {
+  const saved = scrollMemory.get(conversationId)
+  stickToBottom.value = saved ? saved.stick : true
+  const target = saved && !saved.stick ? saved.top : null
+  nextTick(() => {
+    const el = scroller.value
+    if (!el) return
+    if (target == null) {
+      el.scrollTop = el.scrollHeight
+      return
+    }
+    el.scrollTop = Math.min(target, Math.max(0, el.scrollHeight - el.clientHeight))
+  })
+}
+
 function scrollToBottom(force = false) {
   if (!force && !stickToBottom.value) return
   nextTick(() => {
@@ -403,17 +446,18 @@ function previewText(message: MessageView): string {
   return `[${message.type}]`
 }
 
-watch(() => props.messages.length, () => scrollToBottom())
+// 会话切换必须先于消息长度监听执行，否则离开时会以新内容的高度覆盖旧的滚动位置
 watch(
   () => props.conversation?.id,
-  () => {
+  (newId, oldId) => {
+    rememberScroll(oldId)
     closeMenu()
     exitSelect()
-    stickToBottom.value = true
-    scrollToBottom(true)
+    if (newId) restoreScroll(newId)
   },
   { immediate: true },
 )
+watch(() => props.messages.length, () => scrollToBottom())
 </script>
 
 <template>
@@ -582,6 +626,41 @@ watch(
 
         <p v-if="error" class="send-error">{{ error }}</p>
         <p v-if="notice" class="send-notice">{{ notice }}</p>
+
+        <!-- 上传进度：细线、低对比，传完即消失 -->
+        <div v-if="activeUploads.length" class="upload-list">
+          <div v-for="task in activeUploads" :key="task.id" class="upload-item">
+            <span class="upload-thumb">
+              <img v-if="task.previewUrl" :src="task.previewUrl" alt="" />
+              <FileText v-else :size="13" :stroke-width="1.8" />
+            </span>
+            <span class="upload-main">
+              <span class="upload-head">
+                <span class="upload-name truncate">{{ task.name }}</span>
+                <span class="upload-size num">{{ humanBytes(task.sizeBytes) }}</span>
+                <span class="upload-pct num">
+                  <template v-if="task.phase === 'send'">发送中</template>
+                  <template v-else>{{ Math.round(task.progress * 100) }}%</template>
+                </span>
+              </span>
+              <span class="upload-track">
+                <span
+                  class="upload-fill"
+                  :class="{ done: task.phase === 'send' }"
+                  :style="{ width: `${Math.max(2, Math.round(task.progress * 100))}%` }"
+                />
+              </span>
+            </span>
+            <button
+              class="upload-cancel"
+              type="button"
+              aria-label="取消上传"
+              @click="cancelUpload(task.id)"
+            >
+              <X :size="12" :stroke-width="2" />
+            </button>
+          </div>
+        </div>
 
         <div v-if="emojiOpen" class="emoji-panel">
           <button

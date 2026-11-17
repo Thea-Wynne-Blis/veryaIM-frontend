@@ -1,25 +1,47 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { Download, FileText, ImageOff, Loader2 } from 'lucide-vue-next'
-import { downloadFile, fileObjectUrl } from '../api/client'
+import { downloadFile, fileObjectUrl, thumbObjectUrl } from '../api/client'
 import type { Attachment } from '../data/workspace'
 
 const props = defineProps<{ attachment: Attachment }>()
 
-const preview = ref('')
+/** 气泡里显示缩略图；原图只在点开时才下载。 */
+const thumb = ref('')
 const loading = ref(false)
 const failed = ref(false)
 const downloading = ref(false)
+const opening = ref(false)
 
-const isImage = props.attachment.kind === 'image'
+const isImage = computed(() => props.attachment.kind === 'image')
 
-async function loadPreview() {
-  if (!isImage || !props.attachment.fileId) return
+/**
+ * 用消息里记录的宽高先占位，图片到达前后高度一致，列表不会跳动。
+ * 没有记录（老消息）时退回 3:2，接近常见截图比例。
+ */
+const ratioStyle = computed(() => {
+  const width = Number(props.attachment.width) || 0
+  const height = Number(props.attachment.height) || 0
+  if (width > 0 && height > 0) {
+    return { aspectRatio: `${width} / ${height}` }
+  }
+  return { aspectRatio: '3 / 2' }
+})
+
+async function loadThumb() {
+  const fileId = props.attachment.fileId
+  if (!isImage.value || !fileId) return
   loading.value = true
+  failed.value = false
   try {
-    preview.value = await fileObjectUrl(props.attachment.fileId)
+    thumb.value = await thumbObjectUrl(fileId)
   } catch {
-    failed.value = true
+    // 缩略图生成失败（少见格式）时回退原图，至少能看
+    try {
+      thumb.value = await fileObjectUrl(fileId)
+    } catch {
+      failed.value = true
+    }
   } finally {
     loading.value = false
   }
@@ -35,21 +57,44 @@ async function download() {
   }
 }
 
-function openPreview() {
-  if (preview.value) window.open(preview.value, '_blank')
+/** 点击才取原图；object URL 由 api 层缓存，反复打开不会重复下载。 */
+async function openPreview() {
+  const fileId = props.attachment.fileId
+  if (!fileId || opening.value) return
+  opening.value = true
+  try {
+    const url = await fileObjectUrl(fileId)
+    window.open(url, '_blank', 'noopener')
+  } catch {
+    failed.value = true
+  } finally {
+    opening.value = false
+  }
 }
 
-onMounted(loadPreview)
-onBeforeUnmount(() => {
-  if (preview.value) URL.revokeObjectURL(preview.value)
-})
+onMounted(loadThumb)
+
+// 虚拟列表复用组件时 fileId 会变，缩略图跟着换
+watch(
+  () => props.attachment.fileId,
+  () => {
+    thumb.value = ''
+    void loadThumb()
+  },
+)
 </script>
 
 <template>
   <div v-if="isImage" class="bubble media">
     <button class="image-wrap" type="button" title="打开原图" @click="openPreview">
-      <img v-if="preview" :src="preview" :alt="attachment.name" />
-      <span v-else class="media-ph">
+      <img
+        v-if="thumb"
+        :src="thumb"
+        :alt="attachment.name"
+        decoding="async"
+        :style="ratioStyle"
+      />
+      <span v-else class="media-ph" :style="ratioStyle">
         <Loader2 v-if="loading" :size="18" class="spin" />
         <template v-else>
           <ImageOff :size="20" :stroke-width="1.6" />
@@ -99,6 +144,11 @@ onBeforeUnmount(() => {
   max-height: 260px;
   object-fit: cover;
   border-radius: calc(var(--r-md) - 3px);
+}
+
+.media-ph {
+  width: 258px;
+  max-height: 260px;
 }
 
 .image-download {

@@ -124,6 +124,21 @@ ssh ubuntu@82.157.47.151 'sudo install -m 0644 /tmp/veryal-bootstrap-1.0.0-SNAPS
     /home/ubuntu/veryal/backend/veryal-bootstrap.jar && sudo systemctl restart veryal-backend'
 ```
 
+### 图片缩略图
+
+图片消息的气泡只请求 `GET /api/v1/files/{id}/thumb?w=480`（约 30–60KB），
+首次访问时生成，落在原文件旁边：`<objectKey>.thumb-480.jpg`。
+`/content` 与 `/thumb` 都带 `ETag` 和 `Cache-Control: private, max-age=31536000, immutable`，
+浏览器回访不会重复下载。
+
+删除文件时后端会连带删除默认缩略图。手工清数据时可以直接清理：
+
+```bash
+sudo find /home/ubuntu/veryal/data/files -name '*.thumb-*.jpg' -delete
+```
+
+删掉后下次访问会重新生成（单张约 0.5s，之后走缓存）。
+
 ### 完整重装
 
 ```bash

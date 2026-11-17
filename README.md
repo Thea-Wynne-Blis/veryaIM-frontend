@@ -181,6 +181,27 @@ src/
 
 ---
 
+## 附件上传与图片浏览
+
+图片方案的目标是「切会话不再像重新加载」：上传只传一次，展示只下载缩略图，回到会话直接命中缓存。
+
+| 环节 | 优化前 | 现在 |
+|---|---|---|
+| 上传反馈 | `fetch` 没有进度事件，点完只能等 | `XMLHttpRequest` 回报字节进度，输入区上方一条 2px 细线进度条（本地缩略图 / 文件名 / 大小 / 百分比 / 取消） |
+| 服务端处理 | 2.4MB PNG 也完整解码 + 重编码，约 500ms | 只读图片头判断尺寸，未超 1920px 的 PNG 原样入库；实测 470–580ms → 90–130ms |
+| 气泡里的图片 | 每条消息都下原图（2.4MB） | 先取 `/files/{id}/thumb?w=480`（约 33KB），点开才取原图 |
+| 切走再回来 | 组件重新挂载 → 重新下载 + 解码 | object URL 按 `fileId` 缓存（LRU 48 条），直接命中，不发请求 |
+| 滚动位置 | 每次进入都强制贴底 | 按会话记住 `scrollTop`，切回来停在原处；只有首次打开才贴底 |
+| 布局跳动 | 图片加载完才撑开气泡 | 消息 `content` 记录 `width/height`，用 `aspect-ratio` 先占位（老消息回退 3:2） |
+
+服务端对 `/content` 与 `/thumb` 都返回 `ETag` + `Cache-Control: private, max-age=31536000, immutable`，支持 `If-None-Match` → `304`；缩略图首次生成后落盘缓存（`<objectKey>.thumb-480.jpg`）。
+
+自己刚上传的图片（≤3MB）会把本地 object URL 直接塞进缓存，气泡立即显示，不用等服务端生成缩略图；更大的图片走服务端缩略图，避免原图长期占内存。
+
+实现位置：`src/api/client.ts`（`uploadWithProgress` / `thumbObjectUrl` / object URL 缓存）、`src/stores/chat.ts`（`uploads` 任务、`sendAttachment`、`open()` 增量刷新）、`src/components/MessageAttachment.vue`、`src/components/ChatPane.vue`。
+
+---
+
 ## 当前状态
 
 已接入真实后端（`/api/v1`，Bearer 鉴权），不再是本地演示数据：

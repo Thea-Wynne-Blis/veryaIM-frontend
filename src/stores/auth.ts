@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import {
   api,
+  clearFileCache,
   clearSession,
   deviceHeaders,
   resetDeviceId,
@@ -95,6 +96,7 @@ export const useAuthStore = defineStore('auth', {
       }
       this.token = null
       this.user = null
+      clearFileCache()
       clearSession()
     },
   },

@@ -189,11 +189,143 @@ export async function downloadFile(fileId: Id, filename: string): Promise<void> 
   window.setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
-/** 图片等需要鉴权的资源转成本地 object URL。调用方负责 revoke。 */
-export async function fileObjectUrl(fileId: Id): Promise<string> {
-  const response = await authorizedFetch(`/files/${fileId}/content`)
-  return URL.createObjectURL(await response.blob())
+/* ---------- 鉴权图片的内存缓存 ---------- */
+
+/**
+ * 图片必须带 Bearer Token 才能取，无法直接给 `<img src>`，
+ * 只能 fetch 成 blob 再转 object URL。切换会话时组件会重新挂载，
+ * 如果每次都重新下载 2MB 原图，体验就是「每切一次都在重新加载」。
+ * 这里按 fileId 缓存 object URL（LRU，最多 48 张），切回来直接命中。
+ */
+const MAX_CACHED_OBJECT_URLS = 48
+const objectUrlCache = new Map<string, Promise<string>>()
+
+function rememberObjectUrl(key: string, task: Promise<string>): Promise<string> {
+  objectUrlCache.delete(key)
+  objectUrlCache.set(key, task)
+  task.catch(() => {
+    if (objectUrlCache.get(key) === task) objectUrlCache.delete(key)
+  })
+  while (objectUrlCache.size > MAX_CACHED_OBJECT_URLS) {
+    const oldest = objectUrlCache.keys().next().value as string | undefined
+    if (oldest === undefined) break
+    const stale = objectUrlCache.get(oldest)
+    objectUrlCache.delete(oldest)
+    stale?.then((url) => URL.revokeObjectURL(url)).catch(() => {})
+  }
+  return task
 }
+
+function cachedObjectUrl(path: string, cacheKey: string): Promise<string> {
+  const hit = objectUrlCache.get(cacheKey)
+  if (hit) return rememberObjectUrl(cacheKey, hit)
+  const task = authorizedFetch(path)
+    .then((response) => response.blob())
+    .then((blob) => URL.createObjectURL(blob))
+  return rememberObjectUrl(cacheKey, task)
+}
+
+/** 原图（点击放大、下载用）。 */
+export function fileObjectUrl(fileId: Id): Promise<string> {
+  return cachedObjectUrl(`/files/${fileId}/content`, `full:${fileId}`)
+}
+
+/** 图片消息气泡用的缩略图（服务端缩到 480px，通常几十 KB）。 */
+export function thumbObjectUrl(fileId: Id): Promise<string> {
+  return cachedObjectUrl(`/files/${fileId}/thumb?w=480`, `thumb:${fileId}`)
+}
+
+/** 退出登录时清掉缓存，避免下一个账号看到上一个人的图片。 */
+export function clearFileCache(): void {
+  for (const task of objectUrlCache.values()) {
+    task.then((url) => URL.revokeObjectURL(url)).catch(() => {})
+  }
+  objectUrlCache.clear()
+}
+
+/**
+ * 自己刚上传的图片：本地已有 File，直接把这个 object URL 放进缓存，
+ * 气泡和“看大图”都用它，省掉一次服务端缩略图生成（约 0.5s）与下载。
+ *
+ * <p>调用后这个 URL 归缓存所有，调用方不要再 revoke。</p>
+ */
+export function seedFilePreview(fileId: Id, url: string): void {
+  for (const cacheKey of [`thumb:${fileId}`, `full:${fileId}`]) {
+    if (objectUrlCache.has(cacheKey)) continue
+    rememberObjectUrl(cacheKey, Promise.resolve(url))
+  }
+}
+
+/* ---------- 带进度的上传 ---------- */
+
+export type UploadOptions = {
+  onProgress?: (ratio: number) => void
+  signal?: AbortSignal
+}
+
+/**
+ * multipart 上传并回报进度。
+ *
+ * <p>fetch 没有上传进度事件，这里退到 XMLHttpRequest；其它请求仍走 fetch。</p>
+ */
+export function uploadWithProgress<T>(
+  path: string,
+  form: FormData,
+  options: UploadOptions = {},
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', `${BASE}${path}`, true)
+    const token = getToken()
+    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+    xhr.responseType = 'text'
+
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) {
+        options.onProgress?.(Math.min(1, event.loaded / event.total))
+      }
+    }
+
+    xhr.onload = () => {
+      let body: ApiEnvelope<T> | null = null
+      try {
+        body = parseBody<T>(xhr.status, xhr.responseText)
+      } catch (error) {
+        reject(error instanceof Error ? error : new ApiError(xhr.status, -1, '响应格式错误'))
+        return
+      }
+      if (xhr.status === 401) onUnauthorized()
+      if (xhr.status < 200 || xhr.status >= 300) {
+        reject(new ApiError(
+          xhr.status,
+          body?.code ?? xhr.status,
+          body?.message ?? `上传失败 (${xhr.status})`,
+        ))
+        return
+      }
+      if (body && body.code !== 0 && body.code != null) {
+        reject(new ApiError(xhr.status, body.code, body.message || '上传失败'))
+        return
+      }
+      resolve((body ? body.data : undefined) as T)
+    }
+
+    xhr.onerror = () => reject(new ApiError(0, -1, '网络连接失败，请检查网络'))
+    xhr.ontimeout = () => reject(new ApiError(0, -1, '上传超时'))
+    xhr.onabort = () => reject(new ApiError(0, -2, '已取消'))
+
+    if (options.signal) {
+      if (options.signal.aborted) {
+        xhr.abort()
+        return
+      }
+      options.signal.addEventListener('abort', () => xhr.abort(), { once: true })
+    }
+
+    xhr.send(form)
+  })
+}
+
 
 export const api = {
   get: <T>(path: string) => request<T>(path),

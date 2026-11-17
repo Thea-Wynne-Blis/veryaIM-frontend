@@ -1,8 +1,11 @@
 import { defineStore } from 'pinia'
 import {
+  ApiError,
   api,
   getToken,
   sameId,
+  seedFilePreview,
+  uploadWithProgress,
   type ConversationCard,
   type FileRow,
   type GroupDetail,
@@ -54,6 +57,40 @@ export type ChatMember = {
   role?: string
 }
 
+/** 上传统计：上传中 / 发送中，供输入区渲染进度条。 */
+export type UploadTask = {
+  id: string
+  conversationId: string
+  name: string
+  sizeBytes: number
+  /** 0~1 的字节传输进度 */
+  progress: number
+  phase: 'upload' | 'send'
+  /** 图片本地预览（object URL，任务结束时 revoke） */
+  previewUrl?: string
+  width?: number
+  height?: number
+}
+
+/** AbortController 不能进 Pinia state，放模块级 Map。 */
+const uploadControllers = new Map<string, AbortController>()
+
+/** 超过这个大小的图片不再把本地预览塞进缓存，避免几十张原图把内存顶爆。 */
+const SEED_PREVIEW_MAX_BYTES = 3 * 1024 * 1024
+
+/** 读本地图片尺寸，用于气泡占位，避免加载完成后撑开导致跳动。 */
+async function imageSizeOf(file: File): Promise<{ width: number; height: number } | null> {
+  if (typeof createImageBitmap !== 'function') return null
+  try {
+    const bitmap = await createImageBitmap(file)
+    const size = { width: bitmap.width, height: bitmap.height }
+    bitmap.close()
+    return size
+  } catch {
+    return null
+  }
+}
+
 type Prefs = { pinned: string[]; muted: string[]; hidden: Record<string, string[]> }
 
 function loadPrefs(): Prefs {
@@ -92,6 +129,8 @@ type State = {
   mutedIds: string[]
   /** 仅本机删除（服务端无删除接口），按会话记录被隐藏的消息 id */
   hiddenIds: Record<string, string[]>
+  /** 正在上传/发送的附件任务 */
+  uploads: UploadTask[]
 }
 
 /** 后端字段名是 sequence，前端统一用 seq */
@@ -129,6 +168,7 @@ export const useChatStore = defineStore('chat', {
       pinnedIds: prefs.pinned,
       mutedIds: prefs.muted,
       hiddenIds: prefs.hidden,
+      uploads: [],
     }
   },
 
@@ -220,9 +260,12 @@ export const useChatStore = defineStore('chat', {
 
       const lastSeq = card?.lastSeq ?? 0
       const existing = (this.messages[conversationId] ?? []).filter((item) => !item.pending)
-      const loadedSeq = existing.length ? existing[existing.length - 1]!.seq : -1
-      if (!existing.length || loadedSeq < lastSeq) {
+      if (!existing.length) {
+        // 首次打开：拉最近一页，显示骨架
         await this.loadMessages(conversationId, Math.max(0, lastSeq - PAGE_SIZE))
+      } else if (lastSeq > existing[existing.length - 1]!.seq) {
+        // 有缓存：只补离开期间的新消息，不整页重拉、也不切加载态
+        void this.refreshMessages(conversationId)
       }
 
       await Promise.allSettled([
@@ -330,8 +373,8 @@ export const useChatStore = defineStore('chat', {
       }
     },
 
-    async sendRaw(type: string, content: string, preview: string) {
-      const conversationId = this.activeId
+    async sendRaw(type: string, content: string, preview: string, targetId?: string) {
+      const conversationId = targetId ?? this.activeId
       if (!conversationId) throw new Error('没有选中的会话')
       const clientMessageId = `w-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
       this.error = null
@@ -450,28 +493,95 @@ export const useChatStore = defineStore('chat', {
       return resp
     },
 
-    /** 先上传文件，再以 IMAGE / FILE 消息发送。 */
+    /**
+     * 先上传文件，再以 IMAGE / FILE 消息发送。
+     *
+     * <p>上传走 XHR 以便回报字节进度（fetch 没有上传进度事件）；
+     * 任务同时写进 `uploads`，由输入区渲染细线进度条，可中途取消。</p>
+     */
     async sendAttachment(file: File) {
-      if (!this.activeId) throw new Error('没有选中的会话')
+      const conversationId = this.activeId
+      if (!conversationId) throw new Error('没有选中的会话')
       this.error = null
-      const form = new FormData()
-      form.append('file', file)
-      form.append('conversationId', this.activeId)
+
+      const isImage = (file.type || '').startsWith('image/')
+      const taskId = `u-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+      const controller = new AbortController()
+      uploadControllers.set(taskId, controller)
+
+      const task: UploadTask = {
+        id: taskId,
+        conversationId,
+        name: file.name,
+        sizeBytes: file.size,
+        progress: 0,
+        phase: 'upload',
+        previewUrl: isImage ? URL.createObjectURL(file) : undefined,
+      }
+      this.uploads.push(task)
+      // 从 state 里取回响应式代理，否则直接改进度不会触发视图更新
+      const live = this.uploads[this.uploads.length - 1]!
+
+      const size = isImage ? await imageSizeOf(file) : null
+      if (size) {
+        live.width = size.width
+        live.height = size.height
+      }
+
       try {
-        const uploaded = await api.upload<FileRow>('/files', form)
+        const form = new FormData()
+        form.append('file', file)
+        form.append('conversationId', conversationId)
+        const uploaded = await uploadWithProgress<FileRow>('/files', form, {
+          signal: controller.signal,
+          onProgress: (ratio) => {
+            live.progress = ratio
+          },
+        })
+
         const image = (file.type || uploaded.contentType || '').startsWith('image/')
         const content = JSON.stringify({
           fileId: uploaded.fileId,
           fileName: uploaded.name || file.name,
           sizeBytes: uploaded.sizeBytes,
           contentType: uploaded.contentType,
+          ...(size ? { width: size.width, height: size.height } : {}),
         })
+        live.phase = 'send'
+        live.progress = 1
+        // 自己刚传的图片：把本地预览塞进缓存，气泡立即显示，不必等服务端缩略图
+        if (isImage && live.previewUrl && file.size <= SEED_PREVIEW_MAX_BYTES) {
+          seedFilePreview(uploaded.fileId, live.previewUrl)
+          live.previewUrl = undefined
+        }
         const preview = image ? '[图片]' : `[文件] ${uploaded.name || file.name}`
-        return await this.sendRaw(image ? 'IMAGE' : 'FILE', content, preview)
+        return await this.sendRaw(image ? 'IMAGE' : 'FILE', content, preview, conversationId)
       } catch (e) {
-        this.error = e instanceof Error ? e.message : '上传失败'
+        // code -2 = 用户取消，不当作错误提示
+        const cancelled = e instanceof ApiError && e.code === -2
+        if (!cancelled) {
+          this.error = e instanceof Error ? e.message : '上传失败'
+        }
         throw e
+      } finally {
+        uploadControllers.delete(taskId)
+        this.dropUpload(taskId)
       }
+    },
+
+    /** 移除上传任务并释放本地预览 URL。 */
+    dropUpload(taskId: string) {
+      const index = this.uploads.findIndex((item) => item.id === taskId)
+      if (index < 0) return
+      const [removed] = this.uploads.splice(index, 1)
+      if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl)
+    },
+
+    /** 取消上传/发送中的附件任务。 */
+    cancelUpload(taskId: string) {
+      uploadControllers.get(taskId)?.abort()
+      uploadControllers.delete(taskId)
+      this.dropUpload(taskId)
     },
 
     async searchMessages(conversationId: string, keyword: string): Promise<MessageView[]> {
@@ -744,6 +854,12 @@ export const useChatStore = defineStore('chat', {
     reset() {
       this.stopPolling()
       this.stopRealtime()
+      for (const controller of uploadControllers.values()) controller.abort()
+      uploadControllers.clear()
+      for (const task of this.uploads) {
+        if (task.previewUrl) URL.revokeObjectURL(task.previewUrl)
+      }
+      this.uploads = []
       this.cards = []
       this.messages = {}
       this.receipts = {}

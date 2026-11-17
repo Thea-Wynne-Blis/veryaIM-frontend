@@ -22,6 +22,9 @@ export type Attachment = {
   kind: 'file' | 'image'
   /** 雪花 ID 超出 JS 安全整数，可能以 string 形式存在。 */
   fileId?: string | number
+  /** 图片原始像素，用于气泡占位，避免加载后跳动 */
+  width?: number
+  height?: number
 }
 
 export type ChatMessage = {
