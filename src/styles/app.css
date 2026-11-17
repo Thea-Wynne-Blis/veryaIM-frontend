@@ -1985,8 +1985,9 @@
   background: #b93636;
 }
 
+/* 按下时的背景必须是不透明的，否则会把身后的右滑操作按钮透出来 */
 .m-conv:active {
-  background: var(--surface-active);
+  background: color-mix(in srgb, var(--canvas) 92%, var(--ink));
 }
 
 .m-conv-main {

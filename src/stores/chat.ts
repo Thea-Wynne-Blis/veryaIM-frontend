@@ -263,7 +263,7 @@ export const useChatStore = defineStore('chat', {
       })
     },
 
-    /** 「不显示」：从列表里移除，收到新消息后会由服务端重新带回。 */
+    /** 「不显示」：本次从列表移开；重新打开会话或收到新消息后会恢复显示。 */
     async hideConversation(conversationId: string) {
       const card = this.cards.find((item) => item.conversationId === conversationId)
       if (card) card.hidden = true
@@ -273,6 +273,19 @@ export const useChatStore = defineStore('chat', {
         if (card) card.hidden = false
         this.error = e instanceof Error ? e.message : '操作失败'
         throw e
+      }
+    },
+
+    /** 「不显示」只是本次从列表移开：重新打开会话就恢复显示。 */
+    async restoreConversation(conversationId: string) {
+      const card = this.cards.find((item) => item.conversationId === conversationId)
+      if (!card?.hidden) return
+      card.hidden = false
+      try {
+        await updateConversationPrefs(conversationId, { hidden: false })
+      } catch (e) {
+        card.hidden = true
+        this.error = e instanceof Error ? e.message : '恢复会话显示失败'
       }
     },
 
@@ -381,6 +394,8 @@ export const useChatStore = defineStore('chat', {
       await Promise.allSettled([
         this.markRead(conversationId),
         this.loadReceipts(conversationId),
+        // 从通讯录/搜索重新打开「不显示」的会话时，让它回到聊天列表
+        this.restoreConversation(conversationId),
       ])
 
       if (card && card.unreadCount > 0) card.unreadCount = 0
