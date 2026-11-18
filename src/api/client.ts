@@ -542,6 +542,72 @@ export type FileRow = {
 
 export type ReadReceipt = { userId: Id; readSequence: number }
 
+/** 会话文件：图片 / 文件 / 语音 / 视频消息里的附件。 */
+export type ConversationFile = {
+  fileId: Id
+  messageId: Id
+  type: 'IMAGE' | 'FILE' | 'AUDIO' | 'VIDEO' | string
+  name: string
+  sizeBytes: number
+  contentType: string
+  senderId: Id
+  senderName: string
+  createdAt: string
+}
+
+/** 收藏项：文本消息带 text，附件消息带 fileId/fileName。 */
+export type Favorite = {
+  id: Id
+  conversationId: string
+  messageId: Id
+  type: string
+  text?: string | null
+  fileId?: Id | null
+  fileName?: string | null
+  sizeBytes?: number | null
+  contentType?: string | null
+  senderId: Id
+  senderName: string
+  conversationTitle: string
+  createdAt: string
+}
+
+/** 全局搜索结果。 */
+export type SearchResults = {
+  contacts: Array<{
+    userId: Id
+    name: string
+    nickname: string
+    remark?: string | null
+    avatar?: string | null
+    online: boolean
+  }>
+  groups: Array<{ conversationId: string; title: string; memberCount: number }>
+  messages: Array<{
+    messageId: Id
+    conversationId: string
+    conversationTitle: string
+    senderId: Id
+    senderName: string
+    text: string
+    createdAt: string
+  }>
+  files: Array<{
+    fileId: Id
+    messageId: Id
+    conversationId: string
+    conversationTitle: string
+    name: string
+    type: string
+    sizeBytes: number
+    contentType: string
+    senderId: Id
+    senderName: string
+    createdAt: string
+  }>
+}
+
+
 export type GroupDetail = {
   groupId: string
   name: string

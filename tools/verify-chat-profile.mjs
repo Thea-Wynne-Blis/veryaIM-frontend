@@ -199,7 +199,13 @@ const previewContract = await page.evaluate(async () => {
     name: el.querySelector('.conv-name')?.textContent?.trim() ?? '',
     preview: el.querySelector('.conv-preview')?.textContent?.trim() ?? '',
   }))
-  return { cards, rows, bobId: bob ? String(bob.friendId) : null }
+  return {
+    cards,
+    rows,
+    bobId: bob ? String(bob.friendId) : null,
+    // 群里的作者名现在优先显示好友备注，和单聊标题保持一致。
+    bobDisplayName: bob ? (bob.remark?.trim() || bob.nickname) : null,
+  }
 })
 if (previewContract.error) {
   check('group preview renders sender name prefix', false, previewContract.error)
@@ -229,6 +235,8 @@ const directCard = previewContract.cards?.find(
   (card) => card.type === 'PRIVATE' && String(card.peerUserId) === previewContract.bobId,
 )
 const DIRECT_ROW = directCard?.title ?? DIRECT
+/** 群聊里鲍勃的显示名：有备注时是备注，没备注才是昵称。 */
+const FRIEND = previewContract.bobDisplayName ?? DIRECT
 await openConversation(DIRECT_ROW)
 await page.waitForSelector('.msg', { timeout: 15000 })
 check('direct chat has message avatars',
@@ -324,7 +332,7 @@ async function openByAuthor(name) {
   return waitCard()
 }
 
-const friendText = await openByAuthor('鲍勃')
+const friendText = await openByAuthor(FRIEND)
 check('group friend avatar opens friend card',
   /好友/.test(friendText) && /添加时间/.test(friendText), friendText.replace(/\n/g, ' | '))
 await closeCard()
@@ -352,7 +360,7 @@ if (!(await page.locator('.frame.detail-open').count())) {
   await page.click('button[aria-label="会话详情"]')
 }
 await page.waitForSelector('.detail-pane .member', { timeout: 10000 })
-const member = page.locator('.detail-pane .member', { hasText: '鲍勃' }).first()
+const member = page.locator('.detail-pane .member', { hasText: FRIEND }).first()
 check('detail panel member exists', (await member.count()) === 1)
 await member.locator('.member-avatar').click()
 const memberText = await waitCard()
@@ -360,7 +368,85 @@ check('detail panel member opens profile',
   /鲍勃/.test(memberText) && /添加时间/.test(memberText), memberText.replace(/\n/g, ' | '))
 await closeCard()
 
+// ---------- 7. 会话文件 / 全局搜索 / 收藏 ----------
+const pageToken = await page.evaluate(() => localStorage.getItem('veryal.token'))
+const fileName = `e2e-${Date.now()}.txt`
+const form = new FormData()
+form.append('file', new Blob(['veryal note'], { type: 'text/plain' }), fileName)
+form.append('conversationId', directCard.conversationId)
+const uploadRaw = await fetch(`${BASE}/api/v1/files`, {
+  method: 'POST',
+  headers: { Authorization: `Bearer ${pageToken}` },
+  body: form,
+}).then((r) => r.text())
+// fileId 是雪花 ID，超过 2^53，JSON.parse 会丢精度，按文本抠原始数字。
+const uploadedFileId = uploadRaw.match(/"fileId":(\d+)/)?.[1]
+check('file upload for conversation file test', Boolean(uploadedFileId), uploadRaw)
+
+if (uploadedFileId) {
+  await fetch(`${BASE}/api/v1/conversations/${directCard.conversationId}/messages`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${pageToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      conversationId: directCard.conversationId,
+      clientMessageId: `file-${Date.now()}`,
+      type: 'FILE',
+      // content 里必须是原始数字，否则后端按字符串取不到 fileId。
+      content: `{"fileId":${uploadedFileId},"fileName":"${fileName}"}`,
+    }),
+  })
+}
+
+// 刚发的消息没经过 WebSocket（脚本直接打 API），刷新一次页面拿最新会话与消息。
+await page.reload({ waitUntil: 'domcontentloaded' })
+await page.waitForSelector('.conv', { timeout: 20000 })
+
+await openConversation(DIRECT_ROW)
+if (!(await page.locator('.frame.detail-open').count())) {
+  await page.click('button[aria-label="会话详情"]')
+}
+await page.click('.detail-tab:has-text("文件")')
+await page.waitForSelector('.file-filters', { timeout: 10000 })
+const fileRow = page.locator('.file-row', { hasText: fileName }).first()
+await fileRow.waitFor({ timeout: 15000 })
+check('detail panel lists conversation files', (await fileRow.count()) === 1)
+
+await page.click('.detail-tab:has-text("详情")')
+await page.click('button[aria-label="搜索聊天记录"]')
+await page.waitForSelector('.search-pane input', { timeout: 10000 })
+await page.fill('.search-pane input', fileName)
+await page.waitForSelector('.hit-group', { timeout: 15000 })
+const searchText = await page.locator('.search-pane').innerText()
+check('global search finds the file', searchText.includes(fileName))
+check('search offers sender and conversation context', searchText.includes('文件'))
+await page.click('button[aria-label="关闭搜索"]')
+await page.waitForSelector('.search-pane', { state: 'detached', timeout: 10000 })
+
+// 右键文件消息 → 收藏。
+const fileMsg = page.locator('.msg', { hasText: fileName }).first()
+await fileMsg.waitFor({ timeout: 15000 })
+await fileMsg.click({ button: 'right' })
+await page.waitForSelector('.msg-menu-item:has-text("收藏")', { timeout: 10000 })
+await page.click('.msg-menu-item:has-text("收藏")')
+await page.waitForSelector('.app-toast:has-text("已收藏")', { timeout: 10000 })
+check('message menu favorites the message', true)
+
+await page.click('button[aria-label="收藏"]')
+await page.waitForURL('**/app/favorites', { timeout: 10000 })
+await page.waitForSelector('.fav-row', { timeout: 15000 })
+const favText = await page.locator('.favorites').innerText()
+check('favorite appears in the favorites page', favText.includes(fileName), favText.replace(/\n/g, ' | '))
+
+await page.locator('.fav-main', { hasText: fileName }).first().click()
+await page.waitForFunction(
+  (target) => document.querySelector('.chat-title')?.textContent?.includes(target),
+  DIRECT_ROW,
+  { timeout: 15000 },
+)
+check('favorite links back to the original conversation', true)
+
 await page.screenshot({ path: 'tools/verify-chat-profile.png' })
+
 await browser.close()
 
 const failed = results.filter((item) => !item.ok)

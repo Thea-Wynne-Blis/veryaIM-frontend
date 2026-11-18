@@ -393,6 +393,7 @@ export const useChatStore = defineStore('chat', {
           const members: ChatMember[] = list.map((member) => ({
             userId: member.userId,
             nickname: member.nickname,
+            remark: member.remark ?? null,
             avatar: member.avatar,
             online: member.online,
             role:

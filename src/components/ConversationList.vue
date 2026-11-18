@@ -21,6 +21,7 @@ const emit = defineEmits<{
   (e: 'mute', id: string, muted: boolean): void
   (e: 'hide', id: string): void
   (e: 'remove', id: string): void
+  (e: 'open-search'): void
 }>()
 
 type Filter = 'all' | 'unread'
@@ -152,13 +153,15 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <label class="search">
+      <label class="search" @click.prevent="emit('open-search')">
         <Search class="search-icon" :size="15" :stroke-width="2" />
         <input
           v-model="keyword"
           type="search"
           placeholder="搜索会话、联系人"
           aria-label="搜索会话"
+          readonly
+          @click.prevent
         />
         <kbd>⌘K</kbd>
       </label>

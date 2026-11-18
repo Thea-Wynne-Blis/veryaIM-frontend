@@ -218,6 +218,11 @@ async function loadFriends() {
   }
 }
 
+/** 群成员显示名：好友备注优先。 */
+function nameOf(member: GroupMemberProfile): string {
+  return member.remark?.trim() || member.nickname
+}
+
 /** 群成员里的加好友入口，复用通讯录的申请逻辑，不改变群内关系。 */
 async function addFriend(member: GroupMemberProfile) {  const id = String(member.userId)
   if (isSelf(member) || isFriend(member) || friendRequested(member) || busy.value) return
@@ -229,10 +234,10 @@ async function addFriend(member: GroupMemberProfile) {  const id = String(member
     })
     if (result?.status === 'ACCEPTED') {
       friendIds.value = new Set(friendIds.value).add(id)
-      flash(`你和 ${member.nickname} 已成为好友`)
+      flash(`你和 ${nameOf(member)} 已成为好友`)
     } else {
       requestedIds.value = new Set(requestedIds.value).add(id)
-      flash(`已向 ${member.nickname} 发送好友申请`)
+      flash(`已向 ${nameOf(member)} 发送好友申请`)
     }
   } catch (e) {
     if (e instanceof ApiError && e.code === 40905) {
@@ -244,7 +249,7 @@ async function addFriend(member: GroupMemberProfile) {  const id = String(member
     } else if (e instanceof ApiError && e.code === 40305) {
       error.value = '对方已拒收消息，暂时无法添加'
     } else if (e instanceof Error && /rejects friend requests/i.test(e.message)) {
-      error.value = `${member.nickname} 不接受好友申请`
+      error.value = `${nameOf(member)} 不接受好友申请`
     } else {
       error.value = messageOf(e, '发送好友申请失败')
     }
@@ -255,7 +260,7 @@ async function addFriend(member: GroupMemberProfile) {  const id = String(member
 
 function openProfile(member: GroupMemberProfile, event?: MouseEvent) {
   profileId.value = member.userId
-  profileName.value = member.nickname
+  profileName.value = nameOf(member)
   profileAnchor.value = (event?.currentTarget as HTMLElement) ?? null
   profileOpen.value = true
 }
@@ -441,13 +446,13 @@ onBeforeUnmount(() => {
                 <button
                   class="member-open"
                   type="button"
-                  :title="`查看 ${m.nickname} 的资料`"
+                  :title="`查看 ${nameOf(m)} 的资料`"
                   @click="openProfile(m, $event)"
                 >
-                  <AppAvatar :initials="initialsOf(m.nickname)" :tone="toneOfPerson(m.userId, auth.user?.userId)" size="sm" />
+                  <AppAvatar :initials="initialsOf(nameOf(m))" :tone="toneOfPerson(m.userId, auth.user?.userId)" size="sm" />
                   <span class="member-main">
                     <span class="member-name">
-                      {{ m.nickname }}
+                      {{ nameOf(m) }}
                       <span v-if="m.role === 'OWNER'" class="tag owner">群主</span>
                       <span v-else-if="m.role === 'ADMIN'" class="tag admin">管理员</span>
                       <span v-if="isSelf(m)" class="tag me">我</span>

@@ -185,8 +185,10 @@ export function applyMessage(host: RealtimeHost, payload: RealtimePayload) {
 /** 群里取发送者昵称：成员缓存没命中就先不显示名字，下次全量同步会补上。 */
 function memberName(host: RealtimeHost, conversationId: string, senderId: string): string | undefined {
   if (!senderId) return undefined
-  return host.members[conversationId]
-    ?.find((item) => sameId(item.userId, senderId))?.nickname
+  const member = host.members[conversationId]
+    ?.find((item) => sameId(item.userId, senderId))
+  if (!member) return undefined
+  return member.remark?.trim() || member.nickname
 }
 
 /** 游标事件合并：120ms 窗口内同一会话只处理一次。 */

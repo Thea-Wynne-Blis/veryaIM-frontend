@@ -6,9 +6,11 @@ import NavRail from '../components/NavRail.vue'
 import ConversationList from '../components/ConversationList.vue'
 import ChatPane from '../components/ChatPane.vue'
 import DetailPanel from '../components/DetailPanel.vue'
+import SearchPanel from '../components/SearchPanel.vue'
 import MobileWorkspace from '../components/MobileWorkspace.vue'
 import ContactsView from '../components/ContactsView.vue'
 import FilesView from '../components/FilesView.vue'
+import FavoritesView from '../components/FavoritesView.vue'
 import MeView from '../components/MeView.vue'
 import NewChatDialog from '../components/NewChatDialog.vue'
 import CreateGroupDialog from '../components/CreateGroupDialog.vue'
@@ -17,10 +19,11 @@ import ForwardDialog from '../components/ForwardDialog.vue'
 import UserProfileDialog from '../components/UserProfileDialog.vue'
 import { useIsMobile } from '../composables/useIsMobile'
 import { useTheme } from '../composables/useTheme'
+import { useToast } from '../composables/useToast'
 import { useChatStore } from '../stores/chat'
 import { useAuthStore } from '../stores/auth'
 import type { Attachment, ChatMessage, Conversation } from '../types/chat'
-import { parseJson, sameId, type ConversationCard, type Id, type MessageView } from '../api/client'
+import { parseJson, sameId, api, type ConversationCard, type Id, type MessageView } from '../api/client'
 import { clockTime, conversationPreview, humanBytes, initialsOf, listTime, toneOf, toneOfConversation } from '../utils/present'
 
 const route = useRoute()
@@ -31,6 +34,8 @@ const chat = useChatStore()
 const auth = useAuthStore()
 
 const detailOpen = ref(true)
+/** 全局搜索面板与详情面板共用右侧栏位，互斥显示。 */
+const searchOpen = ref(false)
 const dialogOpen = ref(false)
 const createGroupOpen = ref(false)
 const manageOpen = ref(false)
@@ -63,10 +68,12 @@ async function onGroupRemoved() {
   await chat.loadCards()
 }
 
-/** 当前一级导航：chat / contacts / files / me */
+/** 当前一级导航：chat / contacts / files / favorites / me */
 const view = computed(() => {
   const name = String(route.name ?? 'chat')
-  if (name === 'contacts' || name === 'files' || name === 'me') return name
+  if (name === 'contacts' || name === 'files' || name === 'favorites' || name === 'me') {
+    return name
+  }
   return 'chat'
 })
 
@@ -194,8 +201,8 @@ function attachmentOf(item: MessageView): Attachment | undefined {
 function authorOf(item: MessageView): string {
   if (sameId(item.senderId, chat.myId)) return '我'
   if (activeCard.value?.type === 'GROUP') {
-    return activeMembers.value.find((member) => sameId(member.userId, item.senderId))?.nickname
-      ?? `成员 ${item.senderId}`
+    const member = activeMembers.value.find((entry) => sameId(entry.userId, item.senderId))
+    return member ? member.remark?.trim() || member.nickname : `成员 ${item.senderId}`
   }
   return activeCard.value?.title ?? '对方'
 }
@@ -204,8 +211,8 @@ function authorOf(item: MessageView): string {
 function senderNameOf(id: Id): string {
   if (sameId(id, chat.myId)) return '我'
   if (activeCard.value?.type === 'GROUP') {
-    return activeMembers.value.find((member) => sameId(member.userId, id))?.nickname
-      ?? `成员 ${id}`
+    const member = activeMembers.value.find((entry) => sameId(entry.userId, id))
+    return member ? member.remark?.trim() || member.nickname : `成员 ${id}`
   }
   return activeCard.value?.title ?? '对方'
 }
@@ -331,6 +338,7 @@ function navigate(target: string) {
     chat: '/app/chat',
     contacts: '/app/contacts',
     files: '/app/files',
+    favorites: '/app/favorites',
     me: '/app/me',
   }
   router.push(map[target] ?? '/app/chat')
@@ -361,6 +369,70 @@ function onTogglePin() {
 
 function onToggleMute() {
   if (chat.activeId) chat.toggleMute(chat.activeId)
+}
+
+/* ---------- 搜索 / 收藏 ---------- */
+const { message: toast, show: showToast } = useToast()
+
+function openSearch() {
+  searchOpen.value = true
+}
+
+function closeSearch() {
+  searchOpen.value = false
+}
+
+/** 打开搜索结果：先切会话，再定位到具体消息（同一页内尽量滚动过去）。 */
+async function openFromSearch(conversationId: string, messageId?: string) {
+  searchOpen.value = false
+  await select(conversationId)
+  if (!messageId) return
+  // 消息是异步加载的，等两帧再找节点；定位不到就只打开会话。
+  await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()))
+  await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()))
+  const el = document.querySelector<HTMLElement>(`[data-mid="${messageId}"]`)
+  el?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+}
+
+/** 搜索里点联系人：有会话就直接进，没有就现建一个。 */
+async function openUserChat(userId: Id) {
+  closeSearch()
+  try {
+    const conversationId = await chat.createPrivate(userId)
+    await chat.loadCards()
+    await select(conversationId)
+  } catch (e) {
+    showToast(messageOf(e, '发起会话失败'))
+  }
+}
+
+function onToggleDetail() {
+  searchOpen.value = false
+  detailOpen.value = !detailOpen.value
+}
+
+/** 聊天里右键「收藏」：后端存的是消息快照，撤回后仍可在收藏页查看。 */
+async function onFavorite(message: ChatMessage) {
+  if (!chat.activeId) return
+  try {
+    await api.post('/favorites', {
+      conversationId: chat.activeId,
+      // messageId 是字符串（雪花 ID 超过 2^53），直接透传，别用 Number 丢精度。
+      messageId: message.messageId,
+    })
+    showToast('已收藏，可在左侧「收藏」里查看')
+  } catch (e) {
+    showToast(messageOf(e, '收藏失败'))
+  }
+}
+
+/** ⌘K / Ctrl+K 打开搜索，和会话列表里的提示一致。 */
+function onGlobalKeydown(event: KeyboardEvent) {
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+    if (view.value !== 'chat') return
+    event.preventDefault()
+    openSearch()
+  }
 }
 
 /* ---------- 会话列表右键 / 左滑操作 ---------- */
@@ -436,6 +508,7 @@ onMounted(async () => {
   applyTheme()
   window.addEventListener('veryal:open-chat', onOpenChatRequest)
   window.addEventListener('veryal:unauthorized', onUnauthorized)
+  document.addEventListener('keydown', onGlobalKeydown)
   await Promise.allSettled([chat.loadCards(), auth.refresh()])
   if (view.value === 'chat') {
     const fromRoute = route.params.conversationId as string | undefined
@@ -449,6 +522,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   window.removeEventListener('veryal:open-chat', onOpenChatRequest)
   window.removeEventListener('veryal:unauthorized', onUnauthorized)
+  document.removeEventListener('keydown', onGlobalKeydown)
   chat.stopRealtime()
   chat.stopPolling()
 })
@@ -481,7 +555,7 @@ onBeforeUnmount(() => {
     <div class="grain" aria-hidden="true" />
 
     <!-- 聊天：四栏 -->
-    <div v-if="view === 'chat'" class="frame" :class="{ 'detail-open': detailOpen }">
+    <div v-if="view === 'chat'" class="frame" :class="{ 'detail-open': detailOpen || searchOpen }">
       <NavRail
         :active="view"
         :unread="chat.totalUnread"
@@ -499,6 +573,7 @@ onBeforeUnmount(() => {
         @mute="onConvMute"
         @hide="onConvHide"
         @remove="onConvDelete"
+        @open-search="openSearch"
       />
 
       <ChatPane
@@ -510,13 +585,23 @@ onBeforeUnmount(() => {
         :loading="chat.loadingMessages"
         @send="(text, reply) => chat.activeId && send(chat.activeId, text, reply)"
         @attach="(file) => chat.activeId && attach(chat.activeId, file)"
-        @toggle-detail="detailOpen = !detailOpen"
+        @toggle-detail="onToggleDetail"
+        @open-search="openSearch"
+        @favorite="onFavorite"
         @forward="onForward"
         @profile="(id, anchor) => openProfile(id, anchor)"
       />
 
+      <SearchPanel
+        v-if="searchOpen"
+        @close="closeSearch"
+        @open-conversation="openFromSearch"
+        @open-user-chat="openUserChat"
+        @profile="(id, anchor) => openProfile(id, anchor)"
+      />
+
       <DetailPanel
-        v-if="detailOpen && activeConversation"
+        v-else-if="detailOpen && activeConversation"
         :conversation="activeConversation"
         :members="activeMembers"
         :pinned="chat.isPinned(activeConversation.id)"
@@ -529,7 +614,7 @@ onBeforeUnmount(() => {
       />
     </div>
 
-    <!-- 通讯录 / 文件 / 我的：两栏 -->
+    <!-- 通讯录 / 文件 / 收藏 / 我的：两栏 -->
     <div v-else class="frame single">
       <NavRail
         :active="view"
@@ -538,9 +623,14 @@ onBeforeUnmount(() => {
       />
       <ContactsView v-if="view === 'contacts'" />
       <FilesView v-else-if="view === 'files'" />
+      <FavoritesView v-else-if="view === 'favorites'" @open-conversation="openFromSearch" />
       <MeView v-else />
     </div>
   </div>
+
+  <Transition name="fade">
+    <div v-if="toast" class="app-toast" role="status">{{ toast }}</div>
+  </Transition>
 
   <NewChatDialog
     :open="dialogOpen"
@@ -580,3 +670,23 @@ onBeforeUnmount(() => {
     @forwarded="forwardTarget = null"
   />
 </template>
+
+<style scoped>
+/* 全局操作反馈：浮动 toast，和聊天里的错误条互补。 */
+.app-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 34px;
+  z-index: 80;
+  transform: translateX(-50%);
+  padding: 9px 16px;
+  border-radius: var(--r-full);
+  background: var(--ink);
+  color: var(--canvas);
+  font-size: 12px;
+  font-weight: 550;
+  box-shadow: var(--shadow-sm, 0 8px 24px rgba(0, 0, 0, 0.18));
+  pointer-events: none;
+  white-space: nowrap;
+}
+</style>

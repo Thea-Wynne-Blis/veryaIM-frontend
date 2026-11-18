@@ -21,9 +21,17 @@ export const SEED_PREVIEW_MAX_BYTES = 3 * 1024 * 1024
 export type ChatMember = {
   userId: Id
   nickname: string
+  /** 我给这个成员设的好友备注；展示名优先用它 */
+  remark?: string | null
   avatar?: string | null
   online?: boolean
   role?: string
+}
+
+/** 群成员在界面上的显示名：好友备注优先，没设备注才用群昵称。 */
+export function memberDisplayName(member: Pick<ChatMember, 'nickname' | 'remark'>): string {
+  const remark = member.remark?.trim()
+  return remark ? remark : member.nickname
 }
 
 /** 上传统计：准备 / 上传 / 发送，供输入区渲染进度条。 */

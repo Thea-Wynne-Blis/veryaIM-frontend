@@ -3,6 +3,7 @@ import {
   MessageCircle,
   Users,
   FolderOpen,
+  Star,
   Settings,
 } from 'lucide-vue-next'
 import AppAvatar from './AppAvatar.vue'
@@ -11,7 +12,7 @@ import { initialsOf } from '../utils/present'
 
 defineProps<{ unread: number }>()
 const emit = defineEmits<{
-  (e: 'navigate', view: 'chat' | 'contacts' | 'files' | 'me'): void
+  (e: 'navigate', view: 'chat' | 'contacts' | 'files' | 'favorites' | 'me'): void
 }>()
 
 const auth = useAuthStore()
@@ -20,11 +21,12 @@ const nav = [
   { key: 'chat', icon: MessageCircle, label: '消息' },
   { key: 'contacts', icon: Users, label: '通讯录' },
   { key: 'files', icon: FolderOpen, label: '文件' },
+  { key: 'favorites', icon: Star, label: '收藏' },
 ] as const
 
 const active = defineModel<string>('active', { default: 'chat' })
 
-function go(view: 'chat' | 'contacts' | 'files' | 'me') {
+function go(view: 'chat' | 'contacts' | 'files' | 'favorites' | 'me') {
   active.value = view
   emit('navigate', view)
 }

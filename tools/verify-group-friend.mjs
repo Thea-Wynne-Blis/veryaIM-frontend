@@ -11,7 +11,8 @@ const BASE = process.env.VERYAL_BASE ?? 'http://82.157.47.151:8899'
 const CHROME = 'C:/Program Files/Google/Chrome/Application/chrome.exe'
 const GROUP = '产品设计小组'
 const SELF = '爱丽丝'
-const FRIEND = '鲍勃'
+/** 群成员显示名优先用好友备注；登录后按真实备注覆盖。 */
+let FRIEND = '鲍勃'
 const STRANGER = '戴维'
 const STRANGER_ID = '380621346419249152'
 
@@ -37,6 +38,19 @@ await page.fill('input[placeholder="至少 6 位"]', 'password123')
 await page.click('button:has-text("进入 VERYAL")')
 await page.waitForURL('**/app/chat', { timeout: 25000 })
 await page.waitForSelector('.conv', { timeout: 20000 })
+// 群成员行显示「好友备注优先」，从后端取鲍勃当前的显示名，别写死昵称。
+FRIEND = await page.evaluate(async () => {
+  const token = localStorage.getItem('veryal.token')
+  const text = await fetch('/api/v1/friends', {
+    headers: { Authorization: `Bearer ${token}` },
+  }).then((r) => r.text())
+  // 雪花 ID 超过 2^53，先转成字符串再 JSON.parse。
+  const body = JSON.parse(text.replace(/:(\d{16,})/g, ':"$1"'))
+  const bob = (body.data ?? []).find((friend) => friend.nickname === '鲍勃')
+  return bob ? bob.remark?.trim() || bob.nickname : '鲍勃'
+})
+// 上面这次是脚本自己的准备请求，后面的「只拉一次好友」只统计打开群管理之后的。
+apiCalls.length = 0
 await page.locator('.conv', { hasText: GROUP }).first().click()
 await page.waitForTimeout(1200)
 // 切换会话后右侧详情会自动收起，「群管理」入口在详情里，先展开。

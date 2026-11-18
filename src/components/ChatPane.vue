@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type ObjectDirective } from 'vue'
-import { messageOf } from '../utils/error'
 import { useToast } from '../composables/useToast'
 import { useMessageActions } from '../composables/useMessageActions'
 import {
@@ -26,6 +25,7 @@ import {
   Share2,
   ListChecks,
   Quote,
+  Star,
   Trash2,
   CircleAlert,
 } from 'lucide-vue-next'
@@ -35,8 +35,7 @@ import { resetMagnet, trackMagnet, trackSpotlight } from '../composables/usePoin
 import { useTranslatePrefs } from '../composables/useTranslatePrefs'
 import { useChatStore } from '../stores/chat'
 import type { ChatMessage, Conversation } from '../types/chat'
-import type { MessageView } from '../api/client'
-import { clockTime, humanBytes } from '../utils/present'
+import { humanBytes } from '../utils/present'
 
 const props = defineProps<{
   conversation: Conversation | null
@@ -44,13 +43,15 @@ const props = defineProps<{
   detailOpen: boolean
   error?: string | null
   loading?: boolean
-  members?: { userId: string | number; nickname: string }[]
+  members?: { userId: string | number; nickname: string; remark?: string | null }[]
 }>()
 
 const emit = defineEmits<{
   (e: 'send', text: string, reply?: { messageId: string; senderId: string; preview: string }): void
   (e: 'attach', file: File): void
   (e: 'toggle-detail'): void
+  (e: 'open-search'): void
+  (e: 'favorite', message: ChatMessage): void
   (e: 'forward', message: ChatMessage): void
   (e: 'profile', userId: string, anchor?: HTMLElement): void
 }>()
@@ -117,14 +118,6 @@ const {
   forward: (message) => emit('forward', message),
   focusComposer: () => document.getElementById('composer-input')?.focus(),
 })
-
-/* ---------- 消息搜索 ---------- */
-const searchOpen = ref(false)
-const searchKeyword = ref('')
-const searchResults = ref<MessageView[]>([])
-const searching = ref(false)
-const searchError = ref('')
-const searchInput = ref<HTMLInputElement | null>(null)
 
 /* ---------- 表情 ---------- */
 const emojiOpen = ref(false)
@@ -405,46 +398,15 @@ onBeforeUnmount(() => {
   disarmEnter()
 })
 
-function toggleSearch() {
-  searchOpen.value = !searchOpen.value
-  if (searchOpen.value) {
-    nextTick(() => searchInput.value?.focus())
-  } else {
-    searchKeyword.value = ''
-    searchResults.value = []
-    searchError.value = ''
-  }
+function openSearch() {
+  closeMenu()
+  emit('open-search')
 }
 
-async function runSearch() {
-  const keyword = searchKeyword.value.trim()
-  if (!keyword || !props.conversation) return
-  searching.value = true
-  searchError.value = ''
-  try {
-    searchResults.value = await chat.searchMessages(props.conversation.id, keyword)
-  } catch (e) {
-    searchError.value = messageOf(e, '搜索失败')
-    searchResults.value = []
-  } finally {
-    searching.value = false
-  }
-}
-
-function jumpTo(message: MessageView) {
-  const el = scroller.value?.querySelector<HTMLElement>(`[data-mid="${message.messageId}"]`)
-  if (el) el.scrollIntoView({ block: 'center', behavior: 'smooth' })
-  searchOpen.value = false
-}
-
-function previewText(message: MessageView): string {
-  if (message.recalled) return '消息已撤回'
-  if (message.type === 'TEXT') return message.content
-  if (message.type === 'IMAGE') return '[图片]'
-  if (message.type === 'VIDEO') return '[视频]'
-  if (message.type === 'AUDIO') return '[语音]'
-  if (message.type === 'FILE') return '[文件]'
-  return `[${message.type}]`
+/** 收藏走全局接口：侧边栏的「收藏」里能重新点回这条消息。 */
+function favoriteMessage(message: ChatMessage) {
+  closeMenu()
+  emit('favorite', message)
 }
 
 // 会话切换必须先于消息长度监听执行，否则离开时会以新内容的高度覆盖旧的滚动位置
@@ -522,9 +484,8 @@ watch(() => props.messages.length, () => scrollToBottom())
         <div class="chat-actions">
           <button
             class="icon-btn"
-            :class="{ on: searchOpen }"
             aria-label="搜索聊天记录"
-            @click="toggleSearch"
+            @click="openSearch"
           >
             <Search :size="16" :stroke-width="1.9" />
           </button>
@@ -545,40 +506,6 @@ watch(() => props.messages.length, () => scrollToBottom())
           </button>
         </div>
       </header>
-
-      <div v-if="searchOpen" class="chat-search">
-        <label class="search">
-          <Search class="search-icon" :size="14" :stroke-width="2" />
-          <input
-            ref="searchInput"
-            v-model="searchKeyword"
-            type="search"
-            placeholder="搜索聊天记录，回车开始"
-            @keydown.enter.prevent="runSearch"
-          />
-        </label>
-        <button class="icon-btn sm" aria-label="关闭搜索" @click="toggleSearch">
-          <X :size="14" :stroke-width="2" />
-        </button>
-        <div v-if="searchKeyword.trim()" class="search-results">
-          <p v-if="searchError" class="search-error">{{ searchError }}</p>
-          <p v-else-if="searching" class="search-empty">搜索中…</p>
-          <button
-            v-for="item in searchResults"
-            :key="item.messageId"
-            class="search-hit"
-            @click="jumpTo(item)"
-          >
-            <span class="search-hit-main">{{ previewText(item) }}</span>
-            <span class="search-hit-meta num">
-              #{{ item.seq }} · {{ clockTime(item.createdAt) }}
-            </span>
-          </button>
-          <p v-if="!searching && !searchError && !searchResults.length" class="search-empty">
-            没有找到相关消息
-          </p>
-        </div>
-      </div>
 
       <div
         ref="scroller"
@@ -773,8 +700,8 @@ watch(() => props.messages.length, () => scrollToBottom())
         >
           <div v-if="mentionOpen" class="mention-pop">
             <p class="mention-title">选择要提及的成员</p>
-            <button v-for="m in mentionMembers" :key="m.userId" class="mention-item" @click="insertMention(m.nickname)">
-              {{ m.nickname }}
+            <button v-for="m in mentionMembers" :key="m.userId" class="mention-item" @click="insertMention(m.remark?.trim() || m.nickname)">
+              {{ m.remark?.trim() || m.nickname }}
             </button>
             <p v-if="!mentionMembers.length" class="mention-empty">暂无成员资料</p>
           </div>
@@ -878,6 +805,15 @@ watch(() => props.messages.length, () => scrollToBottom())
         <button class="msg-menu-item" role="menuitem" @click="startSelect(menu.message)">
           <ListChecks :size="14" :stroke-width="1.9" />
           多选
+        </button>
+        <button
+          class="msg-menu-item"
+          role="menuitem"
+          :disabled="menu.message.recalled"
+          @click="favoriteMessage(menu.message)"
+        >
+          <Star :size="14" :stroke-width="1.9" />
+          收藏
         </button>
         <button
           class="msg-menu-item"

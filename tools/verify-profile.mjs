@@ -106,6 +106,15 @@ check('hero previews new signature',
   (await page.locator('.me-card.hero').innerText()).includes(MY_SIGNATURE))
 
 const token = await page.evaluate(() => localStorage.getItem('veryal.token'))
+// 群成员列表显示「好友备注优先」，用后端返回的显示名去点，避免写死昵称。
+const friendDisplay = await page.evaluate(async (t) => {
+  const text = await fetch('/api/v1/friends', {
+    headers: { Authorization: `Bearer ${t}` },
+  }).then((r) => r.text())
+  const body = JSON.parse(text.replace(/:(\d{16,})/g, ':"$1"'))
+  const bob = (body.data ?? []).find((friend) => friend.nickname === '鲍勃')
+  return bob ? bob.remark?.trim() || bob.nickname : '鲍勃'
+}, token)
 const me = await page.evaluate(async (t) => {
   const res = await fetch('/api/v1/users/me', { headers: { Authorization: `Bearer ${t}` } })
   return (await res.json()).data
@@ -178,7 +187,7 @@ async function openMember(name) {
   return page.locator('.card[aria-label="用户资料"]').innerText()
 }
 
-const friendText = await openMember('鲍勃')
+const friendText = await openMember(friendDisplay)
 check('member(friend) card shows add-time', /添加时间/.test(friendText), friendText.replace(/\n/g, ' | '))
 check('member(friend) card offers chat', /发消息/.test(friendText))
 await page.click('.card[aria-label="用户资料"] button[aria-label="关闭"]')

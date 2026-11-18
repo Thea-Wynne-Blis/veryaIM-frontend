@@ -26,6 +26,8 @@ export type GroupModeration = {
 export type GroupMemberProfile = {
   userId: Id
   nickname: string
+  /** 我给这个成员设的好友备注，没设为 null */
+  remark?: string | null
   avatar?: string | null
   online?: boolean
   role: GroupRole
