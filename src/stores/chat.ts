@@ -9,13 +9,13 @@ import {
   updateConversationPrefs,
   uploadFile,
   type ConversationCard,
-  type GroupDetail,
   type Id,
   type MessagePage,
   type MessageView,
   type ReadReceipt,
   type UserProfile,
 } from '../api/client'
+import { groupsApi } from '../api/groups'
 import { RealtimeClient, type RealtimeFrame } from '../api/realtime'
 import { audioDurationOf, imageSizeOf, mediaKindOf, videoMetaOf } from '../utils/media'
 import { useAuthStore } from './auth'
@@ -464,21 +464,31 @@ export const useChatStore = defineStore('chat', {
       const card = this.cards.find((item) => item.conversationId === conversationId)
       if (!card) return []
       try {
-        let ids: Id[] = []
-        let ownerId: Id = 0
+        // 群成员一次取回昵称、角色与在线状态：此前是「群详情 + N 个 profile」，
+        // 一个 50 人群打开详情要发 51 个请求，是群管理卡顿的主要来源。
         if (card.type === 'GROUP') {
-          const group = await api.get<GroupDetail>(`/groups/${conversationId}`)
-          ids = group.memberIds ?? []
-          ownerId = group.ownerId
-        } else {
-          const detail = await api.get<{ memberIds: Id[] }>(
-            `/conversations/${conversationId}`,
-          )
-          ids = detail.memberIds ?? []
+          const list = await groupsApi.members(conversationId)
+          const members: ChatMember[] = list.map((member) => ({
+            userId: member.userId,
+            nickname: member.nickname,
+            avatar: member.avatar,
+            online: member.online,
+            role:
+              member.role === 'OWNER'
+                ? '群主'
+                : member.role === 'ADMIN'
+                  ? '管理员'
+                  : undefined,
+          }))
+          this.members[conversationId] = members
+          return members
         }
 
+        const detail = await api.get<{ memberIds: Id[] }>(
+          `/conversations/${conversationId}`,
+        )
         const profiles = await Promise.all(
-          ids.map((id) =>
+          (detail.memberIds ?? []).map((id) =>
             api
               .get<UserProfile>(`/users/${id}/profile`)
               .catch(() => ({ userId: id, nickname: `用户 ${id}` }) as UserProfile),
@@ -489,7 +499,6 @@ export const useChatStore = defineStore('chat', {
           nickname: profile.nickname,
           avatar: profile.avatar,
           online: profile.online,
-          role: ownerId && sameId(profile.userId, ownerId) ? '群主' : undefined,
         }))
         this.members[conversationId] = members
         return members

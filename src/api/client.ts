@@ -564,6 +564,7 @@ export type GroupModeration = {
   announcement?: string | null
   muteAll: boolean
   mutedUntil?: string | null
+  mutedPermanently?: boolean
 }
 
 export type UserProfile = {

@@ -32,6 +32,19 @@ const onlineCount = computed(
 const moderation = ref<GroupModeration | null>(null)
 const loadingModeration = ref(false)
 
+const myMuteLabel = computed(() => {
+  const state = moderation.value
+  if (!state) return ''
+  if (state.mutedPermanently) return '你已被永久禁言'
+  if (!state.mutedUntil) return ''
+  const until = new Date(state.mutedUntil)
+  if (Number.isNaN(until.getTime()) || until.getTime() <= Date.now()) return ''
+  return `你已被禁言至 ${until.toLocaleTimeString('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+  })}`
+})
+
 async function loadModeration() {
   if (!isGroup.value) return
   loadingModeration.value = true
@@ -103,6 +116,7 @@ watch(
           {{ moderation?.announcement || '暂无群公告' }}
         </p>
         <p v-if="moderation?.muteAll" class="card-warn">全员禁言中</p>
+        <p v-if="myMuteLabel" class="card-warn">{{ myMuteLabel }}</p>
       </div>
 
       <div

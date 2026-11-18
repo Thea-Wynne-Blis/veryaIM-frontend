@@ -1,12 +1,17 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import {
   X, Loader2, Users, Megaphone, Shield, UserMinus, Crown,
   BellOff, Bell, LogOut, Trash2, Save,
 } from 'lucide-vue-next'
 import AppAvatar from './AppAvatar.vue'
-import { api } from '../api/client'
-import { groupsApi, type GroupDetail, type GroupModeration, type GroupMemberProfile } from '../api/groups'
+import {
+  groupsApi,
+  type GroupDetail,
+  type GroupMemberProfile,
+  type GroupModeration,
+  type GroupMuteDuration,
+} from '../api/groups'
 import { useAuthStore } from '../stores/auth'
 import { initialsOf, toneOf } from '../utils/present'
 
@@ -25,69 +30,66 @@ const members = ref<GroupMemberProfile[]>([])
 const name = ref('')
 const announcement = ref('')
 const loading = ref(false)
+const refreshing = ref(false)
 const busy = ref('')
 const error = ref('')
 const notice = ref('')
 const confirmDisband = ref(false)
 const confirmLeave = ref(false)
+const pending = ref('')
+
+let noticeTimer: number | undefined
+let pendingTimer: number | undefined
 
 const myId = computed(() => String(auth.user?.userId ?? ''))
 const role = computed(() => detail.value?.roleInGroup ?? null)
 const isOwner = computed(
   () => role.value === 'OWNER' || String(detail.value?.ownerId ?? '') === myId.value,
 )
-const canManage = computed(() => isOwner.value || role.value === 'ADMIN')
+const isAdmin = computed(() => !isOwner.value && role.value === 'ADMIN')
+const canManage = computed(() => isOwner.value || isAdmin.value)
 
-const MUTE_OPTIONS = [
-  { label: '解除禁言', minutes: 0 },
-  { label: '10 分钟', minutes: 10 },
-  { label: '1 小时', minutes: 60 },
-  { label: '1 天', minutes: 1440 },
-  { label: '7 天', minutes: 10080 },
+const MUTE_OPTIONS: { value: GroupMuteDuration; label: string }[] = [
+  { value: 'MUTE_7M', label: '禁言 7 分钟' },
+  { value: 'MUTE_30M', label: '禁言 30 分钟' },
+  { value: 'MUTE_FOREVER', label: '永久禁言' },
 ]
 
 function flash(msg: string) {
   notice.value = msg
-  window.setTimeout(() => (notice.value = ''), 2200)
+  window.clearTimeout(noticeTimer)
+  noticeTimer = window.setTimeout(() => (notice.value = ''), 2200)
 }
 
-async function load() {
+/** 首屏加载才显示整页 loading；操作后的刷新走静默模式，避免整个弹窗闪一下。 */
+async function load(silent = false) {
   const gid = props.groupId
   if (!gid) return
-  loading.value = true
+  if (silent) {
+    refreshing.value = true
+  } else {
+    loading.value = true
+  }
   error.value = ''
   try {
-    const [d, m] = await Promise.all([
+    const [d, m, list] = await Promise.all([
       groupsApi.detail(gid),
       groupsApi.moderation(gid).catch(() => null),
+      groupsApi.members(gid),
     ])
     detail.value = d
     moderation.value = m
-    name.value = d.name
-    announcement.value = m?.announcement ?? ''
-
-    const profiles = await Promise.all(
-      (d.memberIds ?? []).map((id) =>
-        api
-          .get<{ userId: number; nickname: string; online?: boolean }>(`/users/${id}/profile`)
-          .catch(() => ({ userId: id, nickname: `用户 ${id}`, online: false })),
-      ),
-    )
-    members.value = profiles.map((p) => ({
-      userId: p.userId,
-      nickname: p.nickname,
-      online: p.online,
-      role:
-        p.userId === d.ownerId
-          ? '群主'
-          : d.roleInGroup && p.userId === myId.value
-            ? '我'
-            : undefined,
-    }))
+    members.value = list
+    // 静默刷新不覆盖正在编辑的群名/公告
+    if (!silent) {
+      name.value = d.name
+      announcement.value = m?.announcement ?? ''
+    }
   } catch (e) {
     error.value = e instanceof Error ? e.message : '加载群信息失败'
   } finally {
     loading.value = false
+    refreshing.value = false
   }
 }
 
@@ -97,7 +99,7 @@ async function run(key: string, fn: () => Promise<unknown>, successMsg: string) 
   try {
     await fn()
     flash(successMsg)
-    await load()
+    await load(true)
     emit('changed')
   } catch (e) {
     error.value = e instanceof Error ? e.message : '操作失败'
@@ -122,18 +124,18 @@ const toggleMuteAll = () =>
     moderation.value?.muteAll ? '已解除全员禁言' : '已开启全员禁言',
   )
 
-const muteMember = (userId: string | number, minutes: number) =>
+const muteMember = (userId: string | number, duration: GroupMuteDuration) =>
   run(
     `mute-${userId}`,
-    () => groupsApi.muteMember(props.groupId!, userId, minutes),
-    minutes === 0 ? '已解除禁言' : '已禁言该成员',
+    () => groupsApi.muteMember(props.groupId!, userId, duration),
+    duration === 'UNMUTE' ? '已解除禁言' : '已禁言该成员',
   )
 
-const toggleAdmin = (userId: string | number, isAdmin: boolean) =>
+const toggleAdmin = (userId: string | number, isAdminNow: boolean) =>
   run(
     `role-${userId}`,
-    () => groupsApi.changeRole(props.groupId!, userId, isAdmin ? 'MEMBER' : 'ADMIN'),
-    isAdmin ? '已取消管理员' : '已设为管理员',
+    () => groupsApi.changeRole(props.groupId!, userId, isAdminNow ? 'MEMBER' : 'ADMIN'),
+    isAdminNow ? '已取消管理员' : '已设为管理员',
   )
 
 const kick = (userId: string | number) =>
@@ -141,6 +143,58 @@ const kick = (userId: string | number) =>
 
 const transfer = (userId: string | number) =>
   run(`transfer-${userId}`, () => groupsApi.transfer(props.groupId!, userId), '群主已转让')
+
+/** 踢人、转让需要二次点击确认，避免误触。 */
+function confirmThen(key: string, action: () => void) {
+  if (pending.value !== key) {
+    pending.value = key
+    window.clearTimeout(pendingTimer)
+    pendingTimer = window.setTimeout(() => (pending.value = ''), 3000)
+    return
+  }
+  pending.value = ''
+  window.clearTimeout(pendingTimer)
+  action()
+}
+
+function onMuteSelect(userId: string | number, event: Event) {
+  const select = event.target as HTMLSelectElement
+  const value = select.value as GroupMuteDuration | ''
+  select.value = ''
+  if (value) muteMember(userId, value)
+}
+
+function isMuted(member: GroupMemberProfile): boolean {
+  if (member.mutedPermanently) return true
+  if (!member.mutedUntil) return false
+  return new Date(member.mutedUntil).getTime() > Date.now()
+}
+
+function mutedLabel(member: GroupMemberProfile): string {
+  if (member.mutedPermanently) return '永久禁言'
+  if (!isMuted(member)) return ''
+  const until = new Date(member.mutedUntil!)
+  const pad = (value: number) => String(value).padStart(2, '0')
+  const time = `${pad(until.getHours())}:${pad(until.getMinutes())}`
+  const today = new Date().toDateString() === until.toDateString()
+  return `禁言至 ${today ? time : `${until.getMonth() + 1}-${until.getDate()} ${time}`}`
+}
+
+// 权限矩阵与后端一致：禁言、设撤管理员、转让、解散仅群主；
+// 踢人方面群主可踢管理员与成员，管理员只能踢普通成员。
+const canKick = (member: GroupMemberProfile) => {
+  if (member.userId === myId.value || member.role === 'OWNER') return false
+  if (isOwner.value) return true
+  return isAdmin.value && member.role === 'MEMBER'
+}
+const canMute = (member: GroupMemberProfile) =>
+  isOwner.value && member.userId !== myId.value && member.role !== 'OWNER'
+const canGrantAdmin = (member: GroupMemberProfile) =>
+  isOwner.value && member.userId !== myId.value && member.role !== 'OWNER'
+const canTransfer = (member: GroupMemberProfile) =>
+  isOwner.value && member.userId !== myId.value && member.role !== 'OWNER'
+const hasActions = (member: GroupMemberProfile) =>
+  canMute(member) || canGrantAdmin(member) || canKick(member)
 
 async function leave() {
   if (isOwner.value) {
@@ -184,19 +238,30 @@ async function disband() {
 }
 
 watch(
-  () => [props.open, props.groupId] as const,
+  [() => props.open, () => props.groupId],
   ([open]) => {
+    window.clearTimeout(pendingTimer)
+    pending.value = ''
+    confirmDisband.value = false
+    confirmLeave.value = false
+    error.value = ''
+    notice.value = ''
     if (open) {
-      confirmDisband.value = false
-      confirmLeave.value = false
       load()
     } else {
       detail.value = null
       moderation.value = null
       members.value = []
+      name.value = ''
+      announcement.value = ''
     }
   },
 )
+
+onBeforeUnmount(() => {
+  window.clearTimeout(noticeTimer)
+  window.clearTimeout(pendingTimer)
+})
 </script>
 
 <template>
@@ -208,9 +273,12 @@ watch(
             <p class="eyebrow">群管理</p>
             <h2 class="dialog-title">{{ detail?.name || '加载中…' }}</h2>
           </div>
-          <button class="icon-btn sm" aria-label="关闭" @click="emit('close')">
-            <X :size="15" :stroke-width="2" />
-          </button>
+          <div class="head-actions">
+            <Loader2 v-if="refreshing" :size="13" class="spin muted-icon" />
+            <button class="icon-btn sm" aria-label="关闭" @click="emit('close')">
+              <X :size="15" :stroke-width="2" />
+            </button>
+          </div>
         </header>
 
         <div v-if="loading" class="dialog-loading">
@@ -226,7 +294,13 @@ watch(
             <p class="block-label">群名称</p>
             <div class="inline-row">
               <input v-model="name" class="field-input" maxlength="128" :disabled="!canManage" />
-              <button class="icon-btn sm" :disabled="!canManage || busy === 'name'" @click="saveName">
+              <button
+                v-if="canManage"
+                class="icon-btn sm"
+                :disabled="busy === 'name'"
+                title="保存群名称"
+                @click="saveName"
+              >
                 <Loader2 v-if="busy === 'name'" :size="13" class="spin" />
                 <Save v-else :size="13" :stroke-width="2" />
               </button>
@@ -236,28 +310,25 @@ watch(
           <!-- 群公告 -->
           <section class="block">
             <p class="block-label"><Megaphone :size="10" :stroke-width="2.6" /> 群公告</p>
-            <textarea
-              v-model="announcement"
-              class="field-textarea"
-              rows="3"
-              maxlength="2000"
-              placeholder="写点什么，让成员都知道"
-              :disabled="!canManage"
-            />
-            <button
-              v-if="canManage"
-              class="mini-btn"
-              :disabled="busy === 'ann'"
-              @click="saveAnnouncement"
-            >
-              <Loader2 v-if="busy === 'ann'" :size="12" class="spin" />
-              <Save v-else :size="12" :stroke-width="2" />
-              保存公告
-            </button>
+            <template v-if="canManage">
+              <textarea
+                v-model="announcement"
+                class="field-textarea"
+                rows="3"
+                maxlength="2000"
+                placeholder="写点什么，让成员都知道"
+              />
+              <button class="mini-btn" :disabled="busy === 'ann'" @click="saveAnnouncement">
+                <Loader2 v-if="busy === 'ann'" :size="12" class="spin" />
+                <Save v-else :size="12" :stroke-width="2" />
+                保存公告
+              </button>
+            </template>
+            <p v-else class="field-readonly">{{ announcement || '暂无群公告' }}</p>
           </section>
 
-          <!-- 全员禁言 -->
-          <section v-if="canManage" class="block row-between">
+          <!-- 全员禁言：仅群主 -->
+          <section v-if="isOwner" class="block row-between">
             <div>
               <p class="block-label" style="margin: 0">全员禁言</p>
               <p class="block-hint">开启后仅群主与管理员可发言</p>
@@ -276,58 +347,76 @@ watch(
 
           <!-- 成员 -->
           <section class="block">
-            <p class="block-label"><Users :size="10" :stroke-width="2.6" /> 成员 · {{ members.length }}</p>
+            <p class="block-label">
+              <Users :size="10" :stroke-width="2.6" /> 成员 · {{ members.length }}
+            </p>
             <div class="member-list">
               <div v-for="m in members" :key="m.userId" class="member-row">
                 <AppAvatar :initials="initialsOf(m.nickname)" :tone="toneOf(m.userId)" size="sm" />
                 <span class="member-main">
                   <span class="member-name">
                     {{ m.nickname }}
-                    <span v-if="m.userId === detail?.ownerId" class="tag owner">群主</span>
-                    <span v-else-if="m.userId === myId" class="tag">我</span>
+                    <span v-if="m.role === 'OWNER'" class="tag owner">群主</span>
+                    <span v-else-if="m.role === 'ADMIN'" class="tag admin">管理员</span>
+                    <span v-if="m.userId === myId" class="tag me">我</span>
                   </span>
-                  <span class="member-sub">ID {{ m.userId }}</span>
+                  <span class="member-sub">
+                    <template v-if="pending === `kick-${m.userId}`">再点一次确认移出</template>
+                    <template v-else-if="pending === `transfer-${m.userId}`">
+                      再点一次确认转让群主
+                    </template>
+                    <template v-else>ID {{ m.userId }}</template>
+                  </span>
                 </span>
 
-                <div v-if="canManage && m.userId !== myId" class="member-actions">
+                <span v-if="mutedLabel(m)" class="tag muted" :title="mutedLabel(m)">
+                  {{ mutedLabel(m) }}
+                </span>
+
+                <div v-if="hasActions(m)" class="member-actions">
                   <select
+                    v-if="canMute(m)"
                     class="mini-select"
-                    title="禁言时长"
+                    title="禁言"
                     :disabled="Boolean(busy)"
-                    @change="muteMember(m.userId, Number(($event.target as HTMLSelectElement).value))"
+                    @change="onMuteSelect(m.userId, $event)"
                   >
-                    <option value="" selected disabled>禁言</option>
-                    <option v-for="o in MUTE_OPTIONS" :key="o.minutes" :value="o.minutes">
+                    <option value="" selected>禁言</option>
+                    <option v-for="o in MUTE_OPTIONS" :key="o.value" :value="o.value">
                       {{ o.label }}
                     </option>
+                    <option v-if="isMuted(m)" value="UNMUTE">解除禁言</option>
                   </select>
 
                   <button
-                    v-if="m.userId !== detail?.ownerId"
+                    v-if="canGrantAdmin(m)"
                     class="icon-mini"
-                    :title="'设为/取消管理员'"
-                    :disabled="!isOwner || Boolean(busy)"
-                    @click="toggleAdmin(m.userId, false)"
+                    :class="{ active: m.role === 'ADMIN' }"
+                    :title="m.role === 'ADMIN' ? '取消管理员' : '设为管理员'"
+                    :disabled="Boolean(busy)"
+                    @click="toggleAdmin(m.userId, m.role === 'ADMIN')"
                   >
                     <Shield :size="13" :stroke-width="2" />
                   </button>
 
                   <button
-                    v-if="isOwner && m.userId !== detail?.ownerId"
+                    v-if="canTransfer(m)"
                     class="icon-mini"
+                    :class="{ armed: pending === `transfer-${m.userId}` }"
                     title="转让群主"
                     :disabled="Boolean(busy)"
-                    @click="transfer(m.userId)"
+                    @click="confirmThen(`transfer-${m.userId}`, () => transfer(m.userId))"
                   >
                     <Crown :size="13" :stroke-width="2" />
                   </button>
 
                   <button
-                    v-if="m.userId !== detail?.ownerId"
+                    v-if="canKick(m)"
                     class="icon-mini danger"
+                    :class="{ armed: pending === `kick-${m.userId}` }"
                     title="移出群聊"
                     :disabled="Boolean(busy)"
-                    @click="kick(m.userId)"
+                    @click="confirmThen(`kick-${m.userId}`, () => kick(m.userId))"
                   >
                     <UserMinus :size="13" :stroke-width="2" />
                   </button>
@@ -383,6 +472,8 @@ watch(
   overflow: hidden;
 }
 .dialog-head { display: flex; align-items: flex-start; justify-content: space-between; padding: 15px 14px 10px; border-bottom: 1px solid var(--line); }
+.head-actions { display: flex; align-items: center; gap: 6px; }
+.muted-icon { color: var(--ink-4); }
 .dialog-title { font-size: 16px; font-weight: 660; letter-spacing: -0.3px; margin-top: 2px; }
 .dialog-loading { display: flex; align-items: center; gap: 8px; justify-content: center; padding: 50px; font-size: 12.5px; color: var(--ink-3); }
 .dialog-body { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 16px; }
@@ -399,23 +490,29 @@ watch(
 .field-textarea { width: 100%; padding: 9px 11px; border-radius: var(--r-sm); background: var(--surface-3); border: 1px solid transparent; font-size: 12.5px; line-height: 1.6; resize: vertical; }
 .field-textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); background: var(--surface); }
 .field-textarea:disabled { color: var(--ink-3); }
+.field-readonly { margin: 0; padding: 9px 11px; border-radius: var(--r-sm); background: var(--surface-2); border: 1px solid var(--line); font-size: 12.5px; line-height: 1.6; color: var(--ink-2); white-space: pre-wrap; }
 .mini-btn { align-self: flex-start; display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 11px; border-radius: var(--r-xs); background: var(--surface-3); border: 1px solid var(--line); font-size: 11.5px; font-weight: 560; color: var(--ink-2); }
 .mini-btn:hover { background: var(--surface-hover); color: var(--ink); }
 .switch-btn { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 11px; border-radius: var(--r-full); border: 1px solid var(--line); background: var(--surface-2); font-size: 11.5px; font-weight: 560; color: var(--ink-2); }
 .switch-btn.on { background: var(--danger-soft); border-color: color-mix(in srgb, var(--danger) 34%, transparent); color: var(--danger); }
-.member-list { display: flex; flex-direction: column; gap: 2px; max-height: 260px; overflow-y: auto; }
+.member-list { display: flex; flex-direction: column; gap: 2px; max-height: 280px; overflow-y: auto; }
 .member-row { display: flex; align-items: center; gap: 9px; padding: 6px 4px; border-radius: var(--r-sm); }
 .member-row:hover { background: var(--surface-hover); }
 .member-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .member-name { font-size: 12.5px; font-weight: 560; display: flex; align-items: center; gap: 5px; }
 .member-sub { font-size: 10px; color: var(--ink-4); }
-.tag { font-size: 9px; font-weight: 700; padding: 1px 4px; border-radius: 3px; background: var(--surface-3); color: var(--ink-3); border: 1px solid var(--line); }
+.tag { font-size: 9px; font-weight: 700; padding: 1px 4px; border-radius: 3px; background: var(--surface-3); color: var(--ink-3); border: 1px solid var(--line); white-space: nowrap; }
 .tag.owner { background: var(--accent-soft); color: var(--accent-ink); border-color: transparent; }
+.tag.admin { background: var(--accent-soft); color: var(--accent-ink); border-color: transparent; opacity: 0.82; }
+.tag.me { background: var(--surface-3); color: var(--ink-4); }
+.tag.muted { background: var(--danger-soft); color: var(--danger); border-color: transparent; font-weight: 600; }
 .member-actions { display: flex; align-items: center; gap: 2px; }
 .mini-select { height: 24px; border-radius: var(--r-xs); border: 1px solid var(--line); background: var(--surface-2); font-size: 10.5px; color: var(--ink-2); }
 .icon-mini { width: 24px; height: 24px; border-radius: var(--r-xs); display: grid; place-items: center; color: var(--ink-3); }
 .icon-mini:hover:not(:disabled) { background: var(--surface-3); color: var(--ink); }
-.icon-mini.danger:hover:not(:disabled) { background: var(--danger-soft); color: var(--danger); }
+.icon-mini.active { background: var(--accent-soft); color: var(--accent-ink); }
+.icon-mini.danger:hover:not(:disabled), .icon-mini.armed { background: var(--danger-soft); color: var(--danger); }
+.icon-mini.armed { animation: pulse-armed 1s ease-in-out infinite; }
 .icon-mini:disabled { opacity: 0.35; cursor: not-allowed; }
 .danger-zone { border-top: 1px solid var(--line); padding-top: 12px; }
 .danger-hint { display: flex; align-items: center; flex-wrap: wrap; gap: 3px; margin: 0; font-size: 11px; line-height: 1.6; color: var(--ink-3); }
@@ -426,4 +523,5 @@ watch(
 .spin { animation: tick-spin 900ms linear infinite; }
 .fade-enter-active, .fade-leave-active { transition: opacity 160ms var(--ease-out); }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
+@keyframes pulse-armed { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
 </style>
