@@ -20,6 +20,7 @@ const emit = defineEmits<{
   (e: 'toggle-pin'): void
   (e: 'toggle-mute'): void
   (e: 'manage'): void
+  (e: 'profile', userId: string): void
 }>()
 
 const isGroup = computed(() => props.conversation.kind === 'group')
@@ -77,12 +78,21 @@ watch(
 
     <div class="detail-scroll">
       <div class="detail-hero">
-        <AppAvatar
-          :initials="conversation.initials"
-          :tone="conversation.tone"
-          :rounded="isGroup"
-          size="xl"
-        />
+        <button
+          class="hero-avatar"
+          type="button"
+          :disabled="isGroup || !conversation.peerId"
+          :title="!isGroup && conversation.peerId ? `查看 ${conversation.name} 的资料` : undefined"
+          :aria-label="!isGroup && conversation.peerId ? `查看 ${conversation.name} 的资料` : undefined"
+          @click="!isGroup && conversation.peerId && emit('profile', String(conversation.peerId))"
+        >
+          <AppAvatar
+            :initials="conversation.initials"
+            :tone="conversation.tone"
+            :rounded="isGroup"
+            size="xl"
+          />
+        </button>
         <div>
           <p class="detail-name">{{ conversation.name }}</p>
           <p class="detail-caption">{{ conversation.context }}</p>
@@ -135,12 +145,19 @@ watch(
             class="member tip"
             :data-tip="`${member.nickname}${member.role ? ' · ' + member.role : ''}`"
           >
-            <AppAvatar
-              :initials="initialsOf(member.nickname)"
-              :tone="toneOf(member.userId)"
-              size="sm"
-              :presence="member.online ? 'online' : 'offline'"
-            />
+            <button
+              class="member-avatar"
+              type="button"
+              :aria-label="`查看 ${member.nickname} 的资料`"
+              @click="emit('profile', String(member.userId))"
+            >
+              <AppAvatar
+                :initials="initialsOf(member.nickname)"
+                :tone="toneOf(member.userId)"
+                size="sm"
+                :presence="member.online ? 'online' : 'offline'"
+              />
+            </button>
             <span class="member-name">{{ member.nickname }}</span>
           </div>
         </div>
@@ -168,6 +185,39 @@ watch(
 </template>
 
 <style scoped>
+/* 只有头像可点：昵称保持纯文本。 */
+.hero-avatar {
+  display: flex;
+  flex-shrink: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  border-radius: var(--r-full);
+}
+
+.hero-avatar:not(:disabled) {
+  cursor: pointer;
+}
+
+.hero-avatar:not(:disabled):hover :deep(.avatar) {
+  transform: scale(1.04);
+}
+
+.member-avatar {
+  display: flex;
+  padding: 0;
+  border: 0;
+  background: none;
+  border-radius: var(--r-full);
+  cursor: pointer;
+}
+
+.member-avatar:focus-visible,
+.hero-avatar:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 2px;
+}
+
 .member.tip::after {
   left: 50%;
   top: -6px;

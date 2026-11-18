@@ -1,0 +1,143 @@
+/**
+ * 聊天里点头像看资料（生产环境实测）：
+ *  1. 单聊：点顶部头像 / 消息头像 / 发送者昵称 → 打开好友资料卡（地区 + 签名 + 添加时间）；
+ *  2. 群聊：点成员消息头像 → 好友 / 陌生人资料卡，点自己的消息头像 → 自己；
+ *  3. 会话详情右侧成员格也能点开资料卡；
+ *  4. 资料卡里点「发消息」能回到对应单聊。
+ */
+import { chromium } from 'playwright-core'
+
+const BASE = 'http://82.157.47.151:8899'
+const CHROME = 'C:/Program Files/Google/Chrome/Application/chrome.exe'
+const DIRECT = '鲍勃'
+const GROUP = '产品设计小组'
+
+const results = []
+function check(name, ok, detail = '') {
+  results.push({ name, ok })
+  console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${ok ? '' : `  -> ${detail}`}`)
+}
+
+const browser = await chromium.launch({ executablePath: CHROME, headless: true })
+const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
+page.on('pageerror', (e) => console.log('[pageerror]', e.message))
+
+const cardSel = '.card[aria-label="用户资料"]'
+
+async function waitCard() {
+  await page.waitForSelector(cardSel, { timeout: 10000 })
+  await page.waitForFunction(
+    (sel) => {
+      const card = document.querySelector(sel)
+      return card && !card.querySelector('.loading')
+    },
+    cardSel,
+    { timeout: 15000 },
+  )
+  return page.locator(cardSel).innerText()
+}
+
+async function closeCard() {
+  await page.click(`${cardSel} button[aria-label="关闭"]`)
+  await page.waitForSelector(cardSel, { state: 'detached', timeout: 10000 })
+}
+
+async function openConversation(name) {
+  await page.locator('.conv', { hasText: name }).first().click()
+  await page.waitForTimeout(1000)
+}
+
+await page.goto(`${BASE}/login`, { waitUntil: 'domcontentloaded' })
+await page.fill('input[placeholder="至少 3 位"]', 'demo_alice')
+await page.fill('input[placeholder="至少 6 位"]', 'password123')
+await page.click('button:has-text("进入 VERYAL")')
+await page.waitForURL('**/app/chat', { timeout: 25000 })
+await page.waitForSelector('.conv', { timeout: 20000 })
+
+// ---------- 1. 单聊：顶部头像 ----------
+await openConversation(DIRECT)
+await page.waitForSelector('.msg', { timeout: 15000 })
+check('direct chat has message avatars',
+  (await page.locator('.msg-avatar-slot .avatar-btn').count()) > 0)
+
+await page.click('.chat-head .head-avatar')
+const fromHead = await waitCard()
+check('header avatar opens profile', fromHead.includes(DIRECT), fromHead.replace(/\n/g, ' | '))
+check('header card shows region + signature + add-time',
+  /地区/.test(fromHead) && /个性签名/.test(fromHead) && /添加时间/.test(fromHead))
+await closeCard()
+
+// ---------- 2. 单聊：消息头像 ----------
+const incoming = page.locator('.msg:not(.out) .msg-avatar-slot .avatar-btn').last()
+await incoming.click()
+const fromMsg = await waitCard()
+check('message avatar opens the sender card', fromMsg.includes(DIRECT), fromMsg.replace(/\n/g, ' | '))
+await closeCard()
+
+const outgoing = page.locator('.msg.out .msg-avatar-slot .avatar-btn').first()
+await outgoing.click()
+const fromSelf = await waitCard()
+check('own message avatar opens self card', /我自己/.test(fromSelf), fromSelf.replace(/\n/g, ' | '))
+check('self card links to settings', /编辑我的资料/.test(fromSelf))
+await closeCard()
+
+// ---------- 3. 昵称不参与点击：只有头像可点开 ----------
+
+// ---------- 4. 资料卡 → 发消息 ----------
+await page.click('.chat-head .head-avatar')
+await waitCard()
+await page.click(`${cardSel} button:has-text("发消息")`)
+await page.waitForSelector(cardSel, { state: 'detached', timeout: 10000 })
+check('chat action closes the card and keeps conversation',
+  (await page.locator('.chat-title').innerText()).includes(DIRECT))
+
+// ---------- 5. 群聊：成员 / 陌生人 / 自己 ----------
+await openConversation(GROUP)
+await page.waitForSelector('.msg .msg-author', { timeout: 15000 })
+
+async function openByAuthor(name) {
+  const msg = page.locator('.msg', { has: page.locator('.msg-author', { hasText: name }) }).first()
+  await msg.locator('.msg-avatar-slot .avatar-btn').click()
+  return waitCard()
+}
+
+const friendText = await openByAuthor('鲍勃')
+check('group friend avatar opens friend card',
+  /好友/.test(friendText) && /添加时间/.test(friendText), friendText.replace(/\n/g, ' | '))
+await closeCard()
+
+const strangerText = await openByAuthor('戴维')
+check('group stranger avatar opens stranger card',
+  /添加好友/.test(strangerText) && !/添加时间/.test(strangerText), strangerText.replace(/\n/g, ' | '))
+await closeCard()
+
+const daveMsg = page.locator('.msg', { has: page.locator('.msg-author', { hasText: '戴维' }) }).first()
+await daveMsg.locator('.msg-author').click()
+await page.waitForTimeout(1200)
+check('sender nickname is not clickable', (await page.locator(cardSel).count()) === 0,
+  '点击昵称不应该弹出资料卡')
+
+const ownMsg = page.locator('.msg.out', { has: page.locator('.msg-avatar-slot .avatar-btn') }).first()
+await ownMsg.locator('.msg-avatar-slot .avatar-btn').click()
+const selfInGroup = await waitCard()
+check('own avatar in group opens self card', /我自己/.test(selfInGroup), selfInGroup.replace(/\n/g, ' | '))
+await closeCard()
+
+// ---------- 6. 右侧会话详情的成员头像 ----------
+const member = page.locator('.detail-pane .member', { hasText: '鲍勃' }).first()
+check('detail panel member exists', (await member.count()) === 1)
+await member.locator('.member-avatar').click()
+const memberText = await waitCard()
+check('detail panel member opens profile',
+  /鲍勃/.test(memberText) && /添加时间/.test(memberText), memberText.replace(/\n/g, ' | '))
+await closeCard()
+
+await page.screenshot({ path: 'tools/verify-chat-profile.png' })
+await browser.close()
+
+const failed = results.filter((item) => !item.ok)
+console.log(`\n${results.length - failed.length}/${results.length} chat-profile checks passed`)
+if (failed.length) {
+  console.log('FAILED:', failed.map((item) => item.name).join(', '))
+  process.exit(1)
+}

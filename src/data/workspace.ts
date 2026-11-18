@@ -14,6 +14,8 @@ export type Conversation = {
   members?: number
   context: string
   muted?: boolean
+  /** 单聊对方的用户 ID：点聊天里的头像时用它打开资料卡 */
+  peerId?: string
 }
 
 export type Attachment = {

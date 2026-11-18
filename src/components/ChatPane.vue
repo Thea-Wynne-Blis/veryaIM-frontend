@@ -48,12 +48,22 @@ const emit = defineEmits<{
   (e: 'attach', file: File): void
   (e: 'toggle-detail'): void
   (e: 'forward', message: ChatMessage): void
+  (e: 'profile', userId: string): void
 }>()
 
 const chat = useChatStore()
 const draft = ref('')
 const mentionOpen = ref(false)
 const mentionMembers = computed(() => props.members ?? [])
+
+/**
+ * 聊天里点头像 / 昵称看资料：单聊是对方，群聊是发言人，自己就是自己。
+ * 多选状态下点击仍然交给消息本体处理，用来勾选而不是弹资料卡。
+ */
+function openProfile(userId?: string | null) {
+  if (!userId) return
+  emit('profile', String(userId))
+}
 
 function onInput() {
   autoGrow()
@@ -641,16 +651,27 @@ watch(() => props.messages.length, () => scrollToBottom())
   <section class="chat-pane" aria-label="聊天窗口">
     <template v-if="conversation">
       <header class="chat-head">
-        <AppAvatar
+        <button
           :key="conversation.id"
-          class="enter"
-          :initials="conversation.initials"
-          :tone="conversation.tone"
-          :presence="conversation.presence"
-          :rounded="conversation.kind === 'group'"
-          size="sm"
-        />
-        <div :key="conversation.id" class="chat-head-main enter">
+          class="head-avatar enter"
+          type="button"
+          :disabled="conversation.kind !== 'direct' || !conversation.peerId"
+          :title="conversation.kind === 'direct' ? `查看 ${conversation.name} 的资料` : undefined"
+          :aria-label="conversation.kind === 'direct' ? `查看 ${conversation.name} 的资料` : undefined"
+          @click="!selecting && openProfile(conversation.peerId)"
+        >
+          <AppAvatar
+            :initials="conversation.initials"
+            :tone="conversation.tone"
+            :presence="conversation.presence"
+            :rounded="conversation.kind === 'group'"
+            size="sm"
+          />
+        </button>
+        <div
+          :key="conversation.id"
+          class="chat-head-main enter"
+        >
           <h2 class="chat-title">
             {{ conversation.name }}
             <span v-if="conversation.kind === 'group'" class="stat-chip">
@@ -754,12 +775,19 @@ watch(() => props.messages.length, () => scrollToBottom())
 
           <div class="msg-body">
             <div class="msg-avatar-slot">
-              <AppAvatar
+              <button
                 v-if="!grouped"
-                :initials="message.initials"
-                :tone="message.tone"
-                size="sm"
-              />
+                class="avatar-btn"
+                type="button"
+                :title="`查看 ${message.author} 的资料`"
+                @click="selecting ? toggleSelect(message) : openProfile(message.senderId)"
+              >
+                <AppAvatar
+                  :initials="message.initials"
+                  :tone="message.tone"
+                  size="sm"
+                />
+              </button>
             </div>
 
             <div class="msg-main">
@@ -1030,6 +1058,46 @@ watch(() => props.messages.length, () => scrollToBottom())
 </template>
 
 <style scoped>
+/* ---------- 点头像看资料 ---------- */
+.head-avatar {
+  display: flex;
+  flex-shrink: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  border-radius: var(--r-full);
+  transition: transform var(--dur-1) var(--ease-out);
+}
+
+.head-avatar:not(:disabled) {
+  cursor: pointer;
+}
+
+.head-avatar:not(:disabled):hover {
+  transform: scale(1.05);
+}
+
+.head-avatar.enter {
+  animation: surface-rise 280ms var(--ease-out) both;
+}
+
+.avatar-btn {
+  display: flex;
+  padding: 0;
+  border: 0;
+  background: none;
+  border-radius: var(--r-full);
+  cursor: pointer;
+}
+
+.avatar-btn :deep(.avatar) {
+  transition: transform var(--dur-1) var(--ease-out);
+}
+
+.avatar-btn:hover :deep(.avatar) {
+  transform: scale(1.08);
+}
+
 .send-error {
   margin: 0 0 6px;
   padding: 6px 10px;

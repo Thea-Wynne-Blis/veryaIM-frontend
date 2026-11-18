@@ -13,6 +13,7 @@ import NewChatDialog from '../components/NewChatDialog.vue'
 import CreateGroupDialog from '../components/CreateGroupDialog.vue'
 import GroupManageDialog from '../components/GroupManageDialog.vue'
 import ForwardDialog from '../components/ForwardDialog.vue'
+import UserProfileDialog from '../components/UserProfileDialog.vue'
 import { useIsMobile } from '../composables/useIsMobile'
 import { useChatStore } from '../stores/chat'
 import { useAuthStore } from '../stores/auth'
@@ -36,6 +37,10 @@ const theme = ref<'light' | 'dark'>(
 const dialogOpen = ref(false)
 const createGroupOpen = ref(false)
 const manageOpen = ref(false)
+/** 聊天里点任意头像后打开的资料卡 */
+const profileOpen = ref(false)
+const profileId = ref<Id | null>(null)
+const profileFallback = ref<{ nickname: string } | null>(null)
 /** 右键「转发」选中的消息 */
 const forwardTarget = ref<ChatMessage | null>(null)
 
@@ -94,6 +99,7 @@ function toConversation(card: ConversationCard): Conversation {
     context: card.type === 'GROUP' ? `群聊 · ${card.memberCount} 位成员` : '单聊',
     pinned: chat.pinnedIds.includes(card.conversationId),
     muted: chat.mutedIds.includes(card.conversationId),
+    peerId: card.type === 'PRIVATE' && card.peerUserId ? String(card.peerUserId) : undefined,
   }
 }
 
@@ -287,6 +293,32 @@ function onForward(message: ChatMessage) {
   forwardTarget.value = message
 }
 
+/** 聊天里点头像/昵称打开资料卡，好友、陌生人、自己走同一个组件。 */
+function openProfile(userId: Id | string, nickname?: string) {
+  if (!userId) return
+  profileId.value = String(userId)
+  profileFallback.value = nickname ? { nickname } : null
+  profileOpen.value = true
+}
+
+/** 资料卡里点「发消息」：建私聊并直接切过去。 */
+async function profileChat(userId: Id) {
+  profileOpen.value = false
+  try {
+    const conversationId = await chat.createPrivate(userId)
+    await chat.loadCards()
+    await select(conversationId)
+  } catch (e) {
+    chat.error = e instanceof Error ? e.message : '发起会话失败'
+  }
+}
+
+/** 资料卡里点「编辑我的资料」：切到设置页。 */
+function openMySettings() {
+  profileOpen.value = false
+  navigate('me')
+}
+
 function navigate(target: string) {
   const map: Record<string, string> = {
     chat: '/app/chat',
@@ -429,6 +461,7 @@ onBeforeUnmount(() => {
     @mark-unread="onConvUnread"
     @hide="onConvHide"
     @delete="onConvDelete"
+    @profile="(id) => openProfile(id)"
   />
 
   <div v-else class="stage">
@@ -469,6 +502,7 @@ onBeforeUnmount(() => {
         @attach="(file) => chat.activeId && attach(chat.activeId, file)"
         @toggle-detail="detailOpen = !detailOpen"
         @forward="onForward"
+        @profile="(id) => openProfile(id)"
       />
 
       <DetailPanel
@@ -481,6 +515,7 @@ onBeforeUnmount(() => {
         @close="detailOpen = false"
         @toggle-pin="onTogglePin"
         @toggle-mute="onToggleMute"
+        @profile="(id) => openProfile(id)"
       />
     </div>
 
@@ -517,6 +552,16 @@ onBeforeUnmount(() => {
     @close="manageOpen = false"
     @changed="onGroupChanged"
     @removed="onGroupRemoved"
+  />
+
+  <UserProfileDialog
+    :open="profileOpen"
+    :user-id="profileId"
+    :fallback="profileFallback"
+    @close="profileOpen = false"
+    @changed="onGroupChanged"
+    @chat="profileChat"
+    @settings="openMySettings"
   />
 
   <ForwardDialog

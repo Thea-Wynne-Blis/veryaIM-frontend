@@ -57,6 +57,7 @@ const emit = defineEmits<{
   (e: 'mark-unread', id: string): void
   (e: 'hide', id: string): void
   (e: 'delete', id: string): void
+  (e: 'profile', userId: string): void
 }>()
 
 const chat = useChatStore()
@@ -300,6 +301,8 @@ type PressState = {
 }
 
 let press: PressState | null = null
+/** 长按弹菜单的那一下不要再触发「点头像看资料」。 */
+let suppressTap = false
 
 function cancelPress() {
   if (!press) return
@@ -307,9 +310,15 @@ function cancelPress() {
   press = null
 }
 
+function openProfile(userId?: string | null) {
+  if (!userId || suppressTap) return
+  emit('profile', String(userId))
+}
+
 function beginPress(event: PointerEvent, message: ChatMessage) {
   if (event.pointerType === 'mouse' && event.button !== 0) return
   cancelPress()
+  suppressTap = false
   const state: PressState = {
     x: event.clientX,
     y: event.clientY,
@@ -319,6 +328,7 @@ function beginPress(event: PointerEvent, message: ChatMessage) {
   }
   state.timer = window.setTimeout(() => {
     press = null
+    suppressTap = true
     if (navigator.vibrate) navigator.vibrate(12)
     openMenuAt(state.x, state.y, message)
   }, 480)
@@ -800,12 +810,19 @@ document.addEventListener('pointerdown', onDocPointerDown, true)
             </span>
             <div class="msg-body">
               <div class="msg-avatar-slot">
-                <AppAvatar
+                <button
                   v-if="!grouped"
-                  :initials="message.initials"
-                  :tone="message.tone"
-                  size="sm"
-                />
+                  class="avatar-btn"
+                  type="button"
+                  :aria-label="`查看 ${message.author} 的资料`"
+                  @click.stop="openProfile(message.senderId)"
+                >
+                  <AppAvatar
+                    :initials="message.initials"
+                    :tone="message.tone"
+                    size="sm"
+                  />
+                </button>
               </div>
               <div class="msg-main">
                 <div v-if="message.replyTo" class="m-quote" @click.stop="locateMessage(message.replyTo.messageId)">
@@ -934,6 +951,15 @@ document.addEventListener('pointerdown', onDocPointerDown, true)
 </template>
 
 <style scoped>
+/* 点头像 / 昵称看资料 */
+.avatar-btn {
+  display: flex;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
 .m-embed {
   flex: 1;
   min-height: 0;
