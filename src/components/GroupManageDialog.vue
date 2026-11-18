@@ -5,6 +5,7 @@ import {
   BellOff, Bell, LogOut, Trash2, Save, UserPlus, UserCheck, Clock, Check,
 } from 'lucide-vue-next'
 import AppAvatar from './AppAvatar.vue'
+import UserProfileDialog from './UserProfileDialog.vue'
 import {
   groupsApi,
   type GroupDetail,
@@ -14,6 +15,7 @@ import {
 } from '../api/groups'
 import { ApiError, api, type Id } from '../api/client'
 import { useAuthStore } from '../stores/auth'
+import { useChatStore } from '../stores/chat'
 import { initialsOf, toneOf } from '../utils/present'
 
 const props = defineProps<{ open: boolean; groupId: string | null }>()
@@ -24,6 +26,7 @@ const emit = defineEmits<{
 }>()
 
 const auth = useAuthStore()
+const chat = useChatStore()
 
 const detail = ref<GroupDetail | null>(null)
 const moderation = ref<GroupModeration | null>(null)
@@ -41,6 +44,11 @@ const pending = ref('')
 /** 已是好友 / 好友申请已发出的成员，用于把「添加好友」图标换成状态。 */
 const friendIds = ref<Set<string>>(new Set())
 const requestedIds = ref<Set<string>>(new Set())
+
+/** 点成员头像/昵称查看资料卡：好友、陌生人、自己共用同一个组件。 */
+const profileOpen = ref(false)
+const profileId = ref<Id | null>(null)
+const profileName = ref('')
 
 let noticeTimer: number | undefined
 let pendingTimer: number | undefined
@@ -214,8 +222,7 @@ async function loadFriends() {
 }
 
 /** 群成员里的加好友入口，复用通讯录的申请逻辑，不改变群内关系。 */
-async function addFriend(member: GroupMemberProfile) {
-  const id = String(member.userId)
+async function addFriend(member: GroupMemberProfile) {  const id = String(member.userId)
   if (isSelf(member) || isFriend(member) || friendRequested(member) || busy.value) return
   busy.value = `friend-${id}`
   error.value = ''
@@ -244,6 +251,29 @@ async function addFriend(member: GroupMemberProfile) {
     } else {
       error.value = e instanceof Error ? e.message : '发送好友申请失败'
     }
+  } finally {
+    busy.value = ''
+  }
+}
+
+function openProfile(member: GroupMemberProfile) {
+  profileId.value = member.userId
+  profileName.value = member.nickname
+  profileOpen.value = true
+}
+
+/** 资料卡里点「发消息」：建私聊并跳过去，群管理弹窗顺势关闭。 */
+async function chatFromProfile(userId: Id) {
+  busy.value = 'profile-chat'
+  error.value = ''
+  try {
+    const conversationId = await chat.createPrivate(userId)
+    await chat.loadCards()
+    await chat.open(conversationId)
+    emit('close')
+    window.dispatchEvent(new CustomEvent('veryal:open-chat', { detail: conversationId }))
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '发起会话失败'
   } finally {
     busy.value = ''
   }
@@ -310,6 +340,9 @@ watch(
       announcement.value = ''
       friendIds.value = new Set()
       requestedIds.value = new Set()
+      profileOpen.value = false
+      profileId.value = null
+      profileName.value = ''
     }
   },
 )
@@ -407,22 +440,29 @@ onBeforeUnmount(() => {
             </p>
             <div class="member-list">
               <div v-for="m in members" :key="m.userId" class="member-row">
-                <AppAvatar :initials="initialsOf(m.nickname)" :tone="toneOf(m.userId)" size="sm" />
-                <span class="member-main">
-                  <span class="member-name">
-                    {{ m.nickname }}
-                    <span v-if="m.role === 'OWNER'" class="tag owner">群主</span>
-                    <span v-else-if="m.role === 'ADMIN'" class="tag admin">管理员</span>
-                    <span v-if="isSelf(m)" class="tag me">我</span>
+                <button
+                  class="member-open"
+                  type="button"
+                  :title="`查看 ${m.nickname} 的资料`"
+                  @click="openProfile(m)"
+                >
+                  <AppAvatar :initials="initialsOf(m.nickname)" :tone="toneOf(m.userId)" size="sm" />
+                  <span class="member-main">
+                    <span class="member-name">
+                      {{ m.nickname }}
+                      <span v-if="m.role === 'OWNER'" class="tag owner">群主</span>
+                      <span v-else-if="m.role === 'ADMIN'" class="tag admin">管理员</span>
+                      <span v-if="isSelf(m)" class="tag me">我</span>
+                    </span>
+                    <span class="member-sub">
+                      <template v-if="pending === `kick-${m.userId}`">再点一次确认移出</template>
+                      <template v-else-if="pending === `transfer-${m.userId}`">
+                        再点一次确认转让群主
+                      </template>
+                      <template v-else>ID {{ m.userId }}</template>
+                    </span>
                   </span>
-                  <span class="member-sub">
-                    <template v-if="pending === `kick-${m.userId}`">再点一次确认移出</template>
-                    <template v-else-if="pending === `transfer-${m.userId}`">
-                      再点一次确认转让群主
-                    </template>
-                    <template v-else>ID {{ m.userId }}</template>
-                  </span>
-                </span>
+                </button>
 
                 <span v-if="mutedLabel(m)" class="tag muted" :title="mutedLabel(m)">
                   {{ mutedLabel(m) }}
@@ -538,6 +578,16 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
+      <UserProfileDialog
+        :open="profileOpen"
+        :user-id="profileId"
+        :fallback="{ nickname: profileName }"
+        @close="profileOpen = false"
+        @changed="loadFriends"
+        @chat="chatFromProfile"
+        @settings="profileOpen = false"
+      />
+
       <!-- 操作反馈：顶部悬浮小提示，不占正文空间、不把内容顶下去 -->
       <Transition name="toast">
         <div v-if="notice" class="toast" role="status" aria-live="polite">
@@ -613,6 +663,8 @@ onBeforeUnmount(() => {
 .member-list { display: flex; flex-direction: column; gap: 2px; max-height: 280px; overflow-y: auto; }
 .member-row { display: flex; align-items: center; gap: 9px; padding: 6px 4px; border-radius: var(--r-sm); }
 .member-row:hover { background: var(--surface-hover); }
+.member-open { display: flex; align-items: center; gap: 9px; flex: 1; min-width: 0; text-align: left; background: none; border: 0; padding: 0; cursor: pointer; }
+.member-open:focus-visible { outline: 2px solid var(--accent-ring); outline-offset: 2px; border-radius: var(--r-xs); }
 .member-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .member-name { font-size: 12.5px; font-weight: 560; display: flex; align-items: center; gap: 5px; }
 .member-sub { font-size: 10px; color: var(--ink-4); }

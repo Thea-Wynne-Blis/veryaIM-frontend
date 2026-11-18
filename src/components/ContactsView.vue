@@ -3,8 +3,10 @@ import { computed, onMounted, ref } from 'vue'
 import {
   Users, Search, MessageSquarePlus, Loader2, UserPlus,
   Check, X, Pencil, Inbox, Hash, Send, Trash2,
+  MapPin, PenLine, CalendarClock, UserRound,
 } from 'lucide-vue-next'
 import AppAvatar from './AppAvatar.vue'
+import UserProfileDialog from './UserProfileDialog.vue'
 import { useIsMobile } from '../composables/useIsMobile'
 import { api, sameId, type Id } from '../api/client'
 import { useChatStore } from '../stores/chat'
@@ -15,8 +17,11 @@ type Friend = {
   friendId: Id
   nickname: string
   avatar?: string | null
+  region?: string | null
+  signature?: string | null
   remark?: string | null
   online?: boolean
+  /** 成为好友的时间，后端取自 im_friend.created_at。 */
   createdAt?: string
 }
 type GroupItem = { groupId: string; name: string }
@@ -53,6 +58,11 @@ const addKeyword = ref('')
 const addHits = ref<{ userId: Id; nickname: string; username: string }[]>([])
 const addMessage = ref('')
 const addBusy = ref<Id | null>(null)
+
+/** 资料卡：从搜索结果点开的是陌生人，从群成员点开的是好友/陌生人。 */
+const profileOpen = ref(false)
+const profileId = ref<Id | null>(null)
+const profileFallback = ref<{ nickname?: string; avatar?: string | null } | null>(null)
 
 const tabIndex = computed(() => {
   if (tab.value === 'friends') return 0
@@ -147,6 +157,26 @@ function friendOf(userId: Id): Friend | null {
 function chatWithHit(hit: { userId: Id; nickname: string }) {
   const friend = friendOf(hit.userId)
   if (friend) void openChat(friend)
+}
+
+/** 打开统一资料卡：搜索结果里的陌生人也能看地区、签名并直接加好友。 */
+function openUserProfile(hit: { userId: Id; nickname?: string; avatar?: string | null }) {
+  profileId.value = hit.userId
+  profileFallback.value = { nickname: hit.nickname, avatar: hit.avatar ?? null }
+  profileOpen.value = true
+}
+
+function onProfileChat(userId: Id) {
+  const friend = friendOf(userId)
+  if (friend) void openChat(friend)
+}
+
+/** 添加时间按「2026年11月18日」展示。 */
+function fullDate(iso: string | null | undefined): string {
+  if (!iso) return '—'
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return '—'
+  return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`
 }
 
 async function openGroup(group: GroupItem) {
@@ -391,18 +421,62 @@ onMounted(load)
 
     <section class="view-main">
       <div v-if="selected" class="profile-card glare">
-        <AppAvatar :initials="initialsOf(selected.remark || selected.nickname)" :tone="toneOf(selected.friendId)" size="xl" />
-        <h2 class="profile-name">{{ selected.remark || selected.nickname }}</h2>
-        <p class="profile-sub">
-          {{ selected.nickname }} · ID {{ selected.friendId }} · {{ selected.online ? '在线' : '离线' }}
+        <div class="profile-head">
+          <span class="profile-avatar">
+            <AppAvatar
+              :initials="initialsOf(selected.remark || selected.nickname)"
+              :tone="toneOf(selected.friendId)"
+              size="xl"
+            />
+            <span v-if="selected.online" class="online-dot" title="在线" />
+          </span>
+          <h2 class="profile-name">{{ selected.remark || selected.nickname }}</h2>
+          <p class="profile-sub">
+            {{ selected.nickname }} · {{ selected.online ? '在线' : '离线' }}
+          </p>
+        </div>
+
+        <p class="profile-signature" :class="{ empty: !selected.signature }">
+          {{ selected.signature || '这个人很神秘，还没有写个性签名。' }}
         </p>
-        <p v-if="selected.remark" class="profile-remark">备注：{{ selected.remark }}</p>
+
+        <dl class="profile-meta">
+          <div class="meta-row">
+            <dt><MapPin :size="13" :stroke-width="1.9" /> 地区</dt>
+            <dd>{{ selected.region || '未填写' }}</dd>
+          </div>
+          <div class="meta-row">
+            <dt><PenLine :size="13" :stroke-width="1.9" /> 个性签名</dt>
+            <dd :class="{ muted: !selected.signature }">{{ selected.signature || '未填写' }}</dd>
+          </div>
+          <div class="meta-row">
+            <dt><CalendarClock :size="13" :stroke-width="1.9" /> 添加时间</dt>
+            <dd>{{ fullDate(selected.createdAt) }}</dd>
+          </div>
+          <div class="meta-row">
+            <dt><UserRound :size="13" :stroke-width="1.9" /> 用户 ID</dt>
+            <dd class="mono">{{ selected.friendId }}</dd>
+          </div>
+        </dl>
+
         <button class="primary" :disabled="opening !== null" @click="openChat(selected)">
           <Loader2 v-if="sameId(opening, selected.friendId)" :size="14" class="spin" />
           <MessageSquarePlus v-else :size="14" :stroke-width="2" />
           发消息
         </button>
-        <button class="ghost" @click="startEditRemark(selected)">
+        <div v-if="sameId(editingRemark, selected.friendId)" class="remark-box">
+          <input
+            v-model="remarkDraft"
+            class="remark-input wide"
+            placeholder="给 TA 设置一个备注名"
+            maxlength="64"
+            @keydown.enter="saveRemark(selected)"
+          />
+          <button class="mini" title="保存备注" @click="saveRemark(selected)">
+            <Check :size="13" :stroke-width="2.6" />
+          </button>
+        </div>
+        <button v-else class="ghost" @click="startEditRemark(selected)">
           <Pencil :size="13" :stroke-width="2" />
           修改备注
         </button>
@@ -450,7 +524,13 @@ onMounted(load)
           />
 
           <div class="dialog-body">
-            <div v-for="hit in addHits" :key="hit.userId" class="row static">
+            <div
+              v-for="hit in addHits"
+              :key="hit.userId"
+              class="row clickable"
+              title="查看资料"
+              @click="openUserProfile(hit)"
+            >
               <AppAvatar :initials="initialsOf(hit.nickname)" :tone="toneOf(hit.userId)" size="md" />
               <span class="row-main">
                 <span class="row-name">{{ hit.nickname }}</span>
@@ -480,6 +560,17 @@ onMounted(load)
         </div>
       </div>
     </Transition>
+
+    <!-- 用户资料卡：搜索结果里的陌生人 / 已经是好友的人 -->
+    <UserProfileDialog
+      :open="profileOpen"
+      :user-id="profileId"
+      :fallback="profileFallback"
+      @close="profileOpen = false"
+      @changed="load"
+      @chat="onProfileChat"
+      @settings="profileOpen = false"
+    />
   </div>
 </template>
 
@@ -518,10 +609,23 @@ onMounted(load)
 .mini.no:hover { background: var(--danger-soft); color: var(--danger); }
 .view-empty-sm { padding: 14px 9px; font-size: 11.5px; color: var(--ink-4); }
 .view-main { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; background: var(--canvas); }
-.profile-card { display: flex; flex-direction: column; align-items: center; gap: 7px; padding: 24px 30px; border-radius: var(--r-lg); background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow-sm); min-width: 300px; }
+.profile-card { display: flex; flex-direction: column; align-items: stretch; gap: 8px; padding: 22px 24px 20px; border-radius: var(--r-lg); background: var(--surface); border: 1px solid var(--line); box-shadow: var(--frame-ring), var(--shadow-sm); width: min(360px, 100%); }
+.profile-head { display: flex; flex-direction: column; align-items: center; text-align: center; }
+.profile-avatar { position: relative; margin-bottom: 8px; }
 .profile-name { font-size: 17px; font-weight: 680; letter-spacing: -0.3px; }
 .profile-sub { font-size: 11.5px; color: var(--ink-3); }
-.profile-remark { font-size: 11.5px; color: var(--ink-2); }
+.profile-signature { margin: 4px 0 0; text-align: center; font-size: 12.5px; line-height: 1.65; color: var(--ink-2); }
+.profile-signature.empty { color: var(--ink-4); }
+.profile-meta { margin: 6px 0 2px; padding-top: 10px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 7px; }
+.meta-row { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; }
+.meta-row dt { display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0; font-size: 11px; color: var(--ink-3); }
+.meta-row dd { min-width: 0; margin: 0; font-size: 12px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.meta-row dd.muted { color: var(--ink-4); }
+.mono { font-family: var(--mono); font-size: 11px; color: var(--ink-2); }
+.remark-box { display: flex; align-items: center; gap: 6px; }
+.remark-input.wide { flex: 1; width: auto; height: 34px; }
+.mini { width: 34px; height: 34px; flex-shrink: 0; border-radius: var(--r-sm); display: grid; place-items: center; background: var(--accent-soft); color: var(--accent-ink); }
+.row.clickable { cursor: pointer; }
 .primary, .ghost { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 34px; padding: 0 16px; border-radius: var(--r-sm); font-size: 12.5px; font-weight: 620; width: 100%; }
 .primary { background: var(--accent-grad); color: #fff; box-shadow: 0 3px 12px -5px var(--accent); margin-top: 4px; }
 .ghost { border: 1px solid var(--line); color: var(--ink-2); background: var(--surface-2); }

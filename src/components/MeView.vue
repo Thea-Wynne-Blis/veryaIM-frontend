@@ -1,6 +1,9 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
-import { LogOut, Save, Shield, Smartphone, Loader2, Trash2, User, Languages } from 'lucide-vue-next'
+import { computed, onMounted, ref } from 'vue'
+import {
+  LogOut, Save, Shield, Smartphone, Loader2, Trash2, User, Languages,
+  MapPin, PenLine,
+} from 'lucide-vue-next'
 import AppAvatar from './AppAvatar.vue'
 import {
   api,
@@ -25,12 +28,24 @@ const profile = ref<UserProfile | null>(null)
 const privacy = ref<UserPrivacy | null>(null)
 const devices = ref<DeviceInfo[]>([])
 const nickname = ref('')
+const region = ref('')
+const signature = ref('')
 const loading = ref(true)
 const saving = ref(false)
 const privacyBusy = ref(false)
 const removingDevice = ref<string | null>(null)
 const message = ref('')
 const error = ref('')
+
+/** 资料有改动才允许保存，避免无意义的请求。 */
+const profileDirty = computed(() => {
+  if (!profile.value) return false
+  return (
+    nickname.value.trim() !== (profile.value.nickname ?? '') ||
+    region.value.trim() !== (profile.value.region ?? '') ||
+    signature.value.trim() !== (profile.value.signature ?? '')
+  )
+})
 
 const policyLabel: Record<string, string> = {
   REJECT: '拒绝所有人',
@@ -61,6 +76,8 @@ async function load() {
     ])
     profile.value = p
     nickname.value = p.nickname
+    region.value = p.region ?? ''
+    signature.value = p.signature ?? ''
     privacy.value = pr
     devices.value = Array.isArray(d) ? d : []
   } catch (e) {
@@ -70,18 +87,29 @@ async function load() {
   }
 }
 
-async function saveNickname() {
-  const value = nickname.value.trim()
-  if (!value || value === profile.value?.nickname) return
+/** 昵称、地区、个性签名一起提交，资料卡和设置页始终一致。 */
+async function saveProfile() {
+  const name = nickname.value.trim()
+  if (!name || !profileDirty.value || saving.value) return
   saving.value = true
   error.value = ''
   try {
-    // 修改资料只支持 PUT /users/me。
-    const updated = await api.put<UserProfile>('/users/me', { nickname: value })
+    const updated = await api.put<UserProfile>('/users/me', {
+      nickname: name,
+      region: region.value.trim(),
+      signature: signature.value.trim(),
+    })
     profile.value = updated
     nickname.value = updated.nickname
-    auth.updateUser({ nickname: updated.nickname, avatar: updated.avatar ?? auth.user?.avatar })
-    flash('昵称已更新')
+    region.value = updated.region ?? ''
+    signature.value = updated.signature ?? ''
+    auth.updateUser({
+      nickname: updated.nickname,
+      avatar: updated.avatar ?? auth.user?.avatar,
+      region: updated.region,
+      signature: updated.signature,
+    })
+    flash('个人资料已保存')
   } catch (e) {
     error.value = e instanceof Error ? e.message : '保存失败'
   } finally {
@@ -153,7 +181,15 @@ onMounted(load)
             <div class="hero-text">
               <p class="hero-name">{{ profile?.nickname }}</p>
               <p class="hero-sub">@{{ profile?.username }} · ID {{ profile?.userId }}</p>
-              <p class="hero-sub">{{ profile?.online ? '在线' : '离线' }}</p>
+              <p class="hero-bio" :class="{ empty: !profile?.signature }">
+                {{ profile?.signature || '还没有个性签名，去下面写一句吧。' }}
+              </p>
+              <p class="hero-meta">
+                <MapPin :size="11" :stroke-width="2" />
+                {{ profile?.region || '未填写地区' }}
+                <span class="dot">·</span>
+                {{ profile?.online ? '在线' : '离线' }}
+              </p>
             </div>
           </div>
 
@@ -164,19 +200,38 @@ onMounted(load)
               <input
                 v-model="nickname"
                 class="field-input"
-                placeholder="输入新昵称"
+                placeholder="输入昵称"
                 maxlength="32"
-                @keydown.enter="saveNickname"
               />
+            </label>
+            <label class="field">
+              <span class="field-label"><MapPin :size="10" :stroke-width="2.4" /> 地区</span>
+              <input
+                v-model="region"
+                class="field-input"
+                placeholder="例如：北京 · 朝阳"
+                maxlength="64"
+              />
+            </label>
+            <label class="field">
+              <span class="field-label"><PenLine :size="10" :stroke-width="2.4" /> 个性签名</span>
+              <textarea
+                v-model="signature"
+                class="field-textarea"
+                rows="3"
+                maxlength="255"
+                placeholder="一句话介绍自己，好友点开你的资料卡就能看到"
+              />
+              <span class="field-count">{{ signature.length }}/255</span>
             </label>
             <button
               class="primary"
-              :disabled="saving || !nickname.trim() || nickname.trim() === profile?.nickname"
-              @click="saveNickname"
+              :disabled="saving || !nickname.trim() || !profileDirty"
+              @click="saveProfile"
             >
               <Loader2 v-if="saving" :size="13" class="spin" />
               <Save v-else :size="13" :stroke-width="2" />
-              保存昵称
+              保存资料
             </button>
           </div>
 
@@ -307,14 +362,22 @@ onMounted(load)
 .me-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-md); padding: 14px; display: flex; flex-direction: column; gap: 10px; }
 .me-card.busy { opacity: 0.7; pointer-events: none; }
 .me-card.hero { flex-direction: row; align-items: center; gap: 14px; }
+.hero-text { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .hero-name { font-size: 17px; font-weight: 680; letter-spacing: -0.3px; }
 .hero-sub { font-size: 11.5px; color: var(--ink-3); }
+.hero-bio { margin-top: 5px; font-size: 12.5px; line-height: 1.55; color: var(--ink-2); }
+.hero-bio.empty { color: var(--ink-4); }
+.hero-meta { display: flex; align-items: center; gap: 4px; margin-top: 4px; font-size: 10.5px; color: var(--ink-3); }
+.hero-meta .dot { color: var(--ink-4); }
 .card-label { display: flex; align-items: center; gap: 6px; font-size: 10px; font-weight: 660; letter-spacing: 0.09em; text-transform: uppercase; color: var(--ink-3); }
 .card-hint { margin: 0; font-size: 11px; line-height: 1.5; color: var(--ink-4); }
-.field { display: flex; flex-direction: column; gap: 5px; }
-.field-label { font-size: 10.5px; font-weight: 640; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); }
+.field { display: flex; flex-direction: column; gap: 5px; position: relative; }
+.field-label { display: flex; align-items: center; gap: 4px; font-size: 10.5px; font-weight: 640; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); }
 .field-input { height: 36px; padding: 0 11px; border-radius: var(--r-sm); background: var(--surface-3); border: 1px solid transparent; font-size: 13.5px; }
 .field-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); background: var(--surface); }
+.field-textarea { width: 100%; padding: 9px 11px 20px; border-radius: var(--r-sm); background: var(--surface-3); border: 1px solid transparent; font-size: 13px; line-height: 1.6; resize: vertical; }
+.field-textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); background: var(--surface); }
+.field-count { position: absolute; right: 9px; bottom: 7px; font-size: 10px; color: var(--ink-4); pointer-events: none; }
 .switch-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 13px; padding: 4px 0; }
 .switch { appearance: none; width: 38px; height: 22px; border-radius: var(--r-full); background: var(--line-strong); position: relative; cursor: pointer; transition: background var(--dur-2) var(--ease-out); flex-shrink: 0; }
 .switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff; box-shadow: var(--shadow-xs); transition: transform var(--dur-2) var(--ease-spring); }

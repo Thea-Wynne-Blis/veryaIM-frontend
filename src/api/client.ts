@@ -34,6 +34,10 @@ export type AuthUser = {
   username: string
   nickname: string
   avatar?: string | null
+  /** 所在地区 */
+  region?: string | null
+  /** 个性签名 */
+  signature?: string | null
   createdAt?: string
 }
 
@@ -572,6 +576,10 @@ export type UserProfile = {
   username: string
   nickname: string
   avatar?: string | null
+  /** 所在地区 */
+  region?: string | null
+  /** 个性签名 */
+  signature?: string | null
   online?: boolean
   createdAt?: string
 }
