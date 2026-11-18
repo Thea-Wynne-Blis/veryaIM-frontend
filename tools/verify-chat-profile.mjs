@@ -18,24 +18,28 @@ function check(name, ok, detail = '') {
   console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${ok ? '' : `  -> ${detail}`}`)
 }
 
-/**
- * 脚本会把群里的「陌生人」加成好友，重复跑时按钮会变成「申请已发送」。
- * 每次先把 demo_alice 待处理的 outgoing 申请撤掉，保证断言只看得到「加好友」。
- */
-async function resetOutgoingFriendRequests() {
+/** 拿一个账号的 token：前置准备每次换新 deviceId，避免「设备已绑定」。 */
+async function loginToken(username, devicePrefix) {
   const res = await fetch(`${BASE}/api/v1/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      username: 'demo_alice',
+      username,
       password: 'password123',
-      deviceId: `cleanup-${Date.now()}`,
+      deviceId: `${devicePrefix}-${Date.now()}`,
       platform: 'LINUX',
-      deviceName: 'cleanup',
+      deviceName: devicePrefix,
     }),
   })
   const { data } = await res.json()
-  const token = data?.token
+  return data?.token
+}
+
+/**
+ * 脚本会把群里的「陌生人」加成好友，重复跑时按钮会变成「申请已发送」。
+ * 每次先把 demo_alice 待处理的 outgoing 申请撤掉，保证断言只看得到「加好友」。
+ */
+async function resetOutgoingFriendRequests(token) {
   if (!token) return
   const list = await fetch(`${BASE}/api/v1/friends/requests?direction=outgoing`, {
     headers: { Authorization: `Bearer ${token}` },
@@ -58,17 +62,7 @@ async function resetOutgoingFriendRequests() {
  * 先用 demo_bob 的身份补一条，保证最近一页一定有对方消息。
  */
 async function seedIncomingMessage() {
-  const res = await fetch(`${BASE}/api/v1/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      username: 'demo_bob',
-      password: 'password123',
-      deviceId: `seed-${Date.now()}`,
-    }),
-  })
-  const { data } = await res.json()
-  const token = data?.token
+  const token = await loginToken('demo_bob', 'seed-in')
   if (!token) return
   const cards = await fetch(`${BASE}/api/v1/conversations/cards`, {
     headers: { Authorization: `Bearer ${token}` },
@@ -89,9 +83,37 @@ async function seedIncomingMessage() {
   })
 }
 
+/**
+ * 反过来：最近一页也可能全是 Alice 自己发的，「自己的消息头像」就没有气泡可点。
+ * 用 Alice 自己的 token 再补一条，保证最近一页一定有 .msg.out。
+ */
+async function seedOutgoingMessage(token) {
+  if (!token) return
+  const cards = await fetch(`${BASE}/api/v1/conversations/cards`, {
+    headers: { Authorization: `Bearer ${token}` },
+  }).then((r) => r.json())
+  const direct = (cards.data ?? []).find(
+    (card) => card.type === 'PRIVATE' && card.title?.includes('鲍勃'),
+  )
+  if (!direct) return
+  await fetch(`${BASE}/api/v1/conversations/${direct.conversationId}/messages`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      conversationId: direct.conversationId,
+      clientMessageId: `seed-out-${Date.now()}`,
+      type: 'TEXT',
+      content: `自拍实测 seed ${new Date().toISOString()}`,
+    }),
+  })
+}
+
 // 清理是「让脚本可重复跑」的辅助步骤，网络抖动不应该让整轮实测直接崩掉。
+// 两次前置登录合并成一次 Alice 登录，少打一次登录限流。
 try {
-  await resetOutgoingFriendRequests()
+  const aliceToken = await loginToken('demo_alice', 'prep')
+  await resetOutgoingFriendRequests(aliceToken)
+  await seedOutgoingMessage(aliceToken)
   await seedIncomingMessage()
 } catch (e) {
   console.log('[warn] 实测前置准备失败，继续跑：', e.message)
@@ -146,6 +168,50 @@ await page.fill('input[placeholder="至少 6 位"]', 'password123')
 await page.click('button:has-text("进入 VERYAL")')
 await page.waitForURL('**/app/chat', { timeout: 25000 })
 await page.waitForSelector('.conv', { timeout: 20000 })
+
+// 会话列表第二行：不显示占位文案，也不显示系统提示，只显示真实消息。
+const previews = await page.locator('.conv-preview').allTextContents()
+check('conversation list has no placeholder preview',
+  !previews.includes('还没有消息'), previews.join(' | '))
+check('system notices stay out of conversation previews',
+  !previews.some((text) => text.includes('禁言')), previews.join(' | '))
+
+// 群聊预览必须是「姓名：内容」，且后端卡片与列表渲染对得上。
+const previewContract = await page.evaluate(async () => {
+  const token = localStorage.getItem('veryal.token')
+  if (!token) return { error: 'no token' }
+  const res = await fetch('/api/v1/conversations/cards', {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  const body = await res.json()
+  const cards = body.data ?? []
+  const rows = [...document.querySelectorAll('.conv')].map((el) => ({
+    name: el.querySelector('.conv-name')?.textContent?.trim() ?? '',
+    preview: el.querySelector('.conv-preview')?.textContent?.trim() ?? '',
+  }))
+  return { cards, rows }
+})
+if (previewContract.error) {
+  check('group preview renders sender name prefix', false, previewContract.error)
+} else {
+  const groupCard = previewContract.cards.find(
+    (card) => card.type === 'GROUP' && card.lastMessagePreview,
+  )
+  if (!groupCard) {
+    check('group preview renders sender name prefix', false, '没有带消息的群会话可验证')
+  } else {
+    const row = previewContract.rows.find((item) => item.name === groupCard.title)
+    const expected = `${groupCard.lastMessageSenderName}：${groupCard.lastMessagePreview}`
+    check('group preview renders sender name prefix',
+      Boolean(row) && row.preview === expected,
+      JSON.stringify({ title: groupCard.title, expected, got: row?.preview }))
+  }
+  const emptyCards = previewContract.cards.filter((card) => !card.lastMessagePreview)
+  check('cards without real messages render empty preview',
+    emptyCards.every((card) =>
+      previewContract.rows.find((row) => row.name === card.title)?.preview === ''),
+    JSON.stringify(emptyCards.map((card) => card.title)))
+}
 
 // ---------- 1. 单聊：顶部头像 ----------
 await openConversation(DIRECT)

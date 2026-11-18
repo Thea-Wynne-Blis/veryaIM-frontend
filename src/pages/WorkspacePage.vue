@@ -21,7 +21,7 @@ import { useChatStore } from '../stores/chat'
 import { useAuthStore } from '../stores/auth'
 import type { Attachment, ChatMessage, Conversation } from '../types/chat'
 import { parseJson, sameId, type ConversationCard, type Id, type MessageView } from '../api/client'
-import { clockTime, humanBytes, initialsOf, listTime, toneOf, toneOfConversation } from '../utils/present'
+import { clockTime, conversationPreview, humanBytes, initialsOf, listTime, toneOf, toneOfConversation } from '../utils/present'
 
 const route = useRoute()
 const router = useRouter()
@@ -84,18 +84,24 @@ const sortedCards = computed(() =>
 )
 
 function toConversation(card: ConversationCard): Conversation {
+  const group = card.type === 'GROUP'
   return {
     id: card.conversationId,
     name: card.title,
     initials: initialsOf(card.title),
-    kind: card.type === 'GROUP' ? 'group' : 'direct',
+    kind: group ? 'group' : 'direct',
     tone: toneOfConversation(card),
     presence: 'offline',
     unread: card.unreadCount,
     time: listTime(card.lastMessageAt ?? card.updatedAt),
-    preview: card.lastMessagePreview || '还没有消息',
+    preview: conversationPreview(
+      group ? 'group' : 'direct',
+      card.lastMessageType === 'SYSTEM' ? '' : card.lastMessagePreview,
+      card.lastMessageSenderName,
+      sameId(card.lastMessageSenderId ?? '', auth.user?.userId ?? ''),
+    ),
     members: card.memberCount,
-    context: card.type === 'GROUP' ? `群聊 · ${card.memberCount} 位成员` : '单聊',
+    context: group ? `群聊 · ${card.memberCount} 位成员` : '单聊',
     pinned: chat.pinnedIds.includes(card.conversationId),
     muted: chat.mutedIds.includes(card.conversationId),
     peerId: card.type === 'PRIVATE' && card.peerUserId ? String(card.peerUserId) : undefined,

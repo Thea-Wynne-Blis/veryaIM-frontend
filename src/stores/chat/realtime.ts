@@ -149,11 +149,21 @@ export function applyMessage(host: RealtimeHost, payload: RealtimePayload) {
   if (card) {
     if ((payload.seq ?? 0) > card.lastSeq) {
       card.lastSeq = payload.seq ?? card.lastSeq
-      card.lastMessageAt = payload.createdAt ?? card.lastMessageAt
-      card.lastMessageType = payload.messageType ?? card.lastMessageType
-      card.lastMessagePreview = previewOf(payload)
       // 新消息比「不显示」的时间更晚：会话重新出现，与服务端卡片接口的判定一致。
       card.hidden = false
+      // 系统提示（禁言等）只推进序号与未读，不占用会话列表的第二行。
+      const preview = previewOf(payload)
+      if (preview) {
+        const senderId = payload.senderId ?? ''
+        const sameSender = senderId && sameId(senderId, card.lastMessageSenderId ?? '')
+        card.lastMessageAt = payload.createdAt ?? card.lastMessageAt
+        card.lastMessageType = payload.messageType ?? card.lastMessageType
+        card.lastMessagePreview = preview
+        card.lastMessageSenderId = senderId || card.lastMessageSenderId
+        card.lastMessageSenderName = (sameSender
+          ? card.lastMessageSenderName
+          : memberName(host, conversationId, senderId)) ?? null
+      }
     }
     if (conversationId === host.activeId) {
       card.unreadCount = 0
@@ -170,6 +180,13 @@ export function applyMessage(host: RealtimeHost, payload: RealtimePayload) {
     host.markReadThrottled(conversationId)
     void host.loadReceipts(conversationId)
   }
+}
+
+/** 群里取发送者昵称：成员缓存没命中就先不显示名字，下次全量同步会补上。 */
+function memberName(host: RealtimeHost, conversationId: string, senderId: string): string | undefined {
+  if (!senderId) return undefined
+  return host.members[conversationId]
+    ?.find((item) => sameId(item.userId, senderId))?.nickname
 }
 
 /** 游标事件合并：120ms 窗口内同一会话只处理一次。 */

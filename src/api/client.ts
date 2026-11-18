@@ -473,6 +473,9 @@ export type ConversationCard = {
   lastMessagePreview: string
   lastMessageAt: string | null
   updatedAt: string
+  /** 最后一条真实消息的发送者；没有消息时为 0 / null。群聊预览用「姓名：内容」。 */
+  lastMessageSenderId: Id
+  lastMessageSenderName: string | null
   /** 当前用户是否置顶了该会话 */
   pinned: boolean
   /** 当前用户是否对会话开启了消息免打扰 */

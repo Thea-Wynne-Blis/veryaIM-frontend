@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { toneOf, toneOfConversation, toneOfPerson } from '../present'
+import { conversationPreview, toneOf, toneOfConversation, toneOfPerson } from '../present'
 
 /** 演示数据里的真实 id，用来回归「同一个人在任何界面同色」。 */
 const BOB = '380621339972603904'
@@ -59,5 +59,29 @@ describe('toneOfConversation', () => {
     expect(
       toneOfConversation({ type: 'PRIVATE', conversationId: 'p_1_2' }),
     ).toBe(toneOf('p_1_2'))
+  })
+})
+
+describe('conversationPreview', () => {
+  it('没有真实消息时返回空串，不显示占位文案', () => {
+    expect(conversationPreview('direct', '')).toBe('')
+    expect(conversationPreview('group', null, '爱丽丝')).toBe('')
+    expect(conversationPreview('direct', '   ')).toBe('')
+  })
+
+  it('私聊直接显示消息原文', () => {
+    expect(conversationPreview('direct', '晚上一起吃饭吗')).toBe('晚上一起吃饭吗')
+  })
+
+  it('群聊显示「姓名：内容」', () => {
+    expect(conversationPreview('group', '明天上线', '鲍勃')).toBe('鲍勃：明天上线')
+  })
+
+  it('群里自己发的显示「我：内容」', () => {
+    expect(conversationPreview('group', '收到', '爱丽丝', true)).toBe('我：收到')
+  })
+
+  it('群聊拿不到发送者昵称时只显示内容', () => {
+    expect(conversationPreview('group', '收到', null)).toBe('收到')
   })
 })

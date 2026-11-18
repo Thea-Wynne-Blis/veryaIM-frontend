@@ -57,6 +57,26 @@ function pad(n: number): string {
   return String(n).padStart(2, '0')
 }
 
+/**
+ * 会话列表第二行。
+ *
+ * <p>系统提示（禁言等）不进来这里——后端查询已经跳过，前端再兜一层；
+ * 没有真实消息时返回空串，列表不显示「还没有消息」这类占位。
+ * 群聊按「姓名：内容」展示，自己发的显示「我」；两行都靠 CSS 单行省略截断。</p>
+ */
+export function conversationPreview(
+  kind: 'group' | 'direct',
+  preview: string | null | undefined,
+  senderName?: string | null,
+  mine = false,
+): string {
+  const text = (preview ?? '').trim()
+  if (!text) return ''
+  if (kind !== 'group') return text
+  const name = mine ? '我' : (senderName ?? '').trim()
+  return name ? `${name}：${text}` : text
+}
+
 /** 会话列表时间：今天显示 HH:mm，昨天显示「昨天」，更早显示 M/D。 */
 export function listTime(iso: string | null): string {
   if (!iso) return ''

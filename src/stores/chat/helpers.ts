@@ -100,12 +100,13 @@ function decodeText(value: string): string {
 }
 
 export function previewOf(payload: RealtimePayload): string {
+  // 系统提示（禁言等）不占用会话列表的预览位，前端保持上一条真实消息。
+  if (payload.messageType === 'SYSTEM') return ''
   if (payload.messageType === 'IMAGE') return '[图片]'
   if (payload.messageType === 'VIDEO') return '[视频]'
   if (payload.messageType === 'AUDIO') return '[语音]'
   if (payload.messageType === 'FILE') return '[文件]'
   if (payload.messageType === 'EMOJI') return '[表情]'
-  // 系统消息（禁言提示等）以 Base64 推送，直接展示原文而不是编码串。
   if (payload.contentEncoding === 'base64' && payload.content) {
     return decodeText(payload.content)
   }
