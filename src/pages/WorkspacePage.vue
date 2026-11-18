@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { messageOf } from '../utils/error'
 import { useRoute, useRouter } from 'vue-router'
 import NavRail from '../components/NavRail.vue'
@@ -7,6 +7,7 @@ import ConversationList from '../components/ConversationList.vue'
 import ChatPane from '../components/ChatPane.vue'
 import DetailPanel from '../components/DetailPanel.vue'
 import SearchPanel from '../components/SearchPanel.vue'
+import ConversationSearchDialog from '../components/ConversationSearchDialog.vue'
 import MobileWorkspace from '../components/MobileWorkspace.vue'
 import ContactsView from '../components/ContactsView.vue'
 import FilesView from '../components/FilesView.vue'
@@ -36,6 +37,7 @@ const auth = useAuthStore()
 const detailOpen = ref(true)
 /** 全局搜索面板与详情面板共用右侧栏位，互斥显示。 */
 const searchOpen = ref(false)
+const historyConversation = ref<Conversation | null>(null)
 const dialogOpen = ref(false)
 const createGroupOpen = ref(false)
 const manageOpen = ref(false)
@@ -378,20 +380,37 @@ function openSearch() {
   searchOpen.value = true
 }
 
+function openConversationSearch() {
+  if (!activeConversation.value) return
+  historyConversation.value = activeConversation.value
+  void chat.loadMembers(activeConversation.value.id)
+}
+
 function closeSearch() {
   searchOpen.value = false
 }
 
-/** 打开搜索结果：先切会话，再定位到具体消息（同一页内尽量滚动过去）。 */
+/** 打开搜索结果：旧记录先补齐上下文，再滚动并高亮目标。 */
 async function openFromSearch(conversationId: string, messageId?: string) {
   searchOpen.value = false
-  await select(conversationId)
-  if (!messageId) return
-  // 消息是异步加载的，等两帧再找节点；定位不到就只打开会话。
-  await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()))
-  await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()))
-  const el = document.querySelector<HTMLElement>(`[data-mid="${messageId}"]`)
-  el?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  historyConversation.value = null
+  try {
+    await select(conversationId)
+    if (!messageId || chat.activeId !== conversationId) return
+    if (!(chat.messages[conversationId] ?? []).some(message => String(message.messageId) === messageId)) {
+      await chat.loadMessageContext(conversationId, messageId)
+    }
+    if (chat.activeId !== conversationId) return
+    await nextTick()
+    await new Promise<void>(resolve => window.requestAnimationFrame(() => resolve()))
+    const el = document.querySelector<HTMLElement>(`[data-mid="${CSS.escape(messageId)}"]`)
+    if (!el) { showToast('这条消息已删除或暂不可见'); return }
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    el.classList.add('flash')
+    window.setTimeout(() => el.classList.remove('flash'), 1600)
+  } catch (e) {
+    showToast(messageOf(e, '定位消息失败，请重试'))
+  }
 }
 
 /** 搜索里点联系人：有会话就直接进，没有就现建一个。 */
@@ -428,6 +447,11 @@ async function onFavorite(message: ChatMessage) {
 
 /** ⌘K / Ctrl+K 打开搜索，和会话列表里的提示一致。 */
 function onGlobalKeydown(event: KeyboardEvent) {
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f' && view.value === 'chat' && activeConversation.value) {
+    event.preventDefault()
+    openConversationSearch()
+    return
+  }
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
     if (view.value !== 'chat') return
     event.preventDefault()
@@ -544,6 +568,7 @@ onBeforeUnmount(() => {
     @attach="(payload) => attach(payload.conversationId, payload.file)"
     @forward="onForward"
     @new-chat="dialogOpen = true"
+    @open-search="openConversationSearch"
     @mark-unread="onConvUnread"
     @hide="onConvHide"
     @delete="onConvDelete"
@@ -586,7 +611,7 @@ onBeforeUnmount(() => {
         @send="(text, reply) => chat.activeId && send(chat.activeId, text, reply)"
         @attach="(file) => chat.activeId && attach(chat.activeId, file)"
         @toggle-detail="onToggleDetail"
-        @open-search="openSearch"
+        @open-search="openConversationSearch"
         @favorite="onFavorite"
         @forward="onForward"
         @profile="(id, anchor) => openProfile(id, anchor)"
@@ -607,6 +632,7 @@ onBeforeUnmount(() => {
         :pinned="chat.isPinned(activeConversation.id)"
         :muted="chat.isMuted(activeConversation.id)"
         @manage="manageOpen = true"
+        @open-search="openConversationSearch"
         @close="detailOpen = false"
         @toggle-pin="onTogglePin"
         @toggle-mute="onToggleMute"
@@ -627,6 +653,15 @@ onBeforeUnmount(() => {
       <MeView v-else />
     </div>
   </div>
+
+  <ConversationSearchDialog
+    v-if="historyConversation"
+    :key="historyConversation.id"
+    :conversation="historyConversation"
+    :members="chat.members[historyConversation.id] ?? []"
+    @close="historyConversation = null"
+    @locate="openFromSearch"
+  />
 
   <Transition name="fade">
     <div v-if="toast" class="app-toast" role="status">{{ toast }}</div>

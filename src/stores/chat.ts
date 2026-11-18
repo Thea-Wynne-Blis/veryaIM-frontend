@@ -589,6 +589,15 @@ export const useChatStore = defineStore('chat', {
     },
 
 
+    async loadMessageContext(conversationId: string, messageId: string) {
+      const page = await api.get<MessagePage>(
+        `/conversations/${conversationId}/messages/${messageId}/context`,
+      )
+      this.messages[conversationId] = dedupe([
+        ...(this.messages[conversationId] ?? []), ...page.messages.map(normalize),
+      ])
+    },
+
     async searchMessages(conversationId: string, keyword: string): Promise<MessageView[]> {
       const kw = keyword.trim()
       if (!kw) return []

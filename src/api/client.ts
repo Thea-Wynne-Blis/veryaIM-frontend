@@ -522,6 +522,26 @@ export type MessagePage = {
   hasMore: boolean
 }
 
+export type ConversationSearchHit = {
+  messageId: Id
+  seq: number
+  senderId: Id
+  senderName: string
+  type: string
+  text: string
+  createdAt: string
+  fileId: Id | null
+  fileName: string | null
+  sizeBytes: number | null
+  contentType: string | null
+}
+
+export type ConversationSearchPage = {
+  messages: ConversationSearchHit[]
+  nextCursor: string | null
+  hasMore: boolean
+}
+
 export type ContactView = {
   userId: Id
   nickname: string

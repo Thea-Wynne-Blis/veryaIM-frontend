@@ -5,6 +5,7 @@ import {
   Image as ImageIcon, Film, Mic, Download, CornerDownLeft,
 } from 'lucide-vue-next'
 import AppAvatar from './AppAvatar.vue'
+import SearchHighlight from './SearchHighlight.vue'
 import { api, downloadFile, type Id, type SearchResults } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import { humanBytes, initialsOf, listTime, toneOfPerson } from '../utils/present'
@@ -24,13 +25,24 @@ const result = ref<SearchResults | null>(null)
 const input = ref<HTMLInputElement | null>(null)
 const downloading = ref<Id | null>(null)
 let debounce: number | null = null
+let requestVersion = 0
+const composing = ref(false)
+const category = ref('all')
+const categories = [
+  { key: 'all', label: '全部' }, { key: 'contacts', label: '联系人' },
+  { key: 'groups', label: '群聊' }, { key: 'messages', label: '聊天记录' },
+  { key: 'files', label: '文件' },
+] as const
+const atLimit = computed(() => result.value && Object.values(result.value).some(rows => rows.length >= 15))
 
 const trimmed = computed(() => keyword.value.trim())
 
 const totalHits = computed(() => {
   const data = result.value
   if (!data) return 0
-  return data.contacts.length + data.groups.length + data.messages.length + data.files.length
+  return category.value === 'all'
+    ? data.contacts.length + data.groups.length + data.messages.length + data.files.length
+    : data[category.value as keyof SearchResults].length
 })
 
 const hasHits = computed(() => totalHits.value > 0)
@@ -43,6 +55,8 @@ function iconOf(type: string) {
 }
 
 async function run() {
+  if (debounce !== null) window.clearTimeout(debounce)
+  const version = ++requestVersion
   const query = trimmed.value
   if (!query) {
     result.value = null
@@ -55,24 +69,30 @@ async function run() {
   try {
     // 搜索是「一边输入一边出结果」，所以只保留最后一次请求的结果。
     const data = await api.get<SearchResults>(`/search?keyword=${encodeURIComponent(query)}`)
-    if (query === trimmed.value) result.value = data
+    if (version === requestVersion) result.value = data
   } catch (e) {
-    if (query === trimmed.value) {
+    if (version === requestVersion) {
       error.value = e instanceof Error ? e.message : '搜索失败'
       result.value = null
     }
   } finally {
-    if (query === trimmed.value) loading.value = false
+    if (version === requestVersion) loading.value = false
   }
 }
 
-watch(keyword, () => {
+function schedule() {
+  ++requestVersion
   if (debounce !== null) window.clearTimeout(debounce)
+  result.value = null
+  error.value = ''
+  loading.value = !!trimmed.value
+  if (!trimmed.value || composing.value) return
   debounce = window.setTimeout(() => {
     debounce = null
     void run()
   }, 240)
-})
+}
+watch(keyword, schedule, { flush: 'sync' })
 
 function openConversation(conversationId: string, messageId?: string) {
   emit('open-conversation', conversationId, messageId)
@@ -96,6 +116,7 @@ async function download(fileId: Id, name: string) {
 onMounted(() => input.value?.focus())
 
 onBeforeUnmount(() => {
+  ++requestVersion
   if (debounce !== null) window.clearTimeout(debounce)
 })
 </script>
@@ -116,9 +137,13 @@ onBeforeUnmount(() => {
           ref="input"
           v-model="keyword"
           type="search"
+          maxlength="64"
           placeholder="搜索联系人、群聊、聊天记录、文件"
           aria-label="搜索"
           @keydown.esc.prevent="emit('close')"
+          @keydown.enter.prevent="!composing && run()"
+          @compositionstart="composing = true"
+          @compositionend="composing = false; schedule()"
         />
         <Loader2 v-if="loading" :size="14" class="spin search-spin" />
       </label>
@@ -126,10 +151,14 @@ onBeforeUnmount(() => {
         只搜索我的联系人和我参与的会话
         <span v-if="trimmed && !loading" class="num">· {{ totalHits }} 条结果</span>
       </p>
+      <div class="search-categories" role="group" aria-label="搜索结果分类">
+        <button v-for="item in categories" :key="item.key" :class="{ on: category === item.key }" :aria-pressed="category === item.key" @click="category = item.key">{{ item.label }}</button>
+      </div>
+      <p v-if="atLimit" class="search-hint">每类最多展示 15 条，请细化关键词；聊天内可继续翻页查找</p>
     </div>
 
     <div class="detail-scroll search-body">
-      <p v-if="error" class="search-error">{{ error }}</p>
+      <p v-if="error" class="search-error" role="alert">{{ error }} <button @click="run">重试</button></p>
 
       <div v-else-if="!trimmed" class="search-idle">
         <MessageSquare :size="22" :stroke-width="1.6" />
@@ -144,13 +173,12 @@ onBeforeUnmount(() => {
       <p v-else-if="!hasHits" class="search-idle-sub center">没有找到相关内容</p>
 
       <template v-else>
-        <section v-if="result?.contacts.length" class="hit-group">
+        <section v-if="result?.contacts.length && (category === 'all' || category === 'contacts')" class="hit-group">
           <p class="hit-label"><Users :size="11" :stroke-width="2.4" /> 联系人</p>
-          <button
+          <div
             v-for="hit in result.contacts"
             :key="hit.userId"
             class="hit-row"
-            @click="emit('open-user-chat', hit.userId)"
           >
             <button
               class="hit-avatar"
@@ -165,15 +193,15 @@ onBeforeUnmount(() => {
                 :presence="hit.online ? 'online' : 'offline'"
               />
             </button>
-            <span class="hit-main">
-              <span class="hit-name">{{ hit.name }}</span>
+            <button class="hit-main as-button" @click="emit('open-user-chat', hit.userId)">
+              <SearchHighlight class="hit-name" :text="hit.name" :keyword="keyword" />
               <span v-if="hit.remark" class="hit-sub">昵称 {{ hit.nickname }}</span>
-            </span>
+            </button>
             <CornerDownLeft :size="13" class="hit-go" />
-          </button>
+          </div>
         </section>
 
-        <section v-if="result?.groups.length" class="hit-group">
+        <section v-if="result?.groups.length && (category === 'all' || category === 'groups')" class="hit-group">
           <p class="hit-label"><Users :size="11" :stroke-width="2.4" /> 群聊</p>
           <button
             v-for="hit in result.groups"
@@ -183,14 +211,14 @@ onBeforeUnmount(() => {
           >
             <span class="hit-icon"><Users :size="15" :stroke-width="1.9" /></span>
             <span class="hit-main">
-              <span class="hit-name">{{ hit.title }}</span>
+              <SearchHighlight class="hit-name" :text="hit.title" :keyword="keyword" />
               <span class="hit-sub">{{ hit.memberCount }} 位成员</span>
             </span>
             <CornerDownLeft :size="13" class="hit-go" />
           </button>
         </section>
 
-        <section v-if="result?.messages.length" class="hit-group">
+        <section v-if="result?.messages.length && (category === 'all' || category === 'messages')" class="hit-group">
           <p class="hit-label"><MessageSquare :size="11" :stroke-width="2.4" /> 聊天记录</p>
           <button
             v-for="hit in result.messages"
@@ -202,7 +230,7 @@ onBeforeUnmount(() => {
             <span class="hit-main">
               <span class="hit-name">{{ hit.conversationTitle }}</span>
               <span class="hit-sub">
-                {{ hit.senderName }}：{{ hit.text }}
+                {{ hit.senderName }}：<SearchHighlight :text="hit.text" :keyword="keyword" />
               </span>
               <span class="hit-time num">{{ listTime(hit.createdAt) }}</span>
             </span>
@@ -210,7 +238,7 @@ onBeforeUnmount(() => {
           </button>
         </section>
 
-        <section v-if="result?.files.length" class="hit-group">
+        <section v-if="result?.files.length && (category === 'all' || category === 'files')" class="hit-group">
           <p class="hit-label"><FileText :size="11" :stroke-width="2.4" /> 文件</p>
           <div
             v-for="hit in result.files"
@@ -221,7 +249,7 @@ onBeforeUnmount(() => {
               <component :is="iconOf(hit.type)" :size="15" :stroke-width="1.9" />
             </span>
             <button class="hit-main as-button" @click="openConversation(hit.conversationId, String(hit.messageId))">
-              <span class="hit-name">{{ hit.name }}</span>
+              <SearchHighlight class="hit-name" :text="hit.name" :keyword="keyword" />
               <span class="hit-sub">
                 {{ humanBytes(hit.sizeBytes) }} · {{ hit.senderName }} ·
                 {{ hit.conversationTitle }}
@@ -245,6 +273,10 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.search-categories { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 12px; }
+.search-categories button { padding: 5px 7px; border-radius: 4px; background: none; color: var(--ink-3); font-size: 11px; }
+.search-categories button.on { color: var(--accent-ink); background: var(--accent-soft); }
+.search-error button { color: var(--accent); background: none; text-decoration: underline; }
 .search-top {
   padding: 12px;
   border-bottom: 1px solid var(--line);

@@ -16,7 +16,6 @@ import {
   CheckCheck,
   Check,
   Loader2,
-  MoreHorizontal,
   Copy,
   Languages,
   Quote,
@@ -55,6 +54,7 @@ const emit = defineEmits<{
   (e: 'forward', message: ChatMessage): void
   (e: 'close'): void
   (e: 'new-chat'): void
+  (e: 'open-search'): void
   (e: 'mark-unread', id: string): void
   (e: 'hide', id: string): void
   (e: 'delete', id: string): void
@@ -623,8 +623,8 @@ document.addEventListener('pointerdown', onDocPointerDown, true)
             <span class="m-chat-name">{{ current.name }}</span>
             <span class="m-chat-sub">{{ current.context }}</span>
           </div>
-          <button class="icon-btn" aria-label="更多">
-            <MoreHorizontal :size="20" :stroke-width="2" />
+          <button class="icon-btn" aria-label="查找聊天内容" @click="emit('open-search')">
+            <Search :size="20" :stroke-width="2" />
           </button>
         </header>
 

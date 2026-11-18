@@ -484,7 +484,7 @@ watch(() => props.messages.length, () => scrollToBottom())
         <div class="chat-actions">
           <button
             class="icon-btn"
-            aria-label="搜索聊天记录"
+            aria-label="查找聊天内容"
             @click="openSearch"
           >
             <Search :size="16" :stroke-width="1.9" />
