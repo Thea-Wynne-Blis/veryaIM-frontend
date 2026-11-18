@@ -20,7 +20,7 @@ import { useChatStore } from '../stores/chat'
 import { useAuthStore } from '../stores/auth'
 import type { Attachment, ChatMessage, Conversation } from '../types/chat'
 import { parseJson, sameId, type ConversationCard, type Id, type MessageView } from '../api/client'
-import { clockTime, humanBytes, initialsOf, listTime, toneOf } from '../utils/present'
+import { clockTime, humanBytes, initialsOf, listTime, toneOf, toneOfConversation } from '../utils/present'
 
 const THEME_KEY = 'veryal.theme'
 
@@ -93,7 +93,7 @@ function toConversation(card: ConversationCard): Conversation {
     name: card.title,
     initials: initialsOf(card.title),
     kind: card.type === 'GROUP' ? 'group' : 'direct',
-    tone: toneOf(card.conversationId),
+    tone: toneOfConversation(card),
     presence: 'offline',
     unread: card.unreadCount,
     time: listTime(card.lastMessageAt ?? card.updatedAt),
@@ -422,6 +422,17 @@ watch(
       // 移动端进入消息页应先看到会话列表，而不是自动打开第一个会话。
       select(chat.visibleCards[0].conversationId)
     }
+  },
+)
+
+/**
+ * 右侧详情描述的是「当前这个会话」：切到别的会话时收起，
+ * 否则新会话会继承上一个会话的置顶/免打扰/成员状态，看起来像串台。
+ */
+watch(
+  () => chat.activeId,
+  (next, prev) => {
+    if (prev && next !== prev) detailOpen.value = false
   },
 )
 

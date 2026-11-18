@@ -9,7 +9,7 @@ import {
 import AppAvatar from './AppAvatar.vue'
 import { api, ApiError, type Id } from '../api/client'
 import { useAuthStore } from '../stores/auth'
-import { initialsOf, toneOf } from '../utils/present'
+import { initialsOf, toneOfPerson } from '../utils/present'
 
 /**
  * 统一的用户资料卡：好友、陌生人、自己三种形态共用一套展示。
@@ -292,7 +292,7 @@ watch([card, loading], () => {
           <div class="avatar-slot">
             <AppAvatar
               :initials="initialsOf(displayName)"
-              :tone="toneOf(avatarSeed)"
+              :tone="toneOfPerson(avatarSeed, auth.user?.userId)"
               size="xl"
             />
             <span v-if="card?.online" class="online-dot" title="在线" />

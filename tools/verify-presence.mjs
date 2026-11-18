@@ -35,6 +35,11 @@ await page.click('button:has-text("进入 VERYAL")')
 await page.waitForURL('**/app/chat', { timeout: 25000 })
 await page.waitForSelector('.conv', { timeout: 20000 })
 await page.locator('.conv', { hasText: GROUP }).first().click()
+// 切换会话后右侧详情会自动收起，在线人数在详情里，先展开。
+if (!(await page.locator('.frame.detail-open').count())) {
+  await page.click('button[aria-label="会话详情"]')
+}
+await page.waitForSelector('.stat-cell', { timeout: 10000 })
 
 const stats = page.locator('.stat-cell')
 // 在线状态由 WebSocket 连接后写入 Redis，写入时机比页面渲染晚；

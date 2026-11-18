@@ -18,7 +18,7 @@ import {
 import { ApiError, api, type Id } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import { useChatStore } from '../stores/chat'
-import { initialsOf, toneOf } from '../utils/present'
+import { initialsOf, toneOfPerson } from '../utils/present'
 
 const props = defineProps<{ open: boolean; groupId: string | null }>()
 const emit = defineEmits<{
@@ -444,7 +444,7 @@ onBeforeUnmount(() => {
                   :title="`查看 ${m.nickname} 的资料`"
                   @click="openProfile(m, $event)"
                 >
-                  <AppAvatar :initials="initialsOf(m.nickname)" :tone="toneOf(m.userId)" size="sm" />
+                  <AppAvatar :initials="initialsOf(m.nickname)" :tone="toneOfPerson(m.userId, auth.user?.userId)" size="sm" />
                   <span class="member-main">
                     <span class="member-name">
                       {{ m.nickname }}

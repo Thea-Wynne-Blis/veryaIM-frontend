@@ -160,6 +160,11 @@ await page.click('button[aria-label="消息"]')
 await page.waitForSelector('.conv', { timeout: 20000 })
 await page.locator('.conv', { hasText: GROUP }).first().click()
 await page.waitForTimeout(1200)
+// 切换会话后右侧详情会自动收起，「群管理」入口在详情里，先展开。
+if (!(await page.locator('.frame.detail-open').count())) {
+  await page.click('button[aria-label="会话详情"]')
+}
+await page.waitForSelector('button.action-btn:has-text("群管理")', { timeout: 10000 })
 await page.click('button.action-btn:has-text("群管理")')
 await page.waitForSelector('.dialog[aria-label="群管理"] .member-row', { timeout: 20000 })
 

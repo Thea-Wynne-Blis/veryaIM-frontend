@@ -53,7 +53,12 @@ async function resetOutgoingFriendRequests() {
   }
 }
 
-await resetOutgoingFriendRequests()
+// 清理是「让脚本可重复跑」的辅助步骤，网络抖动不应该让整轮实测直接崩掉。
+try {
+  await resetOutgoingFriendRequests()
+} catch (e) {
+  console.log('[warn] 清理待处理好友申请失败，继续跑：', e.message)
+}
 
 const browser = await chromium.launch({ executablePath: CHROME, headless: true })
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
@@ -177,10 +182,27 @@ await page.waitForTimeout(1500)
 // ---------- 5. 群聊：成员 / 陌生人 / 自己 ----------
 await openConversation(GROUP)
 await page.waitForSelector('.msg .msg-author', { timeout: 15000 })
+// 头像按钮比作者名晚一帧渲染，等它出现再点，避免点到占位节点。
+await page.waitForSelector('.msg .msg-avatar-slot .avatar-btn', { timeout: 15000 })
+// 上一个会话是单聊，切过来时右侧详情应该已经自动收起。
+check('switching conversation collapses the detail panel',
+  (await page.locator('.frame.detail-open').count()) === 0,
+  '切到新会话后详情面板仍然展开')
 
+/**
+ * 点某个人的消息头像打开资料卡。
+ * 切换会话后消息列表是分批渲染的，偶尔第一次点击会落在还没稳定下来的节点上，
+ * 所以点完先看卡片是否出现，没有就再点一次（最多 3 次），避免用例假失败。
+ */
 async function openByAuthor(name) {
   const msg = page.locator('.msg', { has: page.locator('.msg-author', { hasText: name }) }).first()
-  await msg.locator('.msg-avatar-slot .avatar-btn').click()
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await msg.locator('.msg-avatar-slot .avatar-btn').click()
+    if (await page.locator(cardSel).isVisible().catch(() => false)) {
+      return waitCard()
+    }
+    await page.waitForTimeout(400)
+  }
   return waitCard()
 }
 
@@ -207,6 +229,11 @@ check('own avatar in group opens self card', /我自己/.test(selfInGroup), self
 await closeCard()
 
 // ---------- 6. 右侧会话详情的成员头像 ----------
+// 侧边栏在切换会话时收起了，这里手动展开再查成员头像。
+if (!(await page.locator('.frame.detail-open').count())) {
+  await page.click('button[aria-label="会话详情"]')
+}
+await page.waitForSelector('.detail-pane .member', { timeout: 10000 })
 const member = page.locator('.detail-pane .member', { hasText: '鲍勃' }).first()
 check('detail panel member exists', (await member.count()) === 1)
 await member.locator('.member-avatar').click()

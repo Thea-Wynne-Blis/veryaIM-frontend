@@ -1,7 +1,13 @@
 const TONES = ['jade', 'rose', 'sand', 'sky', 'violet', 'amber'] as const
 
+type ToneSeed = number | string | null | undefined
+
+function isSameSeed(a: ToneSeed, b: ToneSeed): boolean {
+  return a !== null && a !== undefined && a !== '' && String(a) === String(b)
+}
+
 /** 由用户/会话 id 稳定映射到一个头像配色，保证同一对象颜色不变。 */
-export function toneOf(seed: number | string | null | undefined): string {
+export function toneOf(seed: ToneSeed): string {
   if (seed === null || seed === undefined || seed === '') return TONES[0]
   const value =
     typeof seed === 'number'
@@ -9,6 +15,35 @@ export function toneOf(seed: number | string | null | undefined): string {
       : Array.from(String(seed)).reduce((acc, ch) => acc + ch.charCodeAt(0), 0)
   if (!Number.isFinite(value)) return TONES[0]
   return TONES[Math.abs(value) % TONES.length]
+}
+
+/**
+ * 人的头像配色：自己的头像是品牌绿，其他人的按 userId 取色。
+ * 消息头像、成员列表、通讯录、资料卡都走这里，同一个人在任何界面同色。
+ */
+export function toneOfPerson(userId: ToneSeed, selfId?: ToneSeed): string {
+  if (isSameSeed(userId, selfId)) return 'jade'
+  return toneOf(userId)
+}
+
+/** 会话卡片的默认形状，用于给头像取色（避免这里依赖 api 类型）。 */
+export type ToneSeedConversation = {
+  type: 'PRIVATE' | 'GROUP'
+  conversationId: string
+  peerUserId?: ToneSeed
+}
+
+/**
+ * 会话头像配色：单聊跟对方 userId 走，群聊跟 groupId 走。
+ *
+ * <p>会话 id 本身不能当种子：单聊是 `p_<a>_<b>`、群聊是 `g_<id>`，
+ * 直接哈希会和聊天里的消息头像、通讯录里的同一个人/同一个群不同色。</p>
+ */
+export function toneOfConversation(conversation: ToneSeedConversation): string {
+  if (conversation.type === 'PRIVATE' && conversation.peerUserId) {
+    return toneOf(conversation.peerUserId)
+  }
+  return toneOf(String(conversation.conversationId).replace(/^g_/, ''))
 }
 
 /** 取名字最后一个字作为头像字符（中文更自然）。 */

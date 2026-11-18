@@ -4,7 +4,7 @@ import { messageOf } from '../utils/error'
 import { Check, Loader2, Search, Send, X } from 'lucide-vue-next'
 import AppAvatar from './AppAvatar.vue'
 import { useChatStore } from '../stores/chat'
-import { initialsOf, toneOf } from '../utils/present'
+import { initialsOf, toneOfConversation } from '../utils/present'
 import type { ChatMessage } from '../types/chat'
 
 const props = defineProps<{
@@ -153,7 +153,7 @@ onBeforeUnmount(() => {
           >
             <AppAvatar
               :initials="initialsOf(card.title)"
-              :tone="toneOf(card.conversationId)"
+              :tone="toneOfConversation(card)"
               :rounded="card.type === 'GROUP'"
               size="md"
             />

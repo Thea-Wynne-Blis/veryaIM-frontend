@@ -5,7 +5,8 @@ import AppAvatar from './AppAvatar.vue'
 import { trackSpotlight } from '../composables/usePointerFx'
 import { api, type GroupModeration } from '../api/client'
 import type { ChatMember } from '../stores/chat'
-import { initialsOf, toneOf } from '../utils/present'
+import { useAuthStore } from '../stores/auth'
+import { initialsOf, toneOfPerson } from '../utils/present'
 import type { Conversation } from '../types/chat'
 
 const props = defineProps<{
@@ -24,6 +25,9 @@ const emit = defineEmits<{
 }>()
 
 const isGroup = computed(() => props.conversation.kind === 'group')
+const auth = useAuthStore()
+/** 自己的头像固定品牌绿，和聊天里的「我」保持一致。 */
+const myId = computed(() => auth.user?.userId)
 
 /** 点谁的头像就带着这个元素当锚点，资料卡贴着它弹出。 */
 function openUser(userId: string | number, event: MouseEvent) {
@@ -158,7 +162,7 @@ watch(
             >
               <AppAvatar
                 :initials="initialsOf(member.nickname)"
-                :tone="toneOf(member.userId)"
+                :tone="toneOfPerson(member.userId, myId)"
                 size="sm"
                 :presence="member.online ? 'online' : 'offline'"
               />
