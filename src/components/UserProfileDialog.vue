@@ -9,6 +9,7 @@ import {
 import AppAvatar from './AppAvatar.vue'
 import { api, ApiError, type Id } from '../api/client'
 import { useAuthStore } from '../stores/auth'
+import { useChatStore } from '../stores/chat'
 import { initialsOf, toneOfPerson } from '../utils/present'
 
 /**
@@ -215,6 +216,8 @@ async function saveRemark() {
     current.remark = value || null
     flash(value ? '备注已保存' : '备注已清除')
     emit('changed')
+    // 备注会改会话标题：列表 / 聊天头部立刻跟手，再拉一次卡片兜底。
+    useChatStore().renameFriend(current.userId, current.remark)
   } catch (e) {
     error.value = messageOf(e, '备注保存失败')
   } finally {

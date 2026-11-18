@@ -92,8 +92,14 @@ async function seedOutgoingMessage(token) {
   const cards = await fetch(`${BASE}/api/v1/conversations/cards`, {
     headers: { Authorization: `Bearer ${token}` },
   }).then((r) => r.json())
+  // 会话标题可能是好友备注，这里按好友 id 找会话，不靠昵称匹配。
+  const friends = await fetch(`${BASE}/api/v1/friends`, {
+    headers: { Authorization: `Bearer ${token}` },
+  }).then((r) => r.json())
+  const bob = (friends.data ?? []).find((friend) => friend.nickname === '鲍勃')
+  if (!bob) return
   const direct = (cards.data ?? []).find(
-    (card) => card.type === 'PRIVATE' && card.title?.includes('鲍勃'),
+    (card) => card.type === 'PRIVATE' && String(card.peerUserId) === String(bob.friendId),
   )
   if (!direct) return
   await fetch(`${BASE}/api/v1/conversations/${direct.conversationId}/messages`, {
@@ -185,11 +191,15 @@ const previewContract = await page.evaluate(async () => {
   })
   const body = await res.json()
   const cards = body.data ?? []
+  const friends = await fetch('/api/v1/friends', {
+    headers: { Authorization: `Bearer ${token}` },
+  }).then((r) => r.json())
+  const bob = (friends.data ?? []).find((friend) => friend.nickname === '鲍勃')
   const rows = [...document.querySelectorAll('.conv')].map((el) => ({
     name: el.querySelector('.conv-name')?.textContent?.trim() ?? '',
     preview: el.querySelector('.conv-preview')?.textContent?.trim() ?? '',
   }))
-  return { cards, rows }
+  return { cards, rows, bobId: bob ? String(bob.friendId) : null }
 })
 if (previewContract.error) {
   check('group preview renders sender name prefix', false, previewContract.error)
@@ -214,7 +224,12 @@ if (previewContract.error) {
 }
 
 // ---------- 1. 单聊：顶部头像 ----------
-await openConversation(DIRECT)
+// 会话标题可能是好友备注（demo_alice 给鲍勃设了备注），按鲍勃的会话卡片取真实标题。
+const directCard = previewContract.cards?.find(
+  (card) => card.type === 'PRIVATE' && String(card.peerUserId) === previewContract.bobId,
+)
+const DIRECT_ROW = directCard?.title ?? DIRECT
+await openConversation(DIRECT_ROW)
 await page.waitForSelector('.msg', { timeout: 15000 })
 check('direct chat has message avatars',
   (await page.locator('.msg-avatar-slot .avatar-btn').count()) > 0)
@@ -278,7 +293,7 @@ await waitCard()
 await page.click(`${cardSel} button:has-text("发消息")`)
 await page.waitForSelector(cardSel, { state: 'detached', timeout: 10000 })
 check('chat action closes the card and keeps conversation',
-  (await page.locator('.chat-title').innerText()).includes(DIRECT))
+  (await page.locator('.chat-title').innerText()).includes(DIRECT_ROW))
 // 「发消息」还会异步补一次会话跳转，等它落定再切群，否则会被拉回单聊。
 await page.waitForTimeout(1500)
 

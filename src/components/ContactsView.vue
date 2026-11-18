@@ -210,6 +210,8 @@ async function saveRemark(friend: Friend) {
     await api.put(`/friends/${friend.friendId}`, { remark })
     friend.remark = remark || null
     flash('备注已保存')
+    // 备注会改会话标题：列表 / 聊天头部立刻跟手，再拉一次卡片兜底。
+    chat.renameFriend(friend.friendId, friend.remark)
   } catch (e) {
     error.value = messageOf(e, '备注保存失败')
   }

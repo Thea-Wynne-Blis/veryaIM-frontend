@@ -214,6 +214,22 @@ export const useChatStore = defineStore('chat', {
       if (this.activeId === conversationId) this.activeId = null
     },
 
+    /**
+     * 好友备注改完了：先把列表里对应单聊的标题就地改掉，界面立刻跟手；
+     * 再拉一次卡片，清空备注时用真实昵称兜底。
+     */
+    renameFriend(userId: Id, remark: string | null) {
+      const title = (remark ?? '').trim()
+      if (title) {
+        for (const card of this.cards) {
+          if (card.type === 'PRIVATE' && sameId(card.peerUserId ?? '', userId)) {
+            card.title = title
+          }
+        }
+      }
+      void this.loadCards()
+    },
+
     async applyPrefs(
       conversationId: string,
       prefs: { pinned?: boolean; muted?: boolean; hidden?: boolean },
