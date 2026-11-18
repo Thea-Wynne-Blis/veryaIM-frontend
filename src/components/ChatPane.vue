@@ -50,7 +50,6 @@ const emit = defineEmits<{
   (e: 'send', text: string, reply?: { messageId: string; senderId: string; preview: string }): void
   (e: 'attach', file: File): void
   (e: 'toggle-detail'): void
-  (e: 'open-search'): void
   (e: 'favorite', message: ChatMessage): void
   (e: 'forward', message: ChatMessage): void
   (e: 'profile', userId: string, anchor?: HTMLElement): void
@@ -398,11 +397,6 @@ onBeforeUnmount(() => {
   disarmEnter()
 })
 
-function openSearch() {
-  closeMenu()
-  emit('open-search')
-}
-
 /** 收藏走全局接口：侧边栏的「收藏」里能重新点回这条消息。 */
 function favoriteMessage(message: ChatMessage) {
   closeMenu()
@@ -482,13 +476,6 @@ watch(() => props.messages.length, () => scrollToBottom())
         </div>
 
         <div class="chat-actions">
-          <button
-            class="icon-btn"
-            aria-label="查找聊天内容"
-            @click="openSearch"
-          >
-            <Search :size="16" :stroke-width="1.9" />
-          </button>
           <button class="icon-btn" aria-label="语音通话" @click="showNotice('语音通话暂未开放')">
             <Phone :size="16" :stroke-width="1.9" />
           </button>

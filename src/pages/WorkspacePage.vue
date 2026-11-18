@@ -611,7 +611,6 @@ onBeforeUnmount(() => {
         @send="(text, reply) => chat.activeId && send(chat.activeId, text, reply)"
         @attach="(file) => chat.activeId && attach(chat.activeId, file)"
         @toggle-detail="onToggleDetail"
-        @open-search="openConversationSearch"
         @favorite="onFavorite"
         @forward="onForward"
         @profile="(id, anchor) => openProfile(id, anchor)"
