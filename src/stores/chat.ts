@@ -26,6 +26,8 @@ const REALTIME_HEALTHY_MS = 45_000
 const BACKGROUND_SYNC_MS = 60_000
 const REALTIME_COALESCE_MS = 120
 const MARK_READ_THROTTLE_MS = 1000
+/** 成员列表缓存时长：在线状态靠它保持新鲜，同时避免频繁重拉。 */
+const MEMBERS_TTL_MS = 30_000
 
 let realtimeClient: RealtimeClient | null = null
 let visibilityHandler: (() => void) | null = null
@@ -123,6 +125,8 @@ type State = {
   messages: Record<string, MessageView[]>
   receipts: Record<string, Record<string, number>>
   members: Record<string, ChatMember[]>
+  /** 成员列表的加载时间，用于给在线状态设一个短 TTL。 */
+  membersLoadedAt: Record<string, number>
   activeId: string | null
   loadingCards: boolean
   loadingMessages: boolean
@@ -163,6 +167,7 @@ export const useChatStore = defineStore('chat', {
       messages: {},
       receipts: {},
       members: {},
+      membersLoadedAt: {},
       activeId: null,
       loadingCards: false,
       loadingMessages: false,
@@ -458,9 +463,22 @@ export const useChatStore = defineStore('chat', {
       }
     },
 
+    /**
+     * 在线状态是短周期数据，用 TTL 控制刷新节奏：
+     * 实时重连、切回页面、后台同步都走这里，避免短时间内重复拉同一个群的成员。
+     */
+    refreshMembersIfStale(conversationId: string, minAgeMs = MEMBERS_TTL_MS) {
+      const loadedAt = this.membersLoadedAt[conversationId] ?? 0
+      if (Date.now() - loadedAt < minAgeMs) return
+      void this.loadMembers(conversationId, true)
+    },
+
     /** 加载会话成员资料，用于群聊作者名和详情面板。 */
     async loadMembers(conversationId: string, force = false) {
-      if (!force && this.members[conversationId]) return this.members[conversationId]
+      const cached = this.members[conversationId]
+      const loadedAt = this.membersLoadedAt[conversationId] ?? 0
+      // 在线状态会变，成员资料不能永久缓存：超过 TTL 就重新拉一次。
+      if (!force && cached && Date.now() - loadedAt < MEMBERS_TTL_MS) return cached
       const card = this.cards.find((item) => item.conversationId === conversationId)
       if (!card) return []
       try {
@@ -481,6 +499,7 @@ export const useChatStore = defineStore('chat', {
                   : undefined,
           }))
           this.members[conversationId] = members
+          this.membersLoadedAt[conversationId] = Date.now()
           return members
         }
 
@@ -501,6 +520,7 @@ export const useChatStore = defineStore('chat', {
           online: profile.online,
         }))
         this.members[conversationId] = members
+        this.membersLoadedAt[conversationId] = Date.now()
         return members
       } catch {
         return []
@@ -847,6 +867,8 @@ export const useChatStore = defineStore('chat', {
       const client = new RealtimeClient({
         onStateChange: (connected) => {
           this.realtimeConnected = connected
+          // 刚连上实时通道时补拉一次成员：登录瞬间可能还没写在线状态。
+          if (connected && this.activeId) this.refreshMembersIfStale(this.activeId)
         },
         onError: () => {
           /* 换票失败也会自动重试，不打断轮询兜底 */
@@ -865,7 +887,10 @@ export const useChatStore = defineStore('chat', {
       visibilityHandler = () => {
         if (document.visibilityState !== 'visible') return
         void this.loadCards()
-        if (this.activeId) void this.refreshMessages(this.activeId)
+        if (this.activeId) {
+          void this.refreshMessages(this.activeId)
+          this.refreshMembersIfStale(this.activeId)
+        }
       }
       document.addEventListener('visibilitychange', visibilityHandler)
     },
@@ -1016,6 +1041,8 @@ export const useChatStore = defineStore('chat', {
             await Promise.allSettled([
               this.refreshMessages(activeBefore),
               this.loadReceipts(activeBefore),
+              // 后台全量同步顺带刷新成员在线状态，群详情里的「在线」不会长期停在旧值。
+              Promise.resolve(this.refreshMembersIfStale(activeBefore)),
             ])
             const card = this.cards.find((item) => item.conversationId === activeBefore)
             if (card && card.unreadCount > 0) await this.markRead(activeBefore)
@@ -1047,6 +1074,7 @@ export const useChatStore = defineStore('chat', {
       this.messages = {}
       this.receipts = {}
       this.members = {}
+      this.membersLoadedAt = {}
       this.activeId = null
       this.error = null
     },
