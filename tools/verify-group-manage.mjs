@@ -153,6 +153,64 @@ async function openManage(username) {
   await context.close()
 }
 
+// ---------------- 禁言提示：群内系统消息 + 被禁言者发送拦截 ----------------
+{
+  const { page: ownerPage, context: ownerContext } = await openManage('demo_alice')
+  const ownerRows = ownerPage.locator('.dialog[aria-label="群管理"] .member-row')
+  await ownerRows.filter({ hasText: MUTE_TARGET }).first()
+    .locator('select.mini-select').selectOption('MUTE_7M')
+  await ownerPage.waitForTimeout(1500)
+  await ownerPage.click('.dialog[aria-label="群管理"] button[aria-label="关闭"]')
+  await ownerPage.waitForSelector('.sys-msg', { timeout: 15000 })
+  await ownerPage.waitForTimeout(600)
+  const ownerSys = await ownerPage.locator('.sys-msg').allTextContents()
+  check('owner: mute leaves a system notice in chat',
+    ownerSys.some((text) => text.includes(MUTE_TARGET) && text.includes('禁言')),
+    ownerSys.join(' | '))
+
+  // 被禁言的成员视角：同样的提示 + 发送被拦住
+  const memberContext = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+  const memberPage = await memberContext.newPage()
+  memberPage.on('pageerror', (e) => console.log('[pageerror]', e.message))
+  await memberPage.goto(`${BASE}/login`, { waitUntil: 'domcontentloaded' })
+  await memberPage.fill('input[placeholder="至少 3 位"]', 'demo_erin')
+  await memberPage.fill('input[placeholder="至少 6 位"]', 'password123')
+  await memberPage.click('button:has-text("进入 VERYAL")')
+  await memberPage.waitForURL('**/app/chat', { timeout: 25000 })
+  await memberPage.waitForSelector('.conv', { timeout: 20000 })
+  await memberPage.locator('.conv', { hasText: GROUP }).first().click()
+  await memberPage.waitForSelector('.sys-msg', { timeout: 20000 })
+  const memberSys = await memberPage.locator('.sys-msg').allTextContents()
+  check('muted member sees the same notice',
+    memberSys.some((text) => text.includes('禁言')), memberSys.join(' | '))
+
+  const bubblesBefore = await memberPage.locator('.msg .bubble').count()
+  await memberPage.fill('textarea.composer-input', '禁言期间的消息不应该发出去')
+  await memberPage.click('.send-btn')
+  await memberPage.waitForSelector('.send-error', { timeout: 15000 })
+  const errText = (await memberPage.locator('.send-error').innerText()).replace(/\s+/g, ' ').trim()
+  check('muted member gets a red hint', errText.includes('你已被禁言，请联系管理员'), errText)
+  await memberPage.waitForTimeout(1500)
+  const bubblesAfter = await memberPage.locator('.msg .bubble').count()
+  check('muted message is not sent', bubblesAfter === bubblesBefore,
+    `${bubblesBefore} -> ${bubblesAfter}`)
+  await memberPage.screenshot({ path: 'tools/verify-group-muted.png' })
+  await memberContext.close()
+
+  // 复原：解除艾琳的禁言，避免影响后续实测
+  if (!(await ownerPage.locator('.frame.detail-open').count())) {
+    await ownerPage.click('button[aria-label="会话详情"]')
+  }
+  await ownerPage.waitForSelector('button.action-btn:has-text("群管理")', { timeout: 10000 })
+  await ownerPage.click('button.action-btn:has-text("群管理")')
+  await ownerPage.waitForSelector('.dialog[aria-label="群管理"] .member-row', { timeout: 20000 })
+  await ownerPage.locator('.dialog[aria-label="群管理"] .member-row')
+    .filter({ hasText: MUTE_TARGET }).first()
+    .locator('select.mini-select').selectOption('UNMUTE')
+  await ownerPage.waitForTimeout(1500)
+  await ownerContext.close()
+}
+
 await browser.close()
 
 const failed = results.filter((item) => !item.ok)

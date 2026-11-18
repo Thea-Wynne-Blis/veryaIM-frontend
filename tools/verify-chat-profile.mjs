@@ -53,11 +53,48 @@ async function resetOutgoingFriendRequests() {
   }
 }
 
+/**
+ * 单聊最近一页可能全是 Alice 自己发的消息，这时「消息头像」没有对方气泡可点。
+ * 先用 demo_bob 的身份补一条，保证最近一页一定有对方消息。
+ */
+async function seedIncomingMessage() {
+  const res = await fetch(`${BASE}/api/v1/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      username: 'demo_bob',
+      password: 'password123',
+      deviceId: `seed-${Date.now()}`,
+    }),
+  })
+  const { data } = await res.json()
+  const token = data?.token
+  if (!token) return
+  const cards = await fetch(`${BASE}/api/v1/conversations/cards`, {
+    headers: { Authorization: `Bearer ${token}` },
+  }).then((r) => r.json())
+  const direct = (cards.data ?? []).find(
+    (card) => card.type === 'PRIVATE' && card.title?.includes('爱丽丝'),
+  )
+  if (!direct) return
+  await fetch(`${BASE}/api/v1/conversations/${direct.conversationId}/messages`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      conversationId: direct.conversationId,
+      clientMessageId: `seed-${Date.now()}`,
+      type: 'TEXT',
+      content: `头像实测 seed ${new Date().toISOString()}`,
+    }),
+  })
+}
+
 // 清理是「让脚本可重复跑」的辅助步骤，网络抖动不应该让整轮实测直接崩掉。
 try {
   await resetOutgoingFriendRequests()
+  await seedIncomingMessage()
 } catch (e) {
-  console.log('[warn] 清理待处理好友申请失败，继续跑：', e.message)
+  console.log('[warn] 实测前置准备失败，继续跑：', e.message)
 }
 
 const browser = await chromium.launch({ executablePath: CHROME, headless: true })

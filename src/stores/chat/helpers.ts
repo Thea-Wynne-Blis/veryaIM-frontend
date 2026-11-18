@@ -89,11 +89,26 @@ export type State = {
   uploads: UploadTask[]
 }
 
+function decodeText(value: string): string {
+  try {
+    const binary = atob(value)
+    const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0))
+    return new TextDecoder().decode(bytes)
+  } catch {
+    return value
+  }
+}
+
 export function previewOf(payload: RealtimePayload): string {
   if (payload.messageType === 'IMAGE') return '[图片]'
   if (payload.messageType === 'VIDEO') return '[视频]'
   if (payload.messageType === 'AUDIO') return '[语音]'
   if (payload.messageType === 'FILE') return '[文件]'
+  if (payload.messageType === 'EMOJI') return '[表情]'
+  // 系统消息（禁言提示等）以 Base64 推送，直接展示原文而不是编码串。
+  if (payload.contentEncoding === 'base64' && payload.content) {
+    return decodeText(payload.content)
+  }
   return payload.content ?? ''
 }
 

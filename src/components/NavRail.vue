@@ -4,18 +4,14 @@ import {
   Users,
   FolderOpen,
   Settings,
-  Bell,
-  Moon,
-  Sun,
 } from 'lucide-vue-next'
 import AppAvatar from './AppAvatar.vue'
 import { useAuthStore } from '../stores/auth'
 import { initialsOf } from '../utils/present'
 
-defineProps<{ unread: number; theme: 'light' | 'dark' }>()
+defineProps<{ unread: number }>()
 const emit = defineEmits<{
   (e: 'navigate', view: 'chat' | 'contacts' | 'files' | 'me'): void
-  (e: 'toggle-theme'): void
 }>()
 
 const auth = useAuthStore()
@@ -58,22 +54,6 @@ function go(view: 'chat' | 'contacts' | 'files' | 'me') {
 
     <div class="rail-spacer" />
 
-    <button
-      class="rail-item tip"
-      :data-tip="theme === 'dark' ? '浅色模式' : '深色模式'"
-      :aria-label="theme === 'dark' ? '切换到浅色' : '切换到深色'"
-      @click="emit('toggle-theme')"
-    >
-      <component
-        :is="theme === 'dark' ? Sun : Moon"
-        :size="18"
-        :stroke-width="1.85"
-      />
-    </button>
-    <button class="rail-item tip" :data-tip="unread ? `${unread} 条未读` : '暂无新通知'" aria-label="通知" @click="go('chat')">
-      <Bell :size="18" :stroke-width="1.85" />
-      <span v-if="unread > 0" class="rail-badge num">{{ unread > 99 ? '99+' : unread }}</span>
-    </button>
     <button
       class="rail-item tip"
       :class="{ active: active === 'me' }"

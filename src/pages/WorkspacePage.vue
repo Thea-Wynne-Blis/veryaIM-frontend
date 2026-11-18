@@ -16,25 +16,21 @@ import GroupManageDialog from '../components/GroupManageDialog.vue'
 import ForwardDialog from '../components/ForwardDialog.vue'
 import UserProfileDialog from '../components/UserProfileDialog.vue'
 import { useIsMobile } from '../composables/useIsMobile'
+import { useTheme } from '../composables/useTheme'
 import { useChatStore } from '../stores/chat'
 import { useAuthStore } from '../stores/auth'
 import type { Attachment, ChatMessage, Conversation } from '../types/chat'
 import { parseJson, sameId, type ConversationCard, type Id, type MessageView } from '../api/client'
 import { clockTime, humanBytes, initialsOf, listTime, toneOf, toneOfConversation } from '../utils/present'
 
-const THEME_KEY = 'veryal.theme'
-
 const route = useRoute()
 const router = useRouter()
 const isMobile = useIsMobile(768)
+const { apply: applyTheme } = useTheme()
 const chat = useChatStore()
 const auth = useAuthStore()
 
 const detailOpen = ref(true)
-const theme = ref<'light' | 'dark'>(
-  (localStorage.getItem(THEME_KEY) as 'light' | 'dark' | null) ??
-    (new URLSearchParams(window.location.search).get('theme') === 'dark' ? 'dark' : 'light'),
-)
 const dialogOpen = ref(false)
 const createGroupOpen = ref(false)
 const manageOpen = ref(false)
@@ -334,12 +330,6 @@ function navigate(target: string) {
   router.push(map[target] ?? '/app/chat')
 }
 
-function toggleTheme() {
-  theme.value = theme.value === 'dark' ? 'light' : 'dark'
-  document.documentElement.dataset.theme = theme.value
-  localStorage.setItem(THEME_KEY, theme.value)
-}
-
 async function handleCreated(conversationId: string) {
   dialogOpen.value = false
   await chat.loadCards()
@@ -437,7 +427,7 @@ watch(
 )
 
 onMounted(async () => {
-  document.documentElement.dataset.theme = theme.value
+  applyTheme()
   window.addEventListener('veryal:open-chat', onOpenChatRequest)
   window.addEventListener('veryal:unauthorized', onUnauthorized)
   await Promise.allSettled([chat.loadCards(), auth.refresh()])
@@ -489,9 +479,7 @@ onBeforeUnmount(() => {
       <NavRail
         :active="view"
         :unread="chat.totalUnread"
-        :theme="theme"
         @navigate="navigate"
-        @toggle-theme="toggleTheme"
       />
 
       <ConversationList
@@ -540,9 +528,7 @@ onBeforeUnmount(() => {
       <NavRail
         :active="view"
         :unread="chat.totalUnread"
-        :theme="theme"
         @navigate="navigate"
-        @toggle-theme="toggleTheme"
       />
       <ContactsView v-if="view === 'contacts'" />
       <FilesView v-else-if="view === 'files'" />

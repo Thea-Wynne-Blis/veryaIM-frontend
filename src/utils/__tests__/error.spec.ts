@@ -19,4 +19,12 @@ describe('messageOf', () => {
   it('不传兜底时给通用文案', () => {
     expect(messageOf(null)).toBe('操作失败')
   })
+
+  it('群禁言统一成明确的中文提示', () => {
+    // 后端 GROUP_MUTED = 40306；不论定时还是永久禁言，用户只需要知道「发不出去」。
+    expect(messageOf({ code: 40306, message: 'you are muted until 2026-01-01T00:00:00Z' }))
+      .toBe('你已被禁言，请联系管理员')
+    expect(messageOf({ code: 40306, message: 'group is muted' }))
+      .toBe('你已被禁言，请联系管理员')
+  })
 })

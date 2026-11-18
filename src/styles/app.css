@@ -431,22 +431,6 @@
   letter-spacing: -0.5px;
 }
 
-.list-count {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 20px;
-  height: 19px;
-  padding: 0 6px;
-  border-radius: var(--r-full);
-  background: var(--unread);
-  color: #fff;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.01em;
-  font-variant-numeric: tabular-nums;
-}
-
 .icon-btn {
   width: 32px;
   height: 32px;
@@ -987,6 +971,20 @@
   max-width: 100%;
   /* 底部预留时间 / 已读位置（原来在文档流内，现在绝对定位） */
   padding: 2px 0 19px;
+}
+
+/* 系统提示（禁言、解除禁言等）：居中一条轻量文字，不带头像与气泡 */
+.sys-msg {
+  align-self: center;
+  max-width: 82%;
+  margin: 6px auto;
+  padding: 4px 11px;
+  border-radius: var(--r-full);
+  background: var(--surface-3);
+  color: var(--ink-3);
+  font-size: 11.5px;
+  line-height: 1.5;
+  text-align: center;
 }
 
 .msg.grouped {

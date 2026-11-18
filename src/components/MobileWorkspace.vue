@@ -500,12 +500,7 @@ document.addEventListener('pointerdown', onDocPointerDown, true)
   <div class="m-shell">
     <header class="m-head" :class="{ scrolled: bodyScrolled }">
       <div class="m-title-row">
-        <h1 class="m-title">
-          {{ tabTitle }}
-          <span v-if="tab === 'chat' && totalUnread" class="list-count num">
-            {{ totalUnread }}
-          </span>
-        </h1>
+        <h1 class="m-title">{{ tabTitle }}</h1>
         <button v-if="tab === 'chat'" class="icon-btn" aria-label="新建会话" @click="emit('new-chat')">
           <Plus :size="19" :stroke-width="2" />
         </button>
@@ -641,9 +636,19 @@ document.addEventListener('pointerdown', onDocPointerDown, true)
         >
           <p v-if="error" class="m-error">{{ error }}</p>
           <p class="day-divider">今天</p>
-          <div
+          <template
             v-for="({ message, grouped, key, enterOrder, pending }) in grouping(currentMessages)"
             :key="key"
+          >
+          <div
+            v-if="message.type === 'SYSTEM'"
+            class="sys-msg"
+            :data-mid="message.id"
+          >
+            {{ message.text }}
+          </div>
+          <div
+            v-else
             v-enter="{ order: enterOrder, skip: pending }"
             class="msg"
             :class="{ out: message.side === 'out', grouped }"
@@ -708,6 +713,7 @@ document.addEventListener('pointerdown', onDocPointerDown, true)
               </div>
             </div>
           </div>
+          </template>
           <p v-if="loading && !currentMessages.length" :key="`l-${current.id}`" class="m-loading enter">
             <Loader2 :size="15" class="spin" /> 正在加载消息…
           </p>

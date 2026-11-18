@@ -120,10 +120,7 @@ onBeforeUnmount(() => {
   <section class="list-pane" aria-label="会话列表">
     <header class="list-head">
       <div class="list-title-row">
-        <h1 class="list-title">
-          消息
-          <span v-if="totalUnread" class="list-count num">{{ totalUnread }}</span>
-        </h1>
+        <h1 class="list-title">消息</h1>
         <div class="new-wrap">
           <button class="icon-btn glide" aria-label="新建会话" @click.stop="menuOpen = !menuOpen">
             <Plus :size="18" :stroke-width="2" />

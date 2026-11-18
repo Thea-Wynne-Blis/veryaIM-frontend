@@ -27,6 +27,7 @@ import {
   ListChecks,
   Quote,
   Trash2,
+  CircleAlert,
 } from 'lucide-vue-next'
 import AppAvatar from './AppAvatar.vue'
 import MessageAttachment from './MessageAttachment.vue'
@@ -592,16 +593,24 @@ watch(() => props.messages.length, () => scrollToBottom())
           正在加载消息…
         </div>
 
-        <div
-          v-for="({ message, grouped, key, enterOrder, pending }) in grouping"
-          :key="key"
-          v-enter="{ order: enterOrder, skip: pending }"
-          class="msg"
-          :class="{ out: message.side === 'out', grouped, selecting, selected: isSelected(message) }"
-          :data-mid="message.id"
-          @contextmenu.prevent="openMenu($event, message)"
-          @click="selecting && toggleSelect(message)"
-        >
+        <template v-for="({ message, grouped, key, enterOrder, pending }) in grouping" :key="key">
+          <div
+            v-if="message.type === 'SYSTEM'"
+            class="sys-msg"
+            :data-mid="message.id"
+          >
+            {{ message.text }}
+          </div>
+
+          <div
+            v-else
+            v-enter="{ order: enterOrder, skip: pending }"
+            class="msg"
+            :class="{ out: message.side === 'out', grouped, selecting, selected: isSelected(message) }"
+            :data-mid="message.id"
+            @contextmenu.prevent="openMenu($event, message)"
+            @click="selecting && toggleSelect(message)"
+          >
           <span v-if="!grouped && message.side === 'in'" class="msg-author">
             {{ message.author }}
           </span>
@@ -671,7 +680,8 @@ watch(() => props.messages.length, () => scrollToBottom())
               </div>
             </div>
           </div>
-        </div>
+          </div>
+        </template>
 
         <p
           v-if="!loading && !messages.length"
@@ -691,7 +701,10 @@ watch(() => props.messages.length, () => scrollToBottom())
           <button class="select-btn" @click="exitSelect">取消</button>
         </div>
 
-        <p v-if="error" class="send-error">{{ error }}</p>
+        <p v-if="error" class="send-error" role="alert">
+          <CircleAlert :size="13" :stroke-width="2.2" />
+          {{ error }}
+        </p>
         <p v-if="notice" class="send-notice">{{ notice }}</p>
 
         <!-- 上传进度：细线、低对比，传完即消失 -->
@@ -932,12 +945,33 @@ watch(() => props.messages.length, () => scrollToBottom())
 }
 
 .send-error {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   margin: 0 0 6px;
-  padding: 6px 10px;
+  padding: 7px 10px;
   border-radius: var(--r-sm);
   background: var(--danger-soft);
   color: var(--danger);
   font-size: 11.5px;
+  font-weight: 600;
+  box-shadow: 0 8px 20px color-mix(in srgb, var(--danger) 18%, transparent);
+  animation: send-error-in 200ms var(--ease-out) both;
+}
+
+.send-error :deep(svg) {
+  flex: none;
+}
+
+@keyframes send-error-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .send-notice {

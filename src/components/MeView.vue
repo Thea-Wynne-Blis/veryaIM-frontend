@@ -3,7 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { messageOf } from '../utils/error'
 import {
   LogOut, Save, Shield, Smartphone, Loader2, Trash2, User, Languages,
-  MapPin, PenLine,
+  MapPin, PenLine, Moon, Sun,
 } from 'lucide-vue-next'
 import AppAvatar from './AppAvatar.vue'
 import {
@@ -15,10 +15,12 @@ import {
 import { useAuthStore } from '../stores/auth'
 import { useChatStore } from '../stores/chat'
 import { useTranslatePrefs } from '../composables/useTranslatePrefs'
+import { useTheme } from '../composables/useTheme'
 import { initialsOf, relativeTime } from '../utils/present'
 
 const auth = useAuthStore()
 const chat = useChatStore()
+const { theme, setTheme } = useTheme()
 const {
   target: translateTarget,
   languages: translateLanguages,
@@ -139,6 +141,10 @@ async function savePrivacy(patch: Partial<UserPrivacy>) {
 function chooseTranslateTarget(event: Event) {
   setTranslateTarget((event.target as HTMLSelectElement).value)
   flash('翻译语言已更新')
+}
+
+function setDark(enabled: boolean) {
+  setTheme(enabled ? 'dark' : 'light')
 }
 
 async function logout() {
@@ -301,6 +307,23 @@ onMounted(load)
                 </option>
               </select>
             </label>
+          </div>
+
+          <div class="me-card spot" @pointermove="spot">
+            <p class="card-label">
+              <component :is="theme === 'dark' ? Moon : Sun" :size="11" :stroke-width="2.4" />
+              外观
+            </p>
+            <label class="switch-row">
+              <span>深色模式</span>
+              <input
+                type="checkbox"
+                class="switch"
+                :checked="theme === 'dark'"
+                @change="setDark(($event.target as HTMLInputElement).checked)"
+              />
+            </label>
+            <p class="card-hint">切换后立即生效，并记住在这台设备上的选择。</p>
           </div>
 
           <div class="me-card spot" @pointermove="spot">
