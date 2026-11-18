@@ -29,6 +29,15 @@ const fixtures = [
 let requests = []
 let contextRequested = false
 let alphaCount = 0
+const sentMessages = []
+const attachmentMessages = ['IMAGE', 'FILE', 'AUDIO'].map((type, index) => ({
+  ...recent, conversationId: 'mobile-direct', senderId: '104', messageId: String(70 + index), sequence: 70 + index, type,
+  contentEncoding: 'base64', content: Buffer.from(JSON.stringify({ fileId: String(203 + index), fileName: type === 'FILE' ? '很长的附件文件名-产品设计交付文档.pdf' : `${type}.png`, sizeBytes: 12345, width: 1200, height: 800, durationSeconds: 12 })).toString('base64'),
+}))
+const cards = [
+  { conversationId: cid, title: '产品设计讨论组', type: 'GROUP', memberCount: 3, lastSeq: 900, lastReadSeq: 900, lastMessageType: 'TEXT', lastMessagePreview: recent.content, updatedAt: createdAt, lastMessageAt: createdAt, unreadCount: 0, pinned: false, muted: false, hidden: false },
+  { conversationId: 'mobile-direct', title: '爱丽', type: 'PRIVATE', peerUserId: '104', memberCount: 2, lastSeq: 0, lastReadSeq: 0, lastMessageType: 'TEXT', lastMessagePreview: '明天见，路上注意安全。', updatedAt: createdAt, lastMessageAt: createdAt, unreadCount: 2, pinned: false, muted: false, hidden: false },
+]
 try {
   for (let attempt = 0; attempt < 50; attempt++) {
     if (server.exitCode != null) throw new Error('测试预览服务启动失败')
@@ -47,11 +56,28 @@ try {
     const p = url.pathname.replace('/api/v1', '')
     let data = []
     if (p === '/auth/me') data = user
-    else if (p === '/conversations/cards') data = [{ conversationId: cid, title: '产品设计讨论组', type: 'GROUP', memberCount: 3, lastSeq: 900, lastReadSeq: 900, lastMessageType: 'TEXT', lastMessagePreview: recent.content, updatedAt: createdAt, lastMessageAt: createdAt, unreadCount: 0, pinned: false, muted: false, hidden: false }]
+    else if (p === '/conversations/cards') data = cards
+    else if (p.endsWith('/prefs') && route.request().method() === 'PUT') {
+      const id = p.split('/')[2]
+      Object.assign(cards.find(card => card.conversationId === id), route.request().postDataJSON())
+      data = null
+    }
     else if (p === `/groups/${cid}/members`) data = members
     else if (p === `/groups/${cid}/moderation`) data = { announcement: '每周三同步设计进展，相关文件请在聊天记录中查找。', muteAll: false }
     else if (p.endsWith('/context')) { contextRequested = true; data = { messages: [{ ...recent, messageId: '15', sequence: 15, content: fixtures[0].text }], nextCursor: null, hasMore: false } }
+    else if (p === `/conversations/${cid}/messages` && route.request().method() === 'POST') {
+      const body = route.request().postDataJSON()
+      sentMessages.push(body.content)
+      data = { message: { ...recent, messageId: String(900 + sentMessages.length), sequence: 900 + sentMessages.length, senderId: user.userId, content: body.content }, duplicate: false }
+    }
     else if (p === `/conversations/${cid}/messages`) data = { messages: Number(url.searchParams.get('cursor')) < 900 ? [recent] : [], nextCursor: 900, hasMore: false }
+    else if (p === '/conversations/mobile-direct/messages') data = { messages: Number(url.searchParams.get('cursor')) < 72 ? attachmentMessages : [], nextCursor: 72, hasMore: false }
+    else if (p === '/conversations/mobile-direct') data = { memberIds: ['101', '104'] }
+    else if (p === '/users/104/profile') data = { userId: '104', nickname: '爱丽', online: true }
+    else if (p === '/users/101/profile') data = user
+    else if (p === '/users/me') data = user
+    else if (p === '/users/me/privacy') data = {}
+    else if (p.startsWith('/files/203/')) return route.fulfill({ contentType: 'image/png', body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64') })
     else if (p === `/conversations/${cid}/search`) {
       requests.push(url)
       const query = url.searchParams.get('keyword') ?? ''
@@ -140,14 +166,98 @@ try {
   await global.getByRole('button', { name: '聊天记录', exact: true }).click()
   assert.equal(await global.getByText('设计同学', { exact: true }).count(), 0)
   assert.equal(await global.locator('button button').count(), 0)
+  await global.getByRole('button', { name: '关闭搜索', exact: true }).click()
   await page.setViewportSize({ width: 390, height: 844 })
-  await page.getByRole('button', { name: '查找聊天内容', exact: true }).click()
+  await page.evaluate(() => { document.documentElement.dataset.theme = 'light' })
+  const mobileChat = page.getByRole('region', { name: '聊天', exact: true })
+  await mobileChat.getByRole('button', { name: '聊天信息', exact: true }).click()
+  const info = page.getByRole('region', { name: '聊天信息', exact: true })
+  await info.getByRole('switch', { name: '置顶聊天', exact: true }).click()
+  await page.waitForFunction(() => document.querySelector('.m-info-page [aria-label="置顶聊天"]')?.getAttribute('aria-checked') === 'true')
+  await page.screenshot({ animations: 'disabled', path: '.shots/mobile-chat-info.png' })
+  await info.getByText('查找聊天内容', { exact: true }).click()
   await modal.locator('.history-hit').first().waitFor()
   const rect = await modal.boundingBox()
   assert.ok(rect.width <= 390 && rect.height <= 844)
   await page.screenshot({ animations: 'disabled', path: '.shots/chat-search-mobile.png' })
+  await modal.getByRole('button', { name: '关闭聊天记录', exact: true }).click()
+  const composer = mobileChat.getByRole('textbox', { name: '输入消息', exact: true })
+  await composer.fill('第一行')
+  await composer.press('Enter')
+  await composer.pressSequentially('第二行')
+  assert.equal(await composer.inputValue(), '第一行\n第二行')
+  assert.equal(sentMessages.length, 0)
+  await composer.dispatchEvent('compositionstart')
+  await composer.dispatchEvent('keydown', { key: 'Enter', code: 'Enter', ctrlKey: true, isComposing: true })
+  assert.equal(sentMessages.length, 0)
+  await composer.dispatchEvent('compositionend')
+  await mobileChat.getByRole('button', { name: '表情', exact: true }).click()
+  await mobileChat.getByRole('button', { name: '插入 👍', exact: true }).click()
+  const savedDraft = await composer.inputValue()
+  assert.match(savedDraft, /👍/u)
+  await page.screenshot({ animations: 'disabled', path: '.shots/mobile-chat.png' })
+  await mobileChat.getByRole('button', { name: '返回', exact: true }).click()
+  await page.getByRole('heading', { name: '消息', exact: true }).waitFor()
+  assert.equal(new URL(page.url()).pathname, '/app/chat')
+  assert.equal(await page.locator('.m-conv.pinned').count(), 1)
+  await page.screenshot({ animations: 'disabled', path: '.shots/mobile-conversations.png' })
+  await page.getByRole('button', { name: '爱丽，2 条未读消息', exact: true }).click()
+  await composer.waitFor()
+  assert.equal(await composer.inputValue(), '')
+  await composer.fill('爱丽的独立草稿')
+  await mobileChat.getByRole('button', { name: '返回', exact: true }).click()
+  await page.getByRole('button', { name: '产品设计讨论组', exact: true }).click()
+  await composer.waitFor()
+  assert.equal(await composer.inputValue(), savedDraft)
+  await mobileChat.getByRole('button', { name: '发送', exact: true }).click()
+  await page.waitForFunction(() => document.querySelector('.m-input')?.value === '' && document.querySelector('.m-chat [data-mid="901"]'))
+  assert.deepEqual(sentMessages, [savedDraft])
+  await mobileChat.getByRole('button', { name: '返回', exact: true }).click()
+  await page.getByRole('button', { name: '搜索联系人、群聊和聊天记录', exact: true }).click()
+  const mobileGlobal = page.getByRole('complementary', { name: '搜索', exact: true })
+  await mobileGlobal.getByRole('searchbox').fill('设计')
+  await mobileGlobal.getByText('设计同学', { exact: true }).waitFor()
+  await page.screenshot({ animations: 'disabled', path: '.shots/mobile-global-search.png' })
+  await mobileGlobal.getByRole('button', { name: '关闭搜索', exact: true }).click()
+  await page.getByRole('button', { name: '产品设计讨论组', exact: true }).click()
+  await page.goBack()
+  await page.getByRole('heading', { name: '消息', exact: true }).waitFor()
+  await mobileChat.waitFor({ state: 'detached' })
+  assert.equal(await page.getByRole('region', { name: '聊天', exact: true }).count(), 0)
+  await page.goForward()
+  await mobileChat.waitFor()
+  await mobileChat.getByRole('button', { name: '聊天信息', exact: true }).click()
+  await info.getByText('查找聊天内容', { exact: true }).click()
+  await modal.locator('.history-hit').first().waitFor()
+  for (const width of [320, 390, 768]) {
+    await page.setViewportSize({ width, height: 844 })
+    await page.waitForFunction(width => Math.abs(document.querySelector('dialog')?.getBoundingClientRect().width - width) < 1, width)
+    assert.equal(await modal.evaluate(dialog => dialog.scrollWidth <= dialog.clientWidth), true)
+  }
+  await page.setViewportSize({ width: 390, height: 500 })
+  await page.waitForFunction(() => document.querySelector('dialog')?.getBoundingClientRect().height <= 500)
+  await modal.getByRole('button', { name: '关闭聊天记录', exact: true }).click()
+  await page.setViewportSize({ width: 320, height: 640 })
+  await composer.fill('很长的消息\n'.repeat(12))
+  assert.ok(await composer.evaluate(input => input.getBoundingClientRect().height <= 136))
+  assert.equal(await mobileChat.evaluate(chat => chat.scrollWidth <= chat.clientWidth), true)
+  await mobileChat.getByRole('button', { name: '返回', exact: true }).click()
+  await page.getByRole('button', { name: /^爱丽/ }).click()
+  await mobileChat.locator('.bubble.audio').waitFor()
+  assert.equal(await mobileChat.evaluate(chat => chat.scrollWidth <= chat.clientWidth), true)
+  const messageArea = await mobileChat.locator('.m-messages').boundingBox()
+  for (const bubble of await mobileChat.locator('.bubble').all()) {
+    const box = await bubble.boundingBox()
+    assert.ok(box.x >= 0 && box.x + box.width <= 320)
+  }
+  assert.ok(messageArea.width <= 320)
+  await mobileChat.getByRole('button', { name: '返回', exact: true }).click()
+  for (const tab of ['文件', '通讯录', '我的']) {
+    await page.getByRole('navigation', { name: '主导航' }).getByRole('button', { name: tab, exact: true }).click()
+    assert.equal(await page.locator('.m-body').evaluate(body => body.scrollWidth <= body.clientWidth), true)
+  }
   assert.deepEqual(errors, [])
-  console.log('PASS: 侧栏入口、分类、分页、高亮、组合筛选、空结果、A/B/A 请求竞态、旧消息定位、快捷键、全局搜索、移动端及明暗主题')
+  console.log('PASS: 搜索分类分页、请求竞态、旧消息定位、移动聊天信息与置顶、全局搜索、中文输入、多行消息、表情、独立草稿、发送、320–768px 布局和视口变化')
 } finally {
   await browser?.close()
   server.kill()

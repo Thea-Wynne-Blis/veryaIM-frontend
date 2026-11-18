@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
-  Search, X, Loader2, Users, MessageSquare, FileText,
+  Search, X, ArrowLeft, Loader2, Users, MessageSquare, FileText,
   Image as ImageIcon, Film, Mic, Download, CornerDownLeft,
 } from 'lucide-vue-next'
 import AppAvatar from './AppAvatar.vue'
@@ -9,6 +9,8 @@ import SearchHighlight from './SearchHighlight.vue'
 import { api, downloadFile, type Id, type SearchResults } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import { humanBytes, initialsOf, listTime, toneOfPerson } from '../utils/present'
+
+withDefaults(defineProps<{ mobile?: boolean }>(), { mobile: false })
 
 const emit = defineEmits<{
   (e: 'close'): void
@@ -122,11 +124,12 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <aside class="detail-pane search-pane" aria-label="搜索">
+  <aside class="detail-pane search-pane" :class="{ 'mobile-search-pane': mobile }" aria-label="搜索">
     <header class="detail-head">
       <h2 class="detail-title">搜索</h2>
       <button class="icon-btn sm" aria-label="关闭搜索" @click="emit('close')">
-        <X :size="15" :stroke-width="2" />
+        <ArrowLeft v-if="mobile" :size="22" :stroke-width="2" />
+        <X v-else :size="15" :stroke-width="2" />
       </button>
     </header>
 
@@ -441,4 +444,25 @@ onBeforeUnmount(() => {
 .spin {
   animation: tick-spin 900ms linear infinite;
 }
+
+.mobile-search-pane { display: flex; position: fixed; inset: 0; z-index: 20; height: var(--mobile-viewport-height, 100dvh); border: 0; animation: none; }
+.mobile-search-pane .detail-head { height: auto; min-height: 56px; padding: calc(env(safe-area-inset-top, 0px) + 4px) 12px 4px; justify-content: flex-start; gap: 10px; }
+.mobile-search-pane .detail-title { font-size: 16px; color: var(--ink); letter-spacing: 0; }
+.mobile-search-pane .detail-head > button { order: -1; width: 44px; height: 44px; }
+.mobile-search-pane .search-top { padding: 12px 16px 8px; }
+.mobile-search-pane .search { min-height: 46px; }
+.mobile-search-pane input { min-width: 0; width: 100%; font-size: 16px; }
+.mobile-search-pane input:focus-visible { outline: none; }
+.mobile-search-pane .search-hint { font-size: 11px; }
+.mobile-search-pane .search-categories { flex-wrap: nowrap; overflow-x: auto; gap: 6px; }
+.mobile-search-pane .search-categories button { min-height: 44px; padding: 5px 10px; white-space: nowrap; font-size: 13px; }
+.mobile-search-pane .search-body { padding: 12px 12px calc(env(safe-area-inset-bottom, 0px) + 24px); }
+.mobile-search-pane .hit-row { gap: 12px; min-height: 76px; padding: 12px 8px; }
+.mobile-search-pane .hit-name { font-size: 15px; }
+.mobile-search-pane .hit-avatar { min-width: 44px; min-height: 44px; align-items: center; justify-content: center; }
+.mobile-search-pane .hit-sub { font-size: 12px; line-height: 1.65; }
+.mobile-search-pane .hit-label { font-size: 12px; }
+.mobile-search-pane .hit-time { font-size: 11px; }
+.mobile-search-pane .hit-download { min-width: 44px; min-height: 44px; align-items: center; justify-content: center; }
+.mobile-search-pane .hit-main.as-button { min-height: 44px; justify-content: center; }
 </style>

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { Search, X, Loader2, FileText, Image as ImageIcon, Film, Mic, Download, MessageSquare, RotateCcw } from 'lucide-vue-next'
+import { Search, X, ArrowLeft, Loader2, FileText, Image as ImageIcon, Film, Mic, Download, MessageSquare, RotateCcw } from 'lucide-vue-next'
 import AppAvatar from './AppAvatar.vue'
 import SearchHighlight from './SearchHighlight.vue'
 import { api, downloadFile, type ConversationSearchHit, type ConversationSearchPage, type Id } from '../api/client'
@@ -139,7 +139,7 @@ onBeforeUnmount(() => {
           <h2 id="history-title">“{{ conversation.name }}”的聊天记录</h2>
           <p>查找聊天内容</p>
         </div>
-        <button class="icon-btn" aria-label="关闭聊天记录" @click="emit('close')"><X :size="19" /></button>
+        <button class="icon-btn history-close" aria-label="关闭聊天记录" @click="emit('close')"><X class="desktop-close" :size="19" /><ArrowLeft class="mobile-close" :size="22" /></button>
       </header>
       <div class="history-controls">
         <label class="history-search">
@@ -196,6 +196,7 @@ onBeforeUnmount(() => {
 .history-heading { min-width: 0; }
 .history-head h2 { font-size: 16px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .history-head p { font-size: 11px; color: var(--ink-3); margin-top: 4px; }
+.mobile-close { display: none; }
 .history-controls { padding: 0 24px; border-bottom: 1px solid var(--line); }
 .history-search { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border: 1px solid var(--line-strong); border-radius: 7px; color: var(--ink-3); background: var(--surface-2); }
 .history-search:focus-within { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
@@ -231,13 +232,31 @@ onBeforeUnmount(() => {
 .history-more { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; padding: 14px; background: none; color: var(--accent); font-size: 12px; }
 .history-end { padding: 20px 0 4px; text-align: center; font-size: 11px; color: var(--ink-3); }
 .spin { animation: tick-spin 900ms linear infinite; }
-@media (max-width: 600px) {
-  .history-dialog { width: 100vw; height: 100dvh; border: 0; border-radius: 0; }
-  .history-head { padding: 18px 16px; }
+@media (max-width: 768px) {
+  .history-dialog { width: 100vw; height: var(--mobile-viewport-height, 100dvh); border: 0; border-radius: 0; }
+  .history-head { padding: calc(env(safe-area-inset-top, 0px) + 4px) 12px 8px; gap: 8px; justify-content: flex-start; }
+  .history-head h2 { font-size: 15px; }
+  .history-head p { display: none; }
+  .history-close { order: -1; min-width: 44px; min-height: 44px; }
+  .desktop-close { display: none; }
+  .mobile-close { display: block; }
   .history-controls { padding: 0 16px; }
-  .history-results { padding: 0 12px 16px; }
+  .history-search { min-height: 48px; padding: 10px 12px; }
+  .history-search input { font-size: 16px; }
+  .history-results { padding: 0 12px calc(env(safe-area-inset-bottom, 0px) + 20px); }
   .history-tabs { gap: 22px; }
+  .history-tabs button { min-height: 46px; font-size: 14px; }
+  .history-filters { gap: 8px 12px; padding: 8px 0 12px; }
+  .history-filters input, .history-filters select { height: 38px; max-width: 145px; font-size: 14px; }
+  .history-filters label { font-size: 12px; }
   .history-hit-meta { flex-wrap: wrap; gap: 4px; }
+  .history-hit-meta time { font-size: 11px; }
+  .history-message { font-size: 15px; }
+  .history-hit-main { padding: 16px 4px; gap: 10px; }
+  .history-download { min-width: 44px; min-height: 44px; margin-right: 0; }
+  .history-file { max-width: 100%; padding: 10px; gap: 10px; }
+  .history-file-name { font-size: 14px; }
+  .history-more, .history-reset { min-height: 44px; }
   .history-count > span { display: none; }
 }
 </style>

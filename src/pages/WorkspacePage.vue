@@ -268,8 +268,10 @@ async function select(id: string, updateRoute = true) {
   if (!chat.cards.some((card) => card.conversationId === id)) {
     await chat.loadCards()
   }
+  // 路由监听与点击共用这个入口，先更新选中态以避免重复打开同一会话。
+  chat.activeId = id
   if (updateRoute) {
-    if (view.value !== 'chat') {
+    if (view.value !== 'chat' || (isMobile.value && !route.params.conversationId)) {
       await router.push({ name: 'conversation', params: { conversationId: id } })
     } else {
       await router.replace({ name: 'conversation', params: { conversationId: id } })
@@ -283,7 +285,9 @@ async function select(id: string, updateRoute = true) {
 }
 
 async function closeMobileChat() {
-  chat.activeId = null
+  if (!route.params.conversationId) { chat.activeId = null; return }
+  if (router.options.history.state.back === '/app/chat') router.back()
+  else await router.replace({ name: 'chat' })
 }
 
 async function send(
@@ -320,6 +324,7 @@ function openProfile(userId: Id | string, anchor?: HTMLElement | null, nickname?
 /** 资料卡里点「发消息」：建私聊并直接切过去。 */
 async function profileChat(userId: Id) {
   profileOpen.value = false
+  searchOpen.value = false
   try {
     const conversationId = await chat.createPrivate(userId)
     await chat.loadCards()
@@ -500,6 +505,7 @@ watch(
   () => route.params.conversationId as string | undefined,
   (id) => {
     if (id && id !== chat.activeId) select(id, false)
+    else if (!id && isMobile.value && route.name === 'chat') chat.activeId = null
   },
 )
 
@@ -562,6 +568,7 @@ onBeforeUnmount(() => {
     :me="auth.user?.nickname ?? '我'"
     :error="chat.error"
     :loading="chat.loadingMessages"
+    :inert="searchOpen"
     @select="select"
     @close="closeMobileChat"
     @send="(payload) => send(payload.conversationId, payload.text, payload.reply)"
@@ -569,6 +576,8 @@ onBeforeUnmount(() => {
     @forward="onForward"
     @new-chat="dialogOpen = true"
     @open-search="openConversationSearch"
+    @global-search="openSearch"
+    @manage="manageOpen = true"
     @mark-unread="onConvUnread"
     @hide="onConvHide"
     @delete="onConvDelete"
@@ -652,6 +661,15 @@ onBeforeUnmount(() => {
       <MeView v-else />
     </div>
   </div>
+
+  <SearchPanel
+    v-if="isMobile && searchOpen"
+    mobile
+    @close="closeSearch"
+    @open-conversation="openFromSearch"
+    @open-user-chat="openUserChat"
+    @profile="(id, anchor) => openProfile(id, anchor)"
+  />
 
   <ConversationSearchDialog
     v-if="historyConversation"

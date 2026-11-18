@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch, type ObjectDirective } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type ObjectDirective } from 'vue'
 import { useToast } from '../composables/useToast'
 import { useMessageActions } from '../composables/useMessageActions'
 import {
@@ -12,7 +12,6 @@ import {
   ArrowLeft,
   Paperclip,
   Smile,
-  Send,
   CheckCheck,
   Check,
   Loader2,
@@ -24,12 +23,16 @@ import {
   X,
   MailOpen,
   EyeOff,
+  MoreHorizontal,
+  Pin,
+  BellOff,
 } from 'lucide-vue-next'
 import AppAvatar from './AppAvatar.vue'
 import ContactsView from './ContactsView.vue'
 import FilesView from './FilesView.vue'
 import MeView from './MeView.vue'
 import MessageAttachment from './MessageAttachment.vue'
+import DetailPanel from './DetailPanel.vue'
 import { useTranslatePrefs } from '../composables/useTranslatePrefs'
 import { useChatStore } from '../stores/chat'
 import type { ChatMessage, Conversation } from '../types/chat'
@@ -55,6 +58,8 @@ const emit = defineEmits<{
   (e: 'close'): void
   (e: 'new-chat'): void
   (e: 'open-search'): void
+  (e: 'global-search'): void
+  (e: 'manage'): void
   (e: 'mark-unread', id: string): void
   (e: 'hide', id: string): void
   (e: 'delete', id: string): void
@@ -74,8 +79,19 @@ const initialTab = (() => {
 })()
 
 const tab = ref<Tab>(initialTab)
-const keyword = ref('')
-const draft = ref('')
+const drafts = ref<Record<string, string>>({})
+const draft = computed({
+  get: () => props.activeId ? drafts.value[props.activeId] ?? '' : '',
+  set: (value: string) => { if (props.activeId) drafts.value[props.activeId] = value },
+})
+const composerInput = ref<HTMLTextAreaElement | null>(null)
+const composing = ref(false)
+const infoOpen = ref(false)
+const infoBack = ref<HTMLButtonElement | null>(null)
+const infoButton = ref<HTMLButtonElement | null>(null)
+const emojiOpen = ref(false)
+const emojis = ['😀', '😊', '🥰', '😎', '🤔', '👍', '👏', '🙏', '🎉', '❤️', '🔥', '✅', '😂', '😭', '🙌', '💪']
+const viewportHeight = ref(window.visualViewport?.height ?? window.innerHeight)
 const scroller = ref<HTMLElement | null>(null)
 const bodyScrolled = ref(false)
 const stickToBottom = ref(true)
@@ -92,16 +108,6 @@ const totalUnread = computed(() =>
   props.conversations.reduce((sum, item) => sum + item.unread, 0),
 )
 
-const list = computed(() => {
-  const kw = keyword.value.trim().toLowerCase()
-  if (!kw) return props.conversations
-  return props.conversations.filter(
-    (item) =>
-      item.name.toLowerCase().includes(kw) ||
-      item.preview.toLowerCase().includes(kw),
-  )
-})
-
 const current = computed(() => {
   if (!props.activeId) return null
   const visible = props.conversations.find((item) => item.id === props.activeId)
@@ -115,6 +121,60 @@ const currentMessages = computed(() =>
 )
 
 const canSend = computed(() => draft.value.trim().length > 0)
+const uploads = computed(() => chat.uploads.filter(task => task.conversationId === props.activeId))
+
+function resizeInput() {
+  const input = composerInput.value
+  if (!input) return
+  input.style.height = 'auto'
+  input.style.height = `${Math.min(input.scrollHeight, 136)}px`
+}
+watch(draft, () => nextTick(resizeInput))
+
+function updateViewport() {
+  if (window.visualViewport && window.visualViewport.scale !== 1) return
+  viewportHeight.value = window.visualViewport?.height ?? window.innerHeight
+  document.documentElement.style.setProperty('--mobile-viewport-height', `${viewportHeight.value}px`)
+  if (stickToBottom.value) scrollBottom()
+}
+
+async function openInfo() {
+  closeMenu()
+  emojiOpen.value = false
+  infoOpen.value = true
+  if (props.activeId) void chat.loadMembers(props.activeId)
+  await nextTick()
+  infoBack.value?.focus()
+}
+
+async function closeInfo() {
+  infoOpen.value = false
+  await nextTick()
+  infoButton.value?.focus()
+}
+
+async function toggleSetting(setting: 'pin' | 'mute') {
+  const id = props.activeId
+  if (!id) return
+  try {
+    if (setting === 'pin') await chat.setPinned(id, !chat.isPinned(id))
+    else await chat.setMuted(id, !chat.isMuted(id))
+  } catch (e) { showNotice(e instanceof Error ? e.message : '设置失败，请重试') }
+}
+
+function insertEmoji(emoji: string) {
+  const input = composerInput.value
+  const start = input?.selectionStart ?? draft.value.length
+  const end = input?.selectionEnd ?? start
+  draft.value = draft.value.slice(0, start) + emoji + draft.value.slice(end)
+  nextTick(() => input?.setSelectionRange(start + emoji.length, start + emoji.length))
+}
+
+function sendShortcut(event: KeyboardEvent) {
+  if (event.isComposing || composing.value) return
+  event.preventDefault()
+  send()
+}
 
 const tabTitle = computed(
   () =>
@@ -140,7 +200,6 @@ function onFilePicked(event: Event) {
 
 function open(id: string) {
   emit('select', id)
-  draft.value = ''
   replyTo.value = null
 }
 
@@ -149,7 +208,7 @@ function close() {
 }
 
 function send() {
-  if (!canSend.value || !props.activeId) return
+  if (!canSend.value || !props.activeId || composing.value) return
   disarmEnter()
   const reply = replyTo.value
     ? {
@@ -161,6 +220,7 @@ function send() {
   emit('send', { conversationId: props.activeId, text: draft.value.trim(), reply })
   replyTo.value = null
   draft.value = ''
+  emojiOpen.value = false
   stickToBottom.value = true
   scrollBottom(true)
 }
@@ -213,6 +273,10 @@ const vEnter: ObjectDirective<HTMLElement, { order?: number; skip?: boolean }> =
 watch(
   () => props.activeId,
   (id) => {
+    infoOpen.value = false
+    emojiOpen.value = false
+    replyTo.value = null
+    composing.value = false
     stickToBottom.value = true
     scrollBottom(true)
     if (!id) {
@@ -225,7 +289,6 @@ watch(
       if (currentMessages.value.length) disarmEnter()
     })
   },
-  { immediate: true },
 )
 
 watch(
@@ -243,20 +306,41 @@ function onBodyScroll(event: Event) {
 }
 
 /** 消息不播「新消息」入场动画（同 ChatPane），只给每条一个稳定 key：乐观占位确认后复用同一节点 */
+function messageDay(message: ChatMessage | undefined) {
+  const date = message?.createdAt ? new Date(message.createdAt) : null
+  return date && !Number.isNaN(date.getTime()) ? date.toDateString() : ''
+}
+
+function dayLabel(message: ChatMessage) {
+  const day = messageDay(message)
+  if (!day) return '聊天记录'
+  const today = new Date()
+  if (day === today.toDateString()) return '今天'
+  const yesterday = new Date(today)
+  yesterday.setDate(yesterday.getDate() - 1)
+  if (day === yesterday.toDateString()) return '昨天'
+  return new Date(message.createdAt!).toLocaleDateString('zh-CN', { month: 'long', day: 'numeric',
+    ...(new Date(message.createdAt!).getFullYear() !== today.getFullYear() ? { year: 'numeric' as const } : {}) })
+}
+
 function grouping(messages: ChatMessage[]) {
   const usedKeys = new Set<string>()
   return messages.map((message, index) => {
     const prev = messages[index - 1]
+    const day = index === 0 || messageDay(prev) !== messageDay(message) ? dayLabel(message) : ''
     const grouped =
       !!prev &&
+      !day &&
       prev.side === message.side &&
-      prev.author === message.author &&
+      (prev.senderId ?? prev.author) === (message.senderId ?? message.author) &&
+      !!prev.createdAt && !!message.createdAt &&
+      new Date(message.createdAt).getTime() - new Date(prev.createdAt).getTime() < 5 * 60_000 &&
       !prev.attachment &&
       !message.attachment
     let key = message.clientMsgId ? `c:${message.clientMsgId}` : `s:${message.id}`
     if (usedKeys.has(key)) key = `s:${message.id}:${index}`
     usedKeys.add(key)
-    return { message, grouped, key, enterOrder: index, pending: message.pending }
+    return { message, grouped, key, day, enterOrder: index, pending: message.pending }
   })
 }
 
@@ -489,36 +573,47 @@ document.addEventListener('pointerdown', onDocSwipeReset, true)
 
 onBeforeUnmount(() => {
   cancelPress()
+  window.visualViewport?.removeEventListener('resize', updateViewport)
+  window.removeEventListener('resize', updateViewport)
+  document.documentElement.style.removeProperty('--mobile-viewport-height')
   document.removeEventListener('pointerdown', onDocPointerDown, true)
   document.removeEventListener('pointerdown', onDocSwipeReset, true)
 })
 
 document.addEventListener('pointerdown', onDocPointerDown, true)
+
+onMounted(() => {
+  window.visualViewport?.addEventListener('resize', updateViewport, { passive: true })
+  window.addEventListener('resize', updateViewport, { passive: true })
+  updateViewport()
+  scrollBottom(true)
+})
 </script>
 
 <template>
-  <div class="m-shell">
-    <header class="m-head" :class="{ scrolled: bodyScrolled }">
+  <div class="m-shell" :style="{ height: `${viewportHeight}px` }">
+    <header v-if="tab === 'chat'" class="m-head" :class="{ scrolled: bodyScrolled }" :inert="!!current">
       <div class="m-title-row">
         <h1 class="m-title">{{ tabTitle }}</h1>
         <button v-if="tab === 'chat'" class="icon-btn" aria-label="新建会话" @click="emit('new-chat')">
           <Plus :size="19" :stroke-width="2" />
         </button>
       </div>
-      <label v-if="tab === 'chat'" class="search">
+      <button class="m-search-entry" @click="emit('global-search')">
         <Search class="search-icon" :size="15" :stroke-width="2" />
-        <input v-model="keyword" type="search" placeholder="搜索" aria-label="搜索" />
-      </label>
+        搜索联系人、群聊和聊天记录
+      </button>
     </header>
 
-    <div class="m-body" @scroll.passive="onBodyScroll">
+    <div class="m-body" :class="{ embedded: tab !== 'chat' }" :inert="!!current" @scroll.passive="onBodyScroll">
       <template v-if="tab === 'chat'">
+        <p v-if="error" class="m-error" role="alert">{{ error }}</p>
         <div
-          v-for="(item, index) in list"
+          v-for="(item, index) in conversations"
           :key="item.id"
           class="m-swipe"
           :style="{
-            animation: `fade-up 320ms var(--ease-out) ${index * 30}ms backwards`,
+            animation: `fade-up 320ms var(--ease-out) ${Math.min(index * 30, 180)}ms backwards`,
           }"
         >
           <div class="m-swipe-actions" :class="{ armed: deleteArmedId === item.id }">
@@ -548,7 +643,8 @@ document.addEventListener('pointerdown', onDocPointerDown, true)
           </div>
           <button
             class="m-conv"
-            :class="{ swiping: draggingId === item.id }"
+            :class="{ swiping: draggingId === item.id, pinned: item.pinned }"
+            :aria-label="`${item.name}${item.unread ? `，${item.unread} 条未读消息` : ''}`"
             :style="rowStyle(item.id)"
             @pointerdown="onConvPointerDown($event, item.id)"
             @pointermove="onConvPointerMove"
@@ -566,11 +662,13 @@ document.addEventListener('pointerdown', onDocPointerDown, true)
             <span class="m-conv-main">
               <span class="m-conv-top">
                 <span class="m-conv-name">{{ item.name }}</span>
+                <Pin v-if="item.pinned" :size="12" class="m-conv-status" aria-label="已置顶" />
               </span>
               <span class="m-conv-preview">{{ item.preview }}</span>
             </span>
             <span class="m-conv-meta">
               <span class="conv-time num">{{ item.time }}</span>
+              <BellOff v-if="item.muted && !item.unread" :size="13" class="m-conv-status" aria-label="消息免打扰" />
               <span v-if="item.unread" class="unread" :class="{ muted: item.muted }">
                 <span :key="item.unread">{{ item.unread > 99 ? '99+' : item.unread }}</span>
               </span>
@@ -578,12 +676,11 @@ document.addEventListener('pointerdown', onDocPointerDown, true)
           </button>
         </div>
 
-        <p
-          v-if="!list.length"
-          style="padding: 48px 24px; text-align: center; color: var(--ink-3); font-size: 13px"
-        >
-          没有匹配的会话
-        </p>
+        <div v-if="!conversations.length && !error" class="m-list-empty">
+          <MessageCircle :size="38" :stroke-width="1.2" />
+          <p>还没有聊天</p><span>从通讯录选择好友，或发起新的会话</span>
+          <button @click="emit('new-chat')">发起聊天</button>
+        </div>
       </template>
 
       <!-- 文件 -->
@@ -593,14 +690,14 @@ document.addEventListener('pointerdown', onDocPointerDown, true)
       <MeView v-else class="m-embed" />
     </div>
 
-    <nav class="m-tabs" aria-label="主导航">
+    <nav class="m-tabs" aria-label="主导航" :inert="!!current">
       <button
         v-for="item in tabs"
         :key="item.key"
         class="m-tab"
         :class="{ active: tab === item.key }"
         :aria-current="tab === item.key ? 'page' : undefined"
-        @click="tab = item.key"
+        @click="tab = item.key; bodyScrolled = false; resetSwipe()"
       >
         <span class="m-tab-icon">
           <component :is="item.icon" :size="20" :stroke-width="1.85" />
@@ -615,7 +712,7 @@ document.addEventListener('pointerdown', onDocPointerDown, true)
     <!-- 聊天页 -->
     <Transition name="m-chat">
       <section v-if="current" class="m-chat" aria-label="聊天">
-        <header class="m-chat-head">
+        <header class="m-chat-head" :inert="infoOpen">
           <button class="icon-btn" aria-label="返回" @click="close">
             <ArrowLeft :size="20" :stroke-width="2" />
           </button>
@@ -623,23 +720,24 @@ document.addEventListener('pointerdown', onDocPointerDown, true)
             <span class="m-chat-name">{{ current.name }}</span>
             <span class="m-chat-sub">{{ current.context }}</span>
           </div>
-          <button class="icon-btn" aria-label="查找聊天内容" @click="emit('open-search')">
-            <Search :size="20" :stroke-width="2" />
+          <button ref="infoButton" class="icon-btn" aria-label="聊天信息" @click="openInfo">
+            <MoreHorizontal :size="23" :stroke-width="2" />
           </button>
         </header>
 
         <div
           ref="scroller"
           class="m-messages"
+          :inert="infoOpen"
           @scroll.passive="onMessageScroll"
           @load.capture="scrollBottom(false)"
         >
           <p v-if="error" class="m-error">{{ error }}</p>
-          <p class="day-divider">今天</p>
           <template
-            v-for="({ message, grouped, key, enterOrder, pending }) in grouping(currentMessages)"
+            v-for="({ message, grouped, key, day, enterOrder, pending }) in grouping(currentMessages)"
             :key="key"
           >
+          <p v-if="day" class="day-divider">{{ day }}</p>
           <div
             v-if="message.type === 'SYSTEM'"
             class="sys-msg"
@@ -722,7 +820,7 @@ document.addEventListener('pointerdown', onDocPointerDown, true)
           </p>
         </div>
 
-        <div class="m-composer-wrap">
+        <div class="m-composer-wrap" :inert="infoOpen">
           <p v-if="notice" class="m-notice">{{ notice }}</p>
           <div v-if="replyTo" class="m-quote-bar">
             <Quote :size="13" :stroke-width="2" />
@@ -734,27 +832,57 @@ document.addEventListener('pointerdown', onDocPointerDown, true)
               <X :size="14" :stroke-width="2" />
             </button>
           </div>
+          <div v-if="uploads.length" class="m-uploads" aria-live="polite">
+            <div v-for="task in uploads" :key="task.id" class="m-upload">
+              <Loader2 :size="15" class="spin" />
+              <span>{{ task.name }}</span>
+              <progress :value="task.progress" max="1" :aria-label="`${task.name} 上传进度`" />
+              <button class="icon-btn" :aria-label="`取消上传 ${task.name}`" @click="chat.cancelUpload(task.id)"><X :size="16" /></button>
+            </div>
+          </div>
           <div class="m-composer">
-            <button class="icon-btn" aria-label="表情">
+            <button class="icon-btn" aria-label="表情" :aria-expanded="emojiOpen" aria-controls="mobile-emoji-picker" @click="emojiOpen = !emojiOpen; composerInput?.blur()">
               <Smile :size="20" :stroke-width="1.9" />
             </button>
             <textarea
+              ref="composerInput"
               v-model="draft"
               class="m-input"
               rows="1"
               placeholder="发消息…"
               aria-label="输入消息"
-              @keydown.enter.exact.prevent="send"
+              @focus="emojiOpen = false"
+              @compositionstart="composing = true"
+              @compositionend="composing = false"
+              @keydown.ctrl.enter.exact="sendShortcut"
+              @keydown.meta.enter.exact="sendShortcut"
             />
             <button v-if="!canSend" class="icon-btn" aria-label="附件" @click="triggerAttach">
               <Paperclip :size="20" :stroke-width="1.9" />
             </button>
             <button v-else class="m-send" aria-label="发送" @click="send">
-              <Send :size="17" :stroke-width="2.2" />
+              发送
             </button>
             <input ref="fileInput" type="file" hidden @change="onFilePicked" />
           </div>
+          <div v-if="emojiOpen" id="mobile-emoji-picker" class="m-emoji-picker" role="group" aria-label="选择表情">
+            <button v-for="emoji in emojis" :key="emoji" :aria-label="`插入 ${emoji}`" @click="insertEmoji(emoji)">{{ emoji }}</button>
+          </div>
         </div>
+
+        <section v-if="infoOpen" class="m-info-page" aria-label="聊天信息" @keydown.esc.stop.prevent="closeInfo">
+          <header class="m-info-head">
+            <button ref="infoBack" class="icon-btn" aria-label="返回聊天" @click="closeInfo"><ArrowLeft :size="22" /></button>
+            <h2>{{ current.kind === 'group' ? '群聊信息' : '聊天信息' }}</h2>
+            <span class="m-head-spacer" aria-hidden="true" />
+          </header>
+          <p v-if="notice" class="m-notice" role="status">{{ notice }}</p>
+          <DetailPanel class="m-info-content" :conversation="current" :members="chat.members[current.id] ?? []"
+            :pinned="chat.isPinned(current.id)" :muted="chat.isMuted(current.id)"
+            @close="closeInfo" @toggle-pin="toggleSetting('pin')" @toggle-mute="toggleSetting('mute')"
+            @open-search="infoOpen = false; emit('open-search')" @manage="emit('manage')"
+            @profile="(id, anchor) => emit('profile', id, anchor)" />
+        </section>
       </section>
     </Transition>
 
@@ -806,6 +934,76 @@ document.addEventListener('pointerdown', onDocPointerDown, true)
 </template>
 
 <style scoped>
+.m-shell { max-height: 100dvh; }
+.m-shell .icon-btn { width: 44px; height: 44px; flex-shrink: 0; }
+.m-head { padding: calc(env(safe-area-inset-top, 0px) + 8px) 16px 12px; gap: 8px; background: var(--canvas); }
+.m-title { font-size: 25px; letter-spacing: -0.5px; }
+.m-search-entry { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; min-height: 42px; border-radius: 8px; background: var(--surface-3); color: var(--ink-3); font-size: 14px; }
+.m-body { min-height: 0; padding-bottom: 0; overscroll-behavior: contain; }
+.m-body.embedded { display: flex; flex-direction: column; overflow: hidden; padding-top: env(safe-area-inset-top, 0px); }
+.m-conv { min-height: 84px; padding: 14px 16px; background: var(--surface); border-bottom: 1px solid var(--line); }
+.m-conv.pinned { background: color-mix(in srgb, var(--surface) 95%, var(--accent)); }
+.m-conv-top { min-width: 0; }
+.m-conv-name { font-size: 16px; font-weight: 600; }
+.m-conv-preview { font-size: 13px; margin-top: 3px; }
+.m-conv-status { flex-shrink: 0; color: var(--ink-3); }
+.m-conv-meta { align-self: stretch; justify-content: space-between; padding: 2px 0; }
+.m-list-empty { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 80px 24px; color: var(--ink-3); text-align: center; }
+.m-list-empty p { font-size: 16px; color: var(--ink-2); }
+.m-list-empty span { font-size: 13px; }
+.m-list-empty button { padding: 10px 18px; border-radius: 8px; color: var(--accent-ink); background: var(--accent-soft); margin-top: 6px; }
+.m-tabs { position: relative; flex-shrink: 0; background: var(--surface); padding: 7px 8px calc(env(safe-area-inset-bottom, 0px) + 7px); }
+.m-tab { min-height: 48px; font-size: 11px; }
+.m-chat-head { min-height: 60px; gap: 6px; padding: calc(env(safe-area-inset-top, 0px) + 3px) 8px 3px; background: var(--canvas); }
+.m-chat-name { font-size: 16px; font-weight: 600; }
+.m-chat-sub { font-size: 11px; }
+.m-chat .bubble { font-size: 16px; line-height: 1.6; padding: 10px 13px; overflow-wrap: anywhere; white-space: pre-wrap; }
+.m-chat .msg-main { min-width: 0; }
+.m-chat :deep(.bubble.media) { width: min(258px, calc(100vw - 104px)); max-width: 100%; padding: 4px; }
+.m-chat :deep(.image-wrap), .m-chat :deep(.image-wrap img), .m-chat :deep(.video-player), .m-chat :deep(.media-ph) { width: 100%; max-width: 100%; }
+.m-chat :deep(.media-ph) { height: auto; }
+.m-chat :deep(.bubble.audio) { min-width: 0; width: min(260px, calc(100vw - 104px)); }
+.m-chat :deep(.attach) { min-width: 0; }
+.m-chat :deep(.image-download) { width: 44px; height: 44px; opacity: 1; }
+.m-chat :deep(.audio-play), .m-chat :deep(.audio-download) { min-width: 40px; min-height: 40px; }
+.m-composer-wrap { padding: 8px 8px calc(env(safe-area-inset-bottom, 0px) + 8px); background: var(--canvas); }
+.m-composer { gap: 6px; align-items: flex-end; }
+.m-input { min-width: 0; min-height: 44px; max-height: 136px; padding: 10px 12px; border-radius: 8px; background: var(--surface); border: 1px solid var(--line); font-size: 16px; line-height: 1.45; }
+.m-input:focus { box-shadow: none; }
+.m-input:focus-visible { outline: none; }
+.m-send { min-width: 54px; width: auto; height: 44px; padding: 0 12px; border-radius: 7px; background: var(--accent); box-shadow: none; font-size: 14px; font-weight: 600; }
+.m-emoji-picker { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 3px; padding: 12px 4px 4px; }
+.m-emoji-picker button { min-height: 44px; font-size: 25px; border-radius: 8px; }
+.m-emoji-picker button:active { background: var(--surface-active); }
+.m-upload { display: flex; align-items: center; gap: 8px; padding-left: 6px; font-size: 12px; color: var(--ink-3); }
+.m-upload > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+.m-upload progress { width: 56px; height: 5px; accent-color: var(--accent); }
+.m-info-page { position: absolute; inset: 0; z-index: 8; display: flex; flex-direction: column; background: var(--surface); }
+.m-info-head { display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; padding: calc(env(safe-area-inset-top, 0px) + 4px) 8px 4px; border-bottom: 1px solid var(--line); background: var(--canvas); }
+.m-info-head h2 { font-size: 16px; font-weight: 600; }
+.m-head-spacer { width: 44px; }
+.m-info-content { display: flex; flex: 1; min-height: 0; border: 0; animation: none; }
+.m-info-content :deep(.detail-head) { display: none; }
+.m-info-content :deep(.settings-scroll) { padding: 22px 20px calc(env(safe-area-inset-bottom, 0px) + 24px); }
+.m-info-content :deep(.settings-row) { min-height: 58px; font-size: 16px; }
+.m-info-content :deep(.card-label) { font-size: 12px; letter-spacing: 0; }
+.m-info-content :deep(.card-text) { font-size: 14px; }
+.m-info-content :deep(.member-name) { font-size: 12px; }
+.m-info-content :deep(.member-avatar) { padding: 5px; }
+.m-info-content :deep(.member-grid) { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px 8px; }
+.m-info-content :deep(.member-search) { min-height: 44px; }
+.m-info-content :deep(input) { font-size: 16px; }
+.m-info-content :deep(.member-search input:focus-visible) { outline: none; }
+.m-info-content :deep(.setting-switch) { width: 38px; height: 23px; padding: 3px; }
+.m-info-content :deep(.setting-switch::after) { width: 17px; height: 17px; }
+.m-info-content :deep(.setting-switch.on::after) { transform: translateX(15px); }
+.m-info-content :deep(.show-members) { min-height: 44px; font-size: 13px; }
+.m-embed :deep(input), .m-embed :deep(textarea), .m-embed :deep(select) { font-size: 16px; }
+.m-embed :deep(.file-action), .m-embed :deep(.row-action) { width: 40px; height: 44px; }
+.m-embed :deep(.files-head) { gap: 12px; flex-wrap: wrap; padding: 16px; }
+.m-embed :deep(.head-right) { margin-left: auto; }
+.m-embed :deep(.files-body) { padding: 16px 16px 24px; }
+
 /* 点头像 / 昵称看资料 */
 .avatar-btn {
   display: flex;
