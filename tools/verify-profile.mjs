@@ -188,6 +188,13 @@ check('member(self) card marks 我自己', /我自己/.test(selfText), selfText.
 check('member(self) card has settings entry', /编辑我的资料/.test(selfText))
 await page.click('.card[aria-label="用户资料"] button[aria-label="关闭"]')
 
+// 把演示账号的资料恢复成干净文案，不把测试时间戳留在线上。
+await fetch(`${BASE}/api/v1/users/me`, {
+  method: 'PUT',
+  headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+  body: JSON.stringify({ region: '北京 · 朝阳', signature: '保持好奇，持续交付。' }),
+})
+
 await page.screenshot({ path: 'tools/verify-profile.png' })
 await browser.close()
 
