@@ -85,12 +85,21 @@ async function openManage(username) {
   // 弹窗打开后的请求才算在操作成本里
   apiCalls.length = 0
 
+  const dialog = page.locator('.dialog[aria-label="群管理"]')
+  const boxBefore = await dialog.boundingBox()
   const targetRow = rows.filter({ hasText: MUTE_TARGET }).first()
   await targetRow.locator('select.mini-select').selectOption('MUTE_7M')
   await page.waitForTimeout(1800)
   const muteCalls = apiCalls.filter((call) => call.startsWith('GET /groups/') && call.endsWith('/members'))
   check('owner: mute refresh uses at most 2 member fetches', muteCalls.length <= 2,
     muteCalls.join(', '))
+
+  const toastText = await page.locator('.toast').innerText().catch(() => '')
+  check('owner: mute shows floating toast', toastText.includes('已禁言'), toastText)
+  const boxAfter = await dialog.boundingBox()
+  check('owner: toast does not shift dialog layout',
+    !!boxBefore && !!boxAfter && boxBefore.y === boxAfter.y && boxBefore.height === boxAfter.height,
+    JSON.stringify({ boxBefore, boxAfter }))
 
   const mutedText = await targetRow.innerText()
   check('owner: 7m mute applied and shown', mutedText.includes('禁言'), mutedText.replace(/\s+/g, ' ').slice(0, 120))

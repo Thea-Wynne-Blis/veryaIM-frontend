@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import {
   X, Loader2, Users, Megaphone, Shield, UserMinus, Crown,
-  BellOff, Bell, LogOut, Trash2, Save,
+  BellOff, Bell, LogOut, Trash2, Save, UserPlus, UserCheck, Clock, Check,
 } from 'lucide-vue-next'
 import AppAvatar from './AppAvatar.vue'
 import {
@@ -12,6 +12,7 @@ import {
   type GroupModeration,
   type GroupMuteDuration,
 } from '../api/groups'
+import { ApiError, api, type Id } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import { initialsOf, toneOf } from '../utils/present'
 
@@ -37,6 +38,9 @@ const notice = ref('')
 const confirmDisband = ref(false)
 const confirmLeave = ref(false)
 const pending = ref('')
+/** 已是好友 / 好友申请已发出的成员，用于把「添加好友」图标换成状态。 */
+const friendIds = ref<Set<string>>(new Set())
+const requestedIds = ref<Set<string>>(new Set())
 
 let noticeTimer: number | undefined
 let pendingTimer: number | undefined
@@ -58,7 +62,7 @@ const MUTE_OPTIONS: { value: GroupMuteDuration; label: string }[] = [
 function flash(msg: string) {
   notice.value = msg
   window.clearTimeout(noticeTimer)
-  noticeTimer = window.setTimeout(() => (notice.value = ''), 2200)
+  noticeTimer = window.setTimeout(() => (notice.value = ''), 2400)
 }
 
 /** 首屏加载才显示整页 loading；操作后的刷新走静默模式，避免整个弹窗闪一下。 */
@@ -193,8 +197,57 @@ const canGrantAdmin = (member: GroupMemberProfile) =>
   isOwner.value && member.userId !== myId.value && member.role !== 'OWNER'
 const canTransfer = (member: GroupMemberProfile) =>
   isOwner.value && member.userId !== myId.value && member.role !== 'OWNER'
-const hasActions = (member: GroupMemberProfile) =>
-  canMute(member) || canGrantAdmin(member) || canKick(member)
+
+const isSelf = (member: GroupMemberProfile) => String(member.userId) === myId.value
+const isFriend = (member: GroupMemberProfile) => friendIds.value.has(String(member.userId))
+const friendRequested = (member: GroupMemberProfile) =>
+  requestedIds.value.has(String(member.userId))
+
+/** 好友列表只用于渲染图标状态，取不到也不影响群管理。 */
+async function loadFriends() {
+  try {
+    const list = await api.get<{ friendId: Id }[]>('/friends')
+    friendIds.value = new Set((list ?? []).map((item) => String(item.friendId)))
+  } catch {
+    /* 忽略：图标退化为「添加好友」 */
+  }
+}
+
+/** 群成员里的加好友入口，复用通讯录的申请逻辑，不改变群内关系。 */
+async function addFriend(member: GroupMemberProfile) {
+  const id = String(member.userId)
+  if (isSelf(member) || isFriend(member) || friendRequested(member) || busy.value) return
+  busy.value = `friend-${id}`
+  error.value = ''
+  try {
+    const result = await api.post<{ status?: string }>('/friends/requests', {
+      toUserId: member.userId,
+    })
+    if (result?.status === 'ACCEPTED') {
+      friendIds.value = new Set(friendIds.value).add(id)
+      flash(`你和 ${member.nickname} 已成为好友`)
+    } else {
+      requestedIds.value = new Set(requestedIds.value).add(id)
+      flash(`已向 ${member.nickname} 发送好友申请`)
+    }
+  } catch (e) {
+    if (e instanceof ApiError && e.code === 40905) {
+      friendIds.value = new Set(friendIds.value).add(id)
+      flash('你们已经是好友')
+    } else if (e instanceof ApiError && e.code === 40904) {
+      requestedIds.value = new Set(requestedIds.value).add(id)
+      flash('好友申请已发送，等待对方处理')
+    } else if (e instanceof ApiError && e.code === 40305) {
+      error.value = '对方已拒收消息，暂时无法添加'
+    } else if (e instanceof Error && /rejects friend requests/i.test(e.message)) {
+      error.value = `${member.nickname} 不接受好友申请`
+    } else {
+      error.value = e instanceof Error ? e.message : '发送好友申请失败'
+    }
+  } finally {
+    busy.value = ''
+  }
+}
 
 async function leave() {
   if (isOwner.value) {
@@ -248,12 +301,15 @@ watch(
     notice.value = ''
     if (open) {
       load()
+      loadFriends()
     } else {
       detail.value = null
       moderation.value = null
       members.value = []
       name.value = ''
       announcement.value = ''
+      friendIds.value = new Set()
+      requestedIds.value = new Set()
     }
   },
 )
@@ -287,7 +343,6 @@ onBeforeUnmount(() => {
 
         <div v-else class="dialog-body">
           <p v-if="error" class="dialog-error">{{ error }}</p>
-          <p v-if="notice" class="dialog-notice">{{ notice }}</p>
 
           <!-- 群名称 -->
           <section class="block">
@@ -358,7 +413,7 @@ onBeforeUnmount(() => {
                     {{ m.nickname }}
                     <span v-if="m.role === 'OWNER'" class="tag owner">群主</span>
                     <span v-else-if="m.role === 'ADMIN'" class="tag admin">管理员</span>
-                    <span v-if="m.userId === myId" class="tag me">我</span>
+                    <span v-if="isSelf(m)" class="tag me">我</span>
                   </span>
                   <span class="member-sub">
                     <template v-if="pending === `kick-${m.userId}`">再点一次确认移出</template>
@@ -373,7 +428,38 @@ onBeforeUnmount(() => {
                   {{ mutedLabel(m) }}
                 </span>
 
-                <div v-if="hasActions(m)" class="member-actions">
+                <div class="member-actions">
+                  <button
+                    v-if="isFriend(m)"
+                    class="icon-mini friend"
+                    title="已是好友"
+                    disabled
+                  >
+                    <UserCheck :size="13" :stroke-width="2" />
+                  </button>
+                  <button
+                    v-else-if="friendRequested(m)"
+                    class="icon-mini pending"
+                    title="好友申请等待对方通过"
+                    disabled
+                  >
+                    <Clock :size="13" :stroke-width="2" />
+                  </button>
+                  <button
+                    v-else-if="!isSelf(m)"
+                    class="icon-mini"
+                    title="添加好友"
+                    :disabled="Boolean(busy)"
+                    @click="addFriend(m)"
+                  >
+                    <Loader2
+                      v-if="busy === `friend-${m.userId}`"
+                      :size="13"
+                      class="spin"
+                    />
+                    <UserPlus v-else :size="13" :stroke-width="2" />
+                  </button>
+
                   <select
                     v-if="canMute(m)"
                     class="mini-select"
@@ -451,6 +537,14 @@ onBeforeUnmount(() => {
           </section>
         </div>
       </div>
+
+      <!-- 操作反馈：顶部悬浮小提示，不占正文空间、不把内容顶下去 -->
+      <Transition name="toast">
+        <div v-if="notice" class="toast" role="status" aria-live="polite">
+          <Check :size="13" :stroke-width="2.6" />
+          {{ notice }}
+        </div>
+      </Transition>
     </div>
   </Transition>
 </template>
@@ -478,7 +572,28 @@ onBeforeUnmount(() => {
 .dialog-loading { display: flex; align-items: center; gap: 8px; justify-content: center; padding: 50px; font-size: 12.5px; color: var(--ink-3); }
 .dialog-body { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 16px; }
 .dialog-error { margin: 0; padding: 7px 10px; border-radius: var(--r-sm); background: var(--danger-soft); color: var(--danger); font-size: 11.5px; }
-.dialog-notice { margin: 0; padding: 7px 10px; border-radius: var(--r-sm); background: var(--accent-soft); color: var(--accent-ink); font-size: 11.5px; }
+.toast {
+  position: fixed; top: 18px; left: 50%;
+  z-index: 2;
+  display: inline-flex; align-items: center; gap: 6px;
+  max-width: min(420px, 82vw);
+  padding: 8px 15px;
+  border-radius: var(--r-full);
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  border: 1px solid var(--line);
+  box-shadow: var(--frame-ring), var(--shadow-md);
+  backdrop-filter: blur(10px);
+  font-size: 12px; font-weight: 560; color: var(--ink);
+  pointer-events: none;
+  transform: translateX(-50%);
+}
+.toast svg { color: var(--accent-ink); flex: none; }
+.toast-enter-active { transition: opacity 180ms var(--ease-out), transform 300ms var(--ease-spring); }
+.toast-leave-active { transition: opacity 220ms var(--ease-out), transform 180ms var(--ease-out); }
+.toast-enter-from, .toast-leave-to {
+  opacity: 0;
+  transform: translateX(-50%) translateY(-10px) scale(0.94);
+}
 .block { display: flex; flex-direction: column; gap: 7px; }
 .block.row-between { flex-direction: row; align-items: center; justify-content: space-between; gap: 12px; }
 .block-label { display: flex; align-items: center; gap: 5px; font-size: 10px; font-weight: 660; letter-spacing: 0.09em; text-transform: uppercase; color: var(--ink-3); }
@@ -514,6 +629,8 @@ onBeforeUnmount(() => {
 .icon-mini.danger:hover:not(:disabled), .icon-mini.armed { background: var(--danger-soft); color: var(--danger); }
 .icon-mini.armed { animation: pulse-armed 1s ease-in-out infinite; }
 .icon-mini:disabled { opacity: 0.35; cursor: not-allowed; }
+.icon-mini.friend:disabled { opacity: 1; color: var(--accent-ink); background: var(--accent-soft); cursor: default; }
+.icon-mini.pending:disabled { opacity: 0.8; color: var(--ink-3); cursor: default; }
 .danger-zone { border-top: 1px solid var(--line); padding-top: 12px; }
 .danger-hint { display: flex; align-items: center; flex-wrap: wrap; gap: 3px; margin: 0; font-size: 11px; line-height: 1.6; color: var(--ink-3); }
 .danger-hint-icon { color: var(--accent-ink); }
