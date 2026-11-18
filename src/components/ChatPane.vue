@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type ObjectDirective } from 'vue'
 import { useToast } from '../composables/useToast'
 import { useMessageActions } from '../composables/useMessageActions'
+import { useMessageLocator } from '../composables/useMessageLocator'
 import {
   Search,
   Phone,
@@ -85,6 +86,12 @@ function insertMention(nickname: string) {
 const scroller = ref<HTMLElement | null>(null)
 /** 是否贴住底部。用户主动往上翻历史时不打断；切会话/自己发消息时强制回到底部。 */
 const stickToBottom = ref(true)
+let scrollEpoch = 0
+const focusMessage = useMessageLocator(() => scroller.value, () => {
+  ++scrollEpoch
+  stickToBottom.value = false
+})
+defineExpose({ focusMessage })
 const attachmentInput = ref<HTMLInputElement | null>(null)
 const imageInput = ref<HTMLInputElement | null>(null)
 const canSend = computed(() => draft.value.trim().length > 0)
@@ -339,10 +346,12 @@ function rememberScroll(conversationId?: string | null) {
 }
 
 function restoreScroll(conversationId: string) {
+  const epoch = ++scrollEpoch
   const saved = scrollMemory.get(conversationId)
   stickToBottom.value = saved ? saved.stick : true
   const target = saved && !saved.stick ? saved.top : null
   nextTick(() => {
+    if (epoch !== scrollEpoch) return
     const el = scroller.value
     if (!el) return
     if (target == null) {
@@ -355,7 +364,9 @@ function restoreScroll(conversationId: string) {
 
 function scrollToBottom(force = false) {
   if (!force && !stickToBottom.value) return
+  const epoch = scrollEpoch
   nextTick(() => {
+    if (epoch !== scrollEpoch || (!force && !stickToBottom.value)) return
     const el = scroller.value
     if (!el) return
     el.scrollTop = el.scrollHeight

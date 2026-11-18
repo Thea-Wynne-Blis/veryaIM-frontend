@@ -3,7 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { messageOf } from '../utils/error'
 import {
   LogOut, Save, Shield, Smartphone, Loader2, Trash2, User, Languages,
-  MapPin, PenLine, Moon, Sun,
+  MapPin, PenLine, Moon, Sun, Star, ChevronRight,
 } from 'lucide-vue-next'
 import AppAvatar from './AppAvatar.vue'
 import {
@@ -17,6 +17,9 @@ import { useChatStore } from '../stores/chat'
 import { useTranslatePrefs } from '../composables/useTranslatePrefs'
 import { useTheme } from '../composables/useTheme'
 import { initialsOf, relativeTime } from '../utils/present'
+
+withDefaults(defineProps<{ showFavorites?: boolean }>(), { showFavorites: false })
+const emit = defineEmits<{ (e: 'favorites'): void }>()
 
 const auth = useAuthStore()
 const chat = useChatStore()
@@ -200,6 +203,8 @@ onMounted(load)
             </div>
           </div>
 
+          <button v-if="showFavorites" class="me-favorites" @click="emit('favorites')"><Star :size="19" /><span>我的收藏</span><ChevronRight :size="18" /></button>
+
           <div class="me-card spot" @pointermove="spot">
             <p class="card-label"><User :size="11" :stroke-width="2.4" /> 个人资料</p>
             <label class="field">
@@ -379,6 +384,10 @@ onMounted(load)
 </template>
 
 <style scoped>
+.me-favorites { display: flex; align-items: center; gap: 12px; min-height: 58px; padding: 0 16px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); text-align: left; font-size: 15px; }
+.me-favorites > svg:first-child { color: var(--accent); }
+.me-favorites > span { flex: 1; }
+.me-favorites > svg:last-child { color: var(--ink-3); }
 .me { height: 100%; min-height: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--canvas); }
 .me-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .me-inner { max-width: 560px; margin: 0 auto; padding: 26px 20px 40px; display: flex; flex-direction: column; gap: 14px; }

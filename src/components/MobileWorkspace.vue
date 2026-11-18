@@ -26,6 +26,7 @@ import {
   MoreHorizontal,
   Pin,
   BellOff,
+  Star,
 } from 'lucide-vue-next'
 import AppAvatar from './AppAvatar.vue'
 import ContactsView from './ContactsView.vue'
@@ -33,6 +34,8 @@ import FilesView from './FilesView.vue'
 import MeView from './MeView.vue'
 import MessageAttachment from './MessageAttachment.vue'
 import DetailPanel from './DetailPanel.vue'
+import FavoritesView from './FavoritesView.vue'
+import { useMessageLocator } from '../composables/useMessageLocator'
 import { useTranslatePrefs } from '../composables/useTranslatePrefs'
 import { useChatStore } from '../stores/chat'
 import type { ChatMessage, Conversation } from '../types/chat'
@@ -48,6 +51,8 @@ const props = defineProps<{
   me?: string
   error?: string | null
   loading?: boolean
+  initialView?: string
+  locateFavoriteMessage: (conversationId: string, messageId: string, signal?: AbortSignal) => Promise<void>
 }>()
 
 const emit = defineEmits<{
@@ -55,6 +60,7 @@ const emit = defineEmits<{
   (e: 'send', payload: { conversationId: string; text: string; reply?: ReplyRef }): void
   (e: 'attach', payload: { conversationId: string; file: File }): void
   (e: 'forward', message: ChatMessage): void
+  (e: 'favorite', message: ChatMessage): void
   (e: 'close'): void
   (e: 'new-chat'): void
   (e: 'open-search'): void
@@ -68,12 +74,12 @@ const emit = defineEmits<{
 
 const chat = useChatStore()
 
-type Tab = 'chat' | 'contacts' | 'files' | 'me'
+type Tab = 'chat' | 'contacts' | 'files' | 'favorites' | 'me'
 
 /** 支持 ?tab=files 直接落地到指定页，便于演示与截图。 */
 const initialTab = (() => {
-  const value = new URLSearchParams(window.location.search).get('tab')
-  return value === 'contacts' || value === 'files' || value === 'me'
+  const value = new URLSearchParams(window.location.search).get('tab') ?? props.initialView
+  return value === 'contacts' || value === 'files' || value === 'me' || value === 'favorites'
     ? (value as Tab)
     : 'chat'
 })()
@@ -95,6 +101,14 @@ const viewportHeight = ref(window.visualViewport?.height ?? window.innerHeight)
 const scroller = ref<HTMLElement | null>(null)
 const bodyScrolled = ref(false)
 const stickToBottom = ref(true)
+let scrollEpoch = 0
+const focusMessage = useMessageLocator(() => scroller.value, () => {
+  ++scrollEpoch
+  stickToBottom.value = false
+  infoOpen.value = false
+  emojiOpen.value = false
+})
+defineExpose({ focusMessage })
 const fileInput = ref<HTMLInputElement | null>(null)
 
 const tabs = [
@@ -182,6 +196,7 @@ const tabTitle = computed(
       chat: '消息',
       contacts: '通讯录',
       files: '文件',
+      favorites: '收藏',
       me: '我的',
     })[tab.value],
 )
@@ -227,7 +242,9 @@ function send() {
 
 function scrollBottom(force = false) {
   if (!force && !stickToBottom.value) return
+  const epoch = scrollEpoch
   nextTick(() => {
+    if (epoch !== scrollEpoch || (!force && !stickToBottom.value)) return
     const el = scroller.value
     if (!el) return
     el.scrollTop = el.scrollHeight
@@ -273,6 +290,7 @@ const vEnter: ObjectDirective<HTMLElement, { order?: number; skip?: boolean }> =
 watch(
   () => props.activeId,
   (id) => {
+    ++scrollEpoch
     infoOpen.value = false
     emojiOpen.value = false
     replyTo.value = null
@@ -348,7 +366,7 @@ function grouping(messages: ChatMessage[]) {
 type MenuState = { x: number; y: number; message: ChatMessage }
 
 const MENU_WIDTH = 176
-const MENU_HEIGHT = 244
+const MENU_HEIGHT = 288
 
 const menu = ref<MenuState | null>(null)
 const { message: notice, show: showNotice } = useToast()
@@ -363,6 +381,11 @@ function openMenuAt(x: number, y: number, message: ChatMessage) {
 
 function closeMenu() {
   menu.value = null
+}
+
+function favoriteMessage(message: ChatMessage) {
+  closeMenu()
+  emit('favorite', message)
 }
 
 /**
@@ -687,7 +710,8 @@ onMounted(() => {
       <FilesView v-else-if="tab === 'files'" class="m-embed" />
 
       <ContactsView v-else-if="tab === 'contacts'" class="m-embed" />
-      <MeView v-else class="m-embed" />
+      <FavoritesView v-else-if="tab === 'favorites'" class="m-embed" mobile :locate-message="locateFavoriteMessage" @back="tab = 'me'" />
+      <MeView v-else class="m-embed" show-favorites @favorites="tab = 'favorites'" />
     </div>
 
     <nav class="m-tabs" aria-label="主导航" :inert="!!current">
@@ -695,8 +719,8 @@ onMounted(() => {
         v-for="item in tabs"
         :key="item.key"
         class="m-tab"
-        :class="{ active: tab === item.key }"
-        :aria-current="tab === item.key ? 'page' : undefined"
+        :class="{ active: tab === item.key || (item.key === 'me' && tab === 'favorites') }"
+        :aria-current="tab === item.key || (item.key === 'me' && tab === 'favorites') ? 'page' : undefined"
         @click="tab = item.key; bodyScrolled = false; resetSwipe()"
       >
         <span class="m-tab-icon">
@@ -913,6 +937,7 @@ onMounted(() => {
           <Share2 :size="15" :stroke-width="1.9" />
           转发
         </button>
+        <button class="msg-menu-item" role="menuitem" :disabled="menu.message.recalled || menu.message.pending || !menu.message.messageId" @click="favoriteMessage(menu.message)"><Star :size="15" :stroke-width="1.9" />收藏</button>
         <button
           class="msg-menu-item"
           role="menuitem"

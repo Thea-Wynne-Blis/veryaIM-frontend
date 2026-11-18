@@ -121,7 +121,8 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   let response: Response
   try {
     response = await fetch(`${BASE}${path}`, { ...init, headers })
-  } catch {
+  } catch (error) {
+    if (init.signal?.aborted) throw error
     throw new ApiError(0, -1, '网络连接失败，请检查后端是否已启动')
   }
 
@@ -447,7 +448,7 @@ function putChunk(
 }
 
 export const api = {
-  get: <T>(path: string) => request<T>(path),
+  get: <T>(path: string, options?: { signal?: AbortSignal }) => request<T>(path, options),
   post: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: 'POST', body: JSON.stringify(body ?? {}) }),
   put: <T>(path: string, body?: unknown) =>

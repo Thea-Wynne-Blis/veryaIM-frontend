@@ -24,7 +24,7 @@ import { useToast } from '../composables/useToast'
 import { useChatStore } from '../stores/chat'
 import { useAuthStore } from '../stores/auth'
 import type { Attachment, ChatMessage, Conversation } from '../types/chat'
-import { parseJson, sameId, api, type ConversationCard, type Id, type MessageView } from '../api/client'
+import { parseJson, sameId, api, ApiError, type ConversationCard, type Id, type MessageView, type MessagePage } from '../api/client'
 import { clockTime, conversationPreview, humanBytes, initialsOf, listTime, toneOf, toneOfConversation } from '../utils/present'
 
 const route = useRoute()
@@ -38,6 +38,9 @@ const detailOpen = ref(true)
 /** 全局搜索面板与详情面板共用右侧栏位，互斥显示。 */
 const searchOpen = ref(false)
 const historyConversation = ref<Conversation | null>(null)
+const chatPane = ref<InstanceType<typeof ChatPane> | null>(null)
+const mobileWorkspace = ref<InstanceType<typeof MobileWorkspace> | null>(null)
+let navigationVersion = 0
 const dialogOpen = ref(false)
 const createGroupOpen = ref(false)
 const manageOpen = ref(false)
@@ -264,10 +267,12 @@ function messagesOf(id: string): ChatMessage[] {
   return id === chat.activeId ? messages.value : []
 }
 
-async function select(id: string, updateRoute = true) {
+async function select(id: string, updateRoute = true, locationRequest?: number) {
+  const request = locationRequest ?? ++navigationVersion
   if (!chat.cards.some((card) => card.conversationId === id)) {
     await chat.loadCards()
   }
+  if (request !== navigationVersion) return
   // 路由监听与点击共用这个入口，先更新选中态以避免重复打开同一会话。
   chat.activeId = id
   if (updateRoute) {
@@ -277,6 +282,7 @@ async function select(id: string, updateRoute = true) {
       await router.replace({ name: 'conversation', params: { conversationId: id } })
     }
   }
+  if (request !== navigationVersion) return
   await chat.open(id)
   if (activeCard.value?.type === 'GROUP') {
     // 打开会话时强制刷新一次成员，避免面板沿用 30s TTL 内的旧在线状态。
@@ -285,8 +291,9 @@ async function select(id: string, updateRoute = true) {
 }
 
 async function closeMobileChat() {
+  ++navigationVersion
   if (!route.params.conversationId) { chat.activeId = null; return }
-  if (router.options.history.state.back === '/app/chat') router.back()
+  if (['/app/chat', '/app/favorites'].includes(String(router.options.history.state.back))) router.back()
   else await router.replace({ name: 'chat' })
 }
 
@@ -341,6 +348,7 @@ function openMySettings() {
 }
 
 function navigate(target: string) {
+  ++navigationVersion
   const map: Record<string, string> = {
     chat: '/app/chat',
     contacts: '/app/contacts',
@@ -395,24 +403,46 @@ function closeSearch() {
   searchOpen.value = false
 }
 
-/** 打开搜索结果：旧记录先补齐上下文，再滚动并高亮目标。 */
-async function openFromSearch(conversationId: string, messageId?: string) {
+/** 先验证原消息可访问，再切换页面；失败时保留收藏预览和搜索结果。 */
+async function locateConversationMessage(conversationId: string, messageId: string, signal?: AbortSignal) {
+  const request = ++navigationVersion
+  const context = await api.get<MessagePage>(
+    `/conversations/${conversationId}/messages/${messageId}/context`, { signal },
+  )
+  signal?.throwIfAborted()
+  if (request !== navigationVersion) return
+  if (!chat.cards.some(card => card.conversationId === conversationId)) await chat.loadCards()
+  signal?.throwIfAborted()
+  if (request !== navigationVersion) return
+  if (!chat.cards.some(card => card.conversationId === conversationId)) throw new Error('来源会话暂不可用，请稍后重试。')
+  if ((chat.hiddenIds[conversationId] ?? []).includes(messageId)) throw new Error('这条消息已在本机删除')
   searchOpen.value = false
   historyConversation.value = null
-  try {
-    await select(conversationId)
-    if (!messageId || chat.activeId !== conversationId) return
-    if (!(chat.messages[conversationId] ?? []).some(message => String(message.messageId) === messageId)) {
-      await chat.loadMessageContext(conversationId, messageId)
+  await select(conversationId, true, request)
+  if (request !== navigationVersion || chat.activeId !== conversationId) return
+  chat.applyMessageContext(conversationId, context.messages)
+  await nextTick()
+  const pane = isMobile.value ? mobileWorkspace.value : chatPane.value
+  if (!await pane?.focusMessage(messageId)) throw new Error('这条消息暂不可见，请稍后重试')
+}
+
+async function openFavoriteMessage(conversationId: string, messageId: string, signal?: AbortSignal) {
+  try { await locateConversationMessage(conversationId, messageId, signal) }
+  catch (e) {
+    if (e instanceof ApiError && (e.status === 403 || e.status === 404)) {
+      throw new Error(e.status === 403 ? '原会话已不可访问，收藏内容仍可查看。'
+        : '原消息已撤回、清空或不可访问，收藏内容仍可查看。')
     }
-    if (chat.activeId !== conversationId) return
-    await nextTick()
-    await new Promise<void>(resolve => window.requestAnimationFrame(() => resolve()))
-    const el = document.querySelector<HTMLElement>(`[data-mid="${CSS.escape(messageId)}"]`)
-    if (!el) { showToast('这条消息已删除或暂不可见'); return }
-    el.scrollIntoView({ block: 'center', behavior: 'smooth' })
-    el.classList.add('flash')
-    window.setTimeout(() => el.classList.remove('flash'), 1600)
+    if (e instanceof Error && e.message === '这条消息已在本机删除') throw new Error(`${e.message}，收藏内容仍可查看。`)
+    throw e
+  }
+}
+
+/** 全局搜索和聊天内搜索复用相同的定位流程。 */
+async function openFromSearch(conversationId: string, messageId?: string) {
+  try {
+    if (messageId) await locateConversationMessage(conversationId, messageId)
+    else { searchOpen.value = false; historyConversation.value = null; await select(conversationId) }
   } catch (e) {
     showToast(messageOf(e, '定位消息失败，请重试'))
   }
@@ -444,7 +474,7 @@ async function onFavorite(message: ChatMessage) {
       // messageId 是字符串（雪花 ID 超过 2^53），直接透传，别用 Number 丢精度。
       messageId: message.messageId,
     })
-    showToast('已收藏，可在左侧「收藏」里查看')
+    showToast(isMobile.value ? '已收藏，可在“我的 → 我的收藏”中查看' : '已收藏，可在左侧“收藏”里查看')
   } catch (e) {
     showToast(messageOf(e, '收藏失败'))
   }
@@ -543,7 +573,7 @@ onMounted(async () => {
   if (view.value === 'chat') {
     const fromRoute = route.params.conversationId as string | undefined
     const first = fromRoute ?? (isMobile.value ? null : chat.visibleCards[0]?.conversationId ?? null)
-    if (first) await select(first, false)
+    if (first && first !== chat.activeId) await select(first, false)
   }
   chat.startPolling(3000)
   chat.startRealtime()
@@ -561,10 +591,13 @@ onBeforeUnmount(() => {
 <template>
   <MobileWorkspace
     v-if="isMobile"
+    ref="mobileWorkspace"
+    :initial-view="view"
+    :locate-favorite-message="openFavoriteMessage"
     :conversations="conversations"
     :active-conversation="activeHiddenConversation"
     :messages-of="messagesOf"
-    :active-id="chat.activeId"
+    :active-id="view === 'chat' ? chat.activeId : null"
     :me="auth.user?.nickname ?? '我'"
     :error="chat.error"
     :loading="chat.loadingMessages"
@@ -574,6 +607,7 @@ onBeforeUnmount(() => {
     @send="(payload) => send(payload.conversationId, payload.text, payload.reply)"
     @attach="(payload) => attach(payload.conversationId, payload.file)"
     @forward="onForward"
+    @favorite="onFavorite"
     @new-chat="dialogOpen = true"
     @open-search="openConversationSearch"
     @global-search="openSearch"
@@ -611,6 +645,7 @@ onBeforeUnmount(() => {
       />
 
       <ChatPane
+        ref="chatPane"
         :conversation="activeConversation"
         :messages="messages"
         :detail-open="detailOpen"
@@ -657,7 +692,7 @@ onBeforeUnmount(() => {
       />
       <ContactsView v-if="view === 'contacts'" />
       <FilesView v-else-if="view === 'files'" />
-      <FavoritesView v-else-if="view === 'favorites'" @open-conversation="openFromSearch" />
+      <FavoritesView v-else-if="view === 'favorites'" :locate-message="openFavoriteMessage" />
       <MeView v-else />
     </div>
   </div>

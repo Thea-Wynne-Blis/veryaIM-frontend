@@ -593,8 +593,12 @@ export const useChatStore = defineStore('chat', {
       const page = await api.get<MessagePage>(
         `/conversations/${conversationId}/messages/${messageId}/context`,
       )
+      this.applyMessageContext(conversationId, page.messages)
+    },
+
+    applyMessageContext(conversationId: string, messages: MessageView[]) {
       this.messages[conversationId] = dedupe([
-        ...(this.messages[conversationId] ?? []), ...page.messages.map(normalize),
+        ...messages.map(normalize), ...(this.messages[conversationId] ?? []),
       ])
     },
 
