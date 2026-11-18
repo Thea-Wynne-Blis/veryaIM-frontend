@@ -2,10 +2,8 @@ import { nextTick, ref } from 'vue'
 import { translateText } from '../api/client'
 import type { ChatMessage } from '../types/chat'
 import { messageOf } from '../utils/error'
+import { canRecallAt, copyTextOf, midOf, quotePreviewOf } from '../utils/message'
 import { useTranslatePrefs } from './useTranslatePrefs'
-
-/** 与后端一致：发送后 2 分钟内可撤回。 */
-export const RECALL_WINDOW_MS = 2 * 60 * 1000
 
 export type ReplyDraft = { messageId: string; senderId: string; author: string; preview: string }
 
@@ -45,10 +43,6 @@ export function useMessageActions(options: MessageActionsOptions) {
   const translations = ref<Record<string, { text: string; to: string }>>({})
   const translatingId = ref<string | null>(null)
 
-  function midOf(message: ChatMessage): string {
-    return String(message.messageId ?? message.id)
-  }
-
   /* ---------- 复制 ---------- */
   async function copyText(text: string): Promise<boolean> {
     try {
@@ -73,15 +67,6 @@ export function useMessageActions(options: MessageActionsOptions) {
     }
   }
 
-  function copyTextOf(message: ChatMessage): string {
-    if (message.recalled) return ''
-    if (message.attachment) {
-      const { name, size } = message.attachment
-      return size ? `${name} (${size})` : name
-    }
-    return message.text
-  }
-
   async function copyMessage(message: ChatMessage) {
     options.closeMenu()
     const text = copyTextOf(message)
@@ -94,9 +79,7 @@ export function useMessageActions(options: MessageActionsOptions) {
 
   /* ---------- 撤回 / 删除 ---------- */
   function canRecall(message: ChatMessage): boolean {
-    if (!message.mine || message.recalled || message.pending) return false
-    const createdAt = message.createdAt ? new Date(message.createdAt).getTime() : 0
-    return !!createdAt && Date.now() - createdAt <= RECALL_WINDOW_MS
+    return canRecallAt(message)
   }
 
   async function deleteMessage(message: ChatMessage) {
@@ -122,21 +105,6 @@ export function useMessageActions(options: MessageActionsOptions) {
   }
 
   /* ---------- 引用 ---------- */
-  /** 引用快照：文本截断、附件转成占位词，与后端 replyPreview 保持一致。 */
-  function quotePreviewOf(message: ChatMessage): string {
-    if (message.recalled) return '消息已撤回'
-    if (message.attachment) {
-      const kind = message.attachment.kind
-      if (kind === 'image') return '[图片]'
-      if (kind === 'video') return '[视频]'
-      if (kind === 'audio') return '[语音]'
-      return '[文件]'
-    }
-    const text = message.text.replace(/\s+/g, ' ').trim()
-    if (!text) return '消息'
-    return text.length <= 120 ? text : `${text.slice(0, 120)}…`
-  }
-
   function canQuote(message: ChatMessage): boolean {
     return !message.recalled && !message.pending
   }

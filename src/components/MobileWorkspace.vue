@@ -1,4 +1,4 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch, type ObjectDirective } from 'vue'
 import { useToast } from '../composables/useToast'
 import { useMessageActions } from '../composables/useMessageActions'
@@ -441,7 +441,8 @@ function onConvPointerEnd() {
   track = null
   if (!active) return
   draggingId.value = null
-  dragOffset.value <= -SWIPE_TRIGGER_PX ? (swipeId.value = id) : resetSwipe()
+  if (dragOffset.value <= -SWIPE_TRIGGER_PX) swipeId.value = id
+  else resetSwipe()
   dragOffset.value = 0
 }
 

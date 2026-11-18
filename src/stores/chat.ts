@@ -1,14 +1,9 @@
-import { messageOf } from '../utils/error'
 import { defineStore } from 'pinia'
 import {
-  ApiError,
   api,
   clearConversation,
-  getToken,
   sameId,
-  seedFilePreview,
   updateConversationPrefs,
-  uploadFile,
   type ConversationCard,
   type Id,
   type MessagePage,
@@ -17,148 +12,40 @@ import {
   type UserProfile,
 } from '../api/client'
 import { groupsApi } from '../api/groups'
-import { RealtimeClient, type RealtimeFrame } from '../api/realtime'
-import { audioDurationOf, imageSizeOf, mediaKindOf, videoMetaOf } from '../utils/media'
+import type { RealtimeFrame } from '../api/realtime'
+import { messageOf } from '../utils/error'
 import { useAuthStore } from './auth'
+import {
+  MEMBERS_TTL_MS,
+  PAGE_SIZE,
+  PREFS_KEY,
+  dedupe,
+  loadPrefs,
+  normalize,
+  type ChatMember,
+  type RealtimePayload,
+  type State,
+  type UploadTask,
+} from './chat/helpers'
+import {
+  applyMessage,
+  handleFrame,
+  markReadThrottled,
+  scheduleRefresh,
+  startPolling,
+  startRealtime,
+  stopPolling,
+  stopRealtime,
+} from './chat/realtime'
+import {
+  cancelUpload,
+  dropUpload,
+  resetUploads,
+  sendAttachment,
+} from './chat/upload'
 
-const PAGE_SIZE = 60
-const PREFS_KEY = 'veryal.chatPrefs'
-const REALTIME_HEALTHY_MS = 45_000
-const BACKGROUND_SYNC_MS = 60_000
-const REALTIME_COALESCE_MS = 120
-const MARK_READ_THROTTLE_MS = 1000
-/** 成员列表缓存时长：在线状态靠它保持新鲜，同时避免频繁重拉。 */
-const MEMBERS_TTL_MS = 30_000
-
-let realtimeClient: RealtimeClient | null = null
-let visibilityHandler: (() => void) | null = null
-const realtimeCoalesceTimers = new Map<string, number>()
-const lastMarkReadAt = new Map<string, number>()
-
-type RealtimePayload = {
-  kind?: string
-  conversationId?: string
-  messageId?: string | null
-  seq?: number
-  senderId?: string
-  clientMsgId?: string | null
-  messageType?: string | null
-  content?: string | null
-  contentEncoding?: string | null
-  createdAt?: string | null
-  replyToId?: string | null
-  replySenderId?: string | null
-  replyPreview?: string | null
-}
-
-function previewOf(payload: RealtimePayload): string {
-  if (payload.messageType === 'IMAGE') return '[图片]'
-  if (payload.messageType === 'VIDEO') return '[视频]'
-  if (payload.messageType === 'AUDIO') return '[语音]'
-  if (payload.messageType === 'FILE') return '[文件]'
-  return payload.content ?? ''
-}
-
-export type ChatMember = {
-  userId: Id
-  nickname: string
-  avatar?: string | null
-  online?: boolean
-  role?: string
-}
-
-/** 上传统计：准备 / 上传 / 发送，供输入区渲染进度条。 */
-export type UploadTask = {
-  id: string
-  conversationId: string
-  name: string
-  sizeBytes: number
-  /** 0~1 的字节传输进度 */
-  progress: number
-  /** prepare：客户端生成封面/读时长；upload：传输字节；send：等服务端确认 */
-  phase: 'prepare' | 'upload' | 'send'
-  /** 附件类型，决定进度条缩略图与提示文案 */
-  kind?: 'image' | 'gif' | 'video' | 'audio' | 'file'
-  /** 图片/视频封面本地预览（object URL，任务结束时 revoke） */
-  previewUrl?: string
-  width?: number
-  height?: number
-  /** 视频/音频时长（秒） */
-  duration?: number
-}
-
-/** AbortController 不能进 Pinia state，放模块级 Map。 */
-const uploadControllers = new Map<string, AbortController>()
-
-/** 超过这个大小的图片不再把本地预览塞进缓存，避免几十张原图把内存顶爆。 */
-const SEED_PREVIEW_MAX_BYTES = 3 * 1024 * 1024
-
-/** `a/b.mp4` → `a/b`（封面文件命名用）。 */
-function baseNameOf(name: string): string {
-  const slash = name.lastIndexOf('/')
-  const base = slash >= 0 ? name.slice(slash + 1) : name
-  const dot = base.lastIndexOf('.')
-  return dot > 0 ? base.slice(0, dot) : base
-}
-
-type Prefs = { pinned: string[]; muted: string[]; hidden: Record<string, string[]> }
-
-function loadPrefs(): Prefs {
-  try {
-    const raw = localStorage.getItem(PREFS_KEY)
-    if (!raw) return { pinned: [], muted: [], hidden: {} }
-    const parsed = JSON.parse(raw) as Partial<Prefs>
-    return {
-      pinned: Array.isArray(parsed.pinned) ? parsed.pinned : [],
-      muted: Array.isArray(parsed.muted) ? parsed.muted : [],
-      hidden:
-        parsed.hidden && typeof parsed.hidden === 'object' && !Array.isArray(parsed.hidden)
-          ? parsed.hidden
-          : {},
-    }
-  } catch {
-    return { pinned: [], muted: [], hidden: {} }
-  }
-}
-
-type State = {
-  cards: ConversationCard[]
-  messages: Record<string, MessageView[]>
-  receipts: Record<string, Record<string, number>>
-  members: Record<string, ChatMember[]>
-  /** 成员列表的加载时间，用于给在线状态设一个短 TTL。 */
-  membersLoadedAt: Record<string, number>
-  activeId: string | null
-  loadingCards: boolean
-  loadingMessages: boolean
-  error: string | null
-  pollTimer: number | null
-  pollingBusy: boolean
-  realtimeConnected: boolean
-  realtimeLastPing: number
-  lastSync: number
-  pinnedIds: string[]
-  mutedIds: string[]
-  /** 仅本机删除（服务端无删除接口），按会话记录被隐藏的消息 id */
-  hiddenIds: Record<string, string[]>
-  /** 正在上传/发送的附件任务 */
-  uploads: UploadTask[]
-}
-
-/** 后端字段名是 sequence，前端统一用 seq */
-function normalize(raw: MessageView & { sequence?: number }): MessageView {
-  return { ...raw, seq: raw.seq ?? raw.sequence ?? 0 }
-}
-
-function dedupe(list: MessageView[]): MessageView[] {
-  const seen = new Set<string>()
-  return list
-    .filter((item) => {
-      const key = String(item.messageId)
-      return seen.has(key) ? false : (seen.add(key), true)
-    })
-    .sort((a, b) => a.seq - b.seq)
-}
+// 组件一直从 store 入口导入这两个类型，保持原路径不变。
+export type { ChatMember, UploadTask }
 
 export const useChatStore = defineStore('chat', {
   state: (): State => {
@@ -667,162 +554,19 @@ export const useChatStore = defineStore('chat', {
       return resp
     },
 
-    /**
-     * 上传附件并以对应消息类型发送：图片 / GIF → IMAGE，视频 → VIDEO，
-     * 音频 → AUDIO，其余 → FILE。
-     *
-     * <p>上传走 XHR 以回报字节进度（fetch 没有上传进度事件），超过 8MB 自动分片；
-     * 任务同时写进 `uploads`，由输入区渲染细线进度条，可中途取消。</p>
-     *
-     * <p>视频的宽高、时长与封面全部在客户端生成：服务端没有 ffmpeg。
-     * 封面作为独立图片文件上传，通过 {@code coverFileId} 挂在视频消息上。</p>
-     */
-    async sendAttachment(file: File) {
-      const conversationId = this.activeId
-      if (!conversationId) throw new Error('没有选中的会话')
-      this.error = null
-
-      const kind = await mediaKindOf(file)
-      const isImage = kind === 'image' || kind === 'gif'
-      const taskId = `u-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
-      const controller = new AbortController()
-      uploadControllers.set(taskId, controller)
-
-      const task: UploadTask = {
-        id: taskId,
-        conversationId,
-        name: file.name,
-        sizeBytes: file.size,
-        progress: 0,
-        phase: kind === 'video' ? 'prepare' : 'upload',
-        kind,
-        previewUrl: isImage ? URL.createObjectURL(file) : undefined,
-      }
-      this.uploads.push(task)
-      // 从 state 里取回响应式代理，否则直接改进度不会触发视图更新
-      const live = this.uploads[this.uploads.length - 1]!
-
-      let width: number | undefined
-      let height: number | undefined
-      let duration = 0
-      let coverFileId: Id | undefined
-
-      try {
-        if (isImage) {
-          const size = await imageSizeOf(file)
-          if (size) {
-            width = size.width
-            height = size.height
-            live.width = width
-            live.height = height
-          }
-        } else if (kind === 'video') {
-          const meta = await videoMetaOf(file)
-          if (meta) {
-            width = meta.width || undefined
-            height = meta.height || undefined
-            duration = meta.duration
-            live.width = width
-            live.height = height
-            live.duration = duration
-          }
-          if (meta?.poster) {
-            live.previewUrl = URL.createObjectURL(meta.poster)
-            try {
-              const cover = await uploadFile(
-                new File([meta.poster], `${baseNameOf(file.name)}-cover.jpg`,
-                  { type: 'image/jpeg' }),
-                conversationId,
-                { signal: controller.signal },
-              )
-              coverFileId = cover.fileId
-              // 封面已经在本机，直接塞进缓存，气泡不必再回源
-              seedFilePreview(cover.fileId, URL.createObjectURL(meta.poster))
-            } catch (e) {
-              if (e instanceof ApiError && e.code === -2) throw e
-              // 封面失败不影响视频本身，气泡会回退到深色占位
-            }
-          }
-          live.phase = 'upload'
-        } else if (kind === 'audio') {
-          duration = await audioDurationOf(file)
-          live.duration = duration
-        }
-
-        const uploaded = await uploadFile(file, conversationId, {
-          signal: controller.signal,
-          onProgress: (ratio) => {
-            live.progress = ratio
-          },
-        })
-
-        const payload: Record<string, unknown> = {
-          fileId: uploaded.fileId,
-          fileName: uploaded.name || file.name,
-          sizeBytes: uploaded.sizeBytes,
-          contentType: uploaded.contentType || file.type,
-        }
-        if (width && height) {
-          payload.width = width
-          payload.height = height
-        }
-        if (duration > 0) {
-          payload.durationSeconds = Math.max(1, Math.round(duration))
-        }
-        if (coverFileId) {
-          payload.coverFileId = coverFileId
-        }
-
-        live.phase = 'send'
-        live.progress = 1
-        // 自己刚传的图片：把本地预览塞进缓存，气泡立即显示，不必等服务端缩略图
-        if (isImage && live.previewUrl && file.size <= SEED_PREVIEW_MAX_BYTES) {
-          seedFilePreview(uploaded.fileId, live.previewUrl)
-          live.previewUrl = undefined
-        }
-
-        const type = kind === 'video'
-          ? 'VIDEO'
-          : kind === 'audio'
-            ? 'AUDIO'
-            : isImage
-              ? 'IMAGE'
-              : 'FILE'
-        const preview = kind === 'video'
-          ? '[视频]'
-          : kind === 'audio'
-            ? '[语音]'
-            : isImage
-              ? '[图片]'
-              : `[文件] ${uploaded.name || file.name}`
-        return await this.sendRaw(type, JSON.stringify(payload), preview, conversationId)
-      } catch (e) {
-        // code -2 = 用户取消，不当作错误提示
-        const cancelled = e instanceof ApiError && e.code === -2
-        if (!cancelled) {
-          this.error = messageOf(e, '上传失败')
-        }
-        throw e
-      } finally {
-        uploadControllers.delete(taskId)
-        this.dropUpload(taskId)
-      }
+    /** 附件上传的实现在 ./chat/upload.ts，这里只做转发。 */
+    sendAttachment(file: File) {
+      return sendAttachment(this, file)
     },
 
-    /** 移除上传任务并释放本地预览 URL。 */
     dropUpload(taskId: string) {
-      const index = this.uploads.findIndex((item) => item.id === taskId)
-      if (index < 0) return
-      const [removed] = this.uploads.splice(index, 1)
-      if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl)
+      dropUpload(this, taskId)
     },
 
-    /** 取消上传/发送中的附件任务。 */
     cancelUpload(taskId: string) {
-      uploadControllers.get(taskId)?.abort()
-      uploadControllers.delete(taskId)
-      this.dropUpload(taskId)
+      cancelUpload(this, taskId)
     },
+
 
     async searchMessages(conversationId: string, keyword: string): Promise<MessageView[]> {
       const kw = keyword.trim()
@@ -857,220 +601,43 @@ export const useChatStore = defineStore('chat', {
       return created.conversationId
     },
 
-    /**
-     * 订阅 Netty WebSocket 实时事件：先 HTTP 换一次性 ticket，再建立长连接。
-     * 轮询保留为兜底（见 startPolling），长连接健康时降频为 60 秒一次全量同步。
-     */
+    /* 实时连接、推送落地与轮询的实现都在 ./chat/realtime.ts，动作签名保持不变。 */
     startRealtime() {
-      this.stopRealtime()
-      if (!getToken()) return
-
-      const client = new RealtimeClient({
-        onStateChange: (connected) => {
-          this.realtimeConnected = connected
-          // 刚连上实时通道时补拉一次成员：登录瞬间可能还没写在线状态。
-          if (connected && this.activeId) this.refreshMembersIfStale(this.activeId)
-        },
-        onError: () => {
-          /* 换票失败也会自动重试，不打断轮询兜底 */
-        },
-        onTerminated: () => {
-          // 服务端已终止会话（登出/封禁/设备下线）：回到登录页，不再重连。
-          this.stopRealtime()
-          window.dispatchEvent(new CustomEvent('veryal:unauthorized'))
-        },
-        onFrame: (frame) => this.handleRealtimeFrame(frame),
-      })
-      realtimeClient = client
-      client.start()
-
-      if (visibilityHandler) document.removeEventListener('visibilitychange', visibilityHandler)
-      visibilityHandler = () => {
-        if (document.visibilityState !== 'visible') return
-        void this.loadCards()
-        if (this.activeId) {
-          void this.refreshMessages(this.activeId)
-          this.refreshMembersIfStale(this.activeId)
-        }
-      }
-      document.addEventListener('visibilitychange', visibilityHandler)
+      startRealtime(this)
     },
 
     stopRealtime() {
-      if (visibilityHandler) {
-        document.removeEventListener('visibilitychange', visibilityHandler)
-        visibilityHandler = null
-      }
-      realtimeClient?.close()
-      realtimeClient = null
-      realtimeCoalesceTimers.forEach((timer) => window.clearTimeout(timer))
-      realtimeCoalesceTimers.clear()
-      lastMarkReadAt.clear()
-      this.realtimeConnected = false
+      stopRealtime(this)
     },
 
     handleRealtimeFrame(frame: RealtimeFrame) {
-      this.realtimeLastPing = Date.now()
-      if (frame.cmd !== 'message' || !frame.data) return
-      const payload = frame.data as RealtimePayload
-      const conversationId = payload.conversationId
-      if (!conversationId) return
-
-      // 大群只推游标：合并窗口内拉一次增量，避免每条事件一次请求
-      if (payload.kind === 'cursor' || !payload.messageId) {
-        this.scheduleRealtimeRefresh(conversationId)
-        return
-      }
-      this.applyRealtimeMessage(payload)
+      handleFrame(this, frame)
     },
 
-    /** 推送已带消息体：直接落地，不再回查消息接口。 */
     applyRealtimeMessage(payload: RealtimePayload) {
-      const conversationId = String(payload.conversationId)
-      const messageId = String(payload.messageId)
-      const clientMsgId = payload.clientMsgId ?? undefined
-      const mine = sameId(payload.senderId ?? '', this.myId)
-      const list = this.messages[conversationId] ?? (this.messages[conversationId] = [])
-      const existing = list.find(
-        (item) =>
-          sameId(item.messageId, messageId)
-          || (!!clientMsgId && item.clientMsgId === clientMsgId),
-      )
-      if (!existing) {
-        const view = normalize({
-          messageId,
-          conversationId,
-          senderId: payload.senderId ?? '',
-          clientMsgId,
-          seq: payload.seq ?? 0,
-          type: payload.messageType ?? 'TEXT',
-          content: payload.content ?? '',
-          contentEncoding: payload.contentEncoding ?? undefined,
-          createdAt: payload.createdAt ?? new Date().toISOString(),
-          replyToId: payload.replyToId ?? null,
-          replySenderId: payload.replySenderId ?? null,
-          replyPreview: payload.replyPreview ?? null,
-        })
-        list.push(view)
-        list.sort((a, b) => a.seq - b.seq)
-      } else if (existing.pending) {
-        // 推送先于发送响应到达：直接把乐观占位升级成服务端消息，
-        // 不要先删掉再插入，否则这条气泡会闪一下（节点重建会重播入场动画）。
-        existing.messageId = messageId
-        existing.seq = payload.seq ?? existing.seq
-        existing.senderId = payload.senderId ?? existing.senderId
-        existing.type = payload.messageType ?? existing.type
-        existing.content = payload.content ?? existing.content
-        existing.contentEncoding = payload.contentEncoding ?? existing.contentEncoding
-        existing.createdAt = payload.createdAt ?? existing.createdAt
-        existing.replyToId = payload.replyToId ?? existing.replyToId
-        existing.replySenderId = payload.replySenderId ?? existing.replySenderId
-        existing.replyPreview = payload.replyPreview ?? existing.replyPreview
-        existing.clientMsgId = existing.clientMsgId ?? clientMsgId ?? undefined
-        existing.pending = false
-        list.sort((a, b) => a.seq - b.seq)
-      }
-
-      const card = this.cards.find((item) => item.conversationId === conversationId)
-      if (card) {
-        if ((payload.seq ?? 0) > card.lastSeq) {
-          card.lastSeq = payload.seq ?? card.lastSeq
-          card.lastMessageAt = payload.createdAt ?? card.lastMessageAt
-          card.lastMessageType = payload.messageType ?? card.lastMessageType
-          card.lastMessagePreview = previewOf(payload)
-          // 新消息比「不显示」的时间更晚：会话重新出现，与服务端卡片接口的判定一致。
-          card.hidden = false
-        }
-        if (conversationId === this.activeId) {
-          card.unreadCount = 0
-        } else if (!mine) {
-          card.unreadCount = (card.unreadCount ?? 0) + 1
-        }
-      } else {
-        // 新会话（首次私聊/被拉群）：卡片信息不在本地，拉一次列表
-        void this.loadCards()
-      }
-
-      this.lastSync = Date.now()
-      if (conversationId === this.activeId) {
-        this.markReadThrottled(conversationId)
-        void this.loadReceipts(conversationId)
-      }
+      applyMessage(this, payload)
     },
 
-    /** 游标事件合并：120ms 窗口内同一会话只处理一次。 */
     scheduleRealtimeRefresh(conversationId: string) {
-      const existing = realtimeCoalesceTimers.get(conversationId)
-      if (existing !== undefined) window.clearTimeout(existing)
-      const timer = window.setTimeout(() => {
-        realtimeCoalesceTimers.delete(conversationId)
-        void (async () => {
-          if (conversationId === this.activeId) {
-            await this.refreshMessages(conversationId)
-            this.markReadThrottled(conversationId)
-            void this.loadReceipts(conversationId)
-          } else {
-            await this.loadCards()
-          }
-          this.lastSync = Date.now()
-        })()
-      }, REALTIME_COALESCE_MS)
-      realtimeCoalesceTimers.set(conversationId, timer)
+      scheduleRefresh(this, conversationId)
     },
 
-    /** 已读上报节流：高频群聊下避免每条消息一次写库。 */
     markReadThrottled(conversationId: string) {
-      const now = Date.now()
-      const last = lastMarkReadAt.get(conversationId) ?? 0
-      if (now - last < MARK_READ_THROTTLE_MS) return
-      lastMarkReadAt.set(conversationId, now)
-      void this.markRead(conversationId)
+      markReadThrottled(this, conversationId)
     },
 
     startPolling(intervalMs = 3000) {
-      this.stopPolling()
-      this.pollTimer = window.setInterval(async () => {
-        const realtimeHealthy = this.realtimeConnected
-          && Date.now() - this.realtimeLastPing < REALTIME_HEALTHY_MS
-        if (realtimeHealthy && Date.now() - this.lastSync < BACKGROUND_SYNC_MS) return
-        if (this.pollingBusy) return
-        this.pollingBusy = true
-        try {
-          const activeBefore = this.activeId
-          await this.loadCards()
-          if (activeBefore && activeBefore === this.activeId) {
-            await Promise.allSettled([
-              this.refreshMessages(activeBefore),
-              this.loadReceipts(activeBefore),
-              // 后台全量同步顺带刷新成员在线状态，群详情里的「在线」不会长期停在旧值。
-              Promise.resolve(this.refreshMembersIfStale(activeBefore)),
-            ])
-            const card = this.cards.find((item) => item.conversationId === activeBefore)
-            if (card && card.unreadCount > 0) await this.markRead(activeBefore)
-          }
-          this.lastSync = Date.now()
-        } finally {
-          this.pollingBusy = false
-        }
-      }, intervalMs)
+      startPolling(this, intervalMs)
     },
 
     stopPolling() {
-      if (this.pollTimer !== null) {
-        window.clearInterval(this.pollTimer)
-        this.pollTimer = null
-      }
+      stopPolling(this)
     },
 
     reset() {
       this.stopPolling()
       this.stopRealtime()
-      for (const controller of uploadControllers.values()) controller.abort()
-      uploadControllers.clear()
-      for (const task of this.uploads) {
-        if (task.previewUrl) URL.revokeObjectURL(task.previewUrl)
-      }
-      this.uploads = []
+      resetUploads(this)
       this.cards = []
       this.messages = {}
       this.receipts = {}

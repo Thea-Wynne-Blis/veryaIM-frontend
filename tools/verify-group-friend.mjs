@@ -7,7 +7,7 @@
  */
 import { chromium } from 'playwright-core'
 
-const BASE = 'http://82.157.47.151:8899'
+const BASE = process.env.VERYAL_BASE ?? 'http://82.157.47.151:8899'
 const CHROME = 'C:/Program Files/Google/Chrome/Application/chrome.exe'
 const GROUP = '产品设计小组'
 const SELF = '爱丽丝'

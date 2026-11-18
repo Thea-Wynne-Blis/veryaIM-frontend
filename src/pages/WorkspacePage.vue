@@ -266,7 +266,8 @@ async function select(id: string, updateRoute = true) {
   }
   await chat.open(id)
   if (activeCard.value?.type === 'GROUP') {
-    await chat.loadMembers(id)
+    // 打开会话时强制刷新一次成员，避免面板沿用 30s TTL 内的旧在线状态。
+    await chat.loadMembers(id, true)
   }
 }
 

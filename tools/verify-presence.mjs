@@ -7,7 +7,7 @@
 import { chromium } from 'playwright-core'
 import { execFileSync } from 'node:child_process'
 
-const BASE = 'http://82.157.47.151:8899'
+const BASE = process.env.VERYAL_BASE ?? 'http://82.157.47.151:8899'
 const CHROME = 'C:/Program Files/Google/Chrome/Application/chrome.exe'
 const GROUP = '产品设计小组'
 
@@ -35,10 +35,18 @@ await page.click('button:has-text("进入 VERYAL")')
 await page.waitForURL('**/app/chat', { timeout: 25000 })
 await page.waitForSelector('.conv', { timeout: 20000 })
 await page.locator('.conv', { hasText: GROUP }).first().click()
-await page.waitForTimeout(2500)
 
 const stats = page.locator('.stat-cell')
-const online = Number((await stats.nth(1).innerText()).split('\n')[0].trim())
+// 在线状态由 WebSocket 连接后写入 Redis，写入时机比页面渲染晚；
+// 成员列表有 30s TTL 缓存，所以这里最多等 35s 覆盖一次缓存过期，而不是硬等。
+async function onlineCount() {
+  return Number((await stats.nth(1).innerText()).split('\n')[0].trim())
+}
+let online = await onlineCount()
+for (let i = 0; i < 70 && online < 1; i++) {
+  await page.waitForTimeout(500)
+  online = await onlineCount()
+}
 check('detail panel shows at least 1 online', online >= 1, `online=${online}`)
 
 async function memberList() {

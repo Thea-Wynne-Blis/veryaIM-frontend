@@ -7,7 +7,7 @@
  */
 import { chromium } from 'playwright-core'
 
-const BASE = 'http://82.157.47.151:8899'
+const BASE = process.env.VERYAL_BASE ?? 'http://82.157.47.151:8899'
 const CHROME = 'C:/Program Files/Google/Chrome/Application/chrome.exe'
 const DIRECT = '鲍勃'
 const GROUP = '产品设计小组'
@@ -17,6 +17,43 @@ function check(name, ok, detail = '') {
   results.push({ name, ok })
   console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${ok ? '' : `  -> ${detail}`}`)
 }
+
+/**
+ * 脚本会把群里的「陌生人」加成好友，重复跑时按钮会变成「申请已发送」。
+ * 每次先把 demo_alice 待处理的 outgoing 申请撤掉，保证断言只看得到「加好友」。
+ */
+async function resetOutgoingFriendRequests() {
+  const res = await fetch(`${BASE}/api/v1/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      username: 'demo_alice',
+      password: 'password123',
+      deviceId: `cleanup-${Date.now()}`,
+      platform: 'LINUX',
+      deviceName: 'cleanup',
+    }),
+  })
+  const { data } = await res.json()
+  const token = data?.token
+  if (!token) return
+  const list = await fetch(`${BASE}/api/v1/friends/requests?direction=outgoing`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  // 请求 ID 是雪花 ID，超过 2^53，用文本正则取原始数字避免精度丢失。
+  const text = await list.text()
+  const ids = [...text.matchAll(/"requestId":(\d+)(?=[^{}]*"status":"PENDING")/g)].map(
+    (match) => match[1],
+  )
+  for (const id of ids) {
+    await fetch(`${BASE}/api/v1/friends/requests/${id}/cancel`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+    })
+  }
+}
+
+await resetOutgoingFriendRequests()
 
 const browser = await chromium.launch({ executablePath: CHROME, headless: true })
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })

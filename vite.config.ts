@@ -1,5 +1,5 @@
 import { fileURLToPath, URL } from 'node:url'
-import { defineConfig } from 'vite'
+import { defineConfig } from 'vitest/config'
 import vue from '@vitejs/plugin-vue'
 
 // npm run dev 时把 /api/v1 代理到后端，避免前端请求 404。
@@ -31,5 +31,10 @@ export default defineConfig({
         system: fileURLToPath(new URL('./system.html', import.meta.url)),
       },
     },
+  },
+  test: {
+    // 单元测试只覆盖纯函数与轻量 composable，用 jsdom 提供 document/localStorage。
+    environment: 'jsdom',
+    include: ['src/**/*.spec.ts'],
   },
 })
