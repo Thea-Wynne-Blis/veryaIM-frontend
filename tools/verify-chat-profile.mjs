@@ -43,8 +43,22 @@ async function closeCard() {
 }
 
 async function openConversation(name) {
-  await page.locator('.conv', { hasText: name }).first().click()
-  await page.waitForTimeout(1000)
+  // 「发消息」之后列表会刷新，可能刚点的会话被异步切换覆盖，这里允许重试。
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await page.locator('.conv', { hasText: name }).first().click()
+    try {
+      await page.waitForFunction(
+        (target) => document.querySelector('.chat-title')?.textContent?.includes(target),
+        name,
+        { timeout: 4000 },
+      )
+      await page.waitForTimeout(900)
+      return
+    } catch {
+      /* 下一轮重试 */
+    }
+  }
+  throw new Error(`打不开会话：${name}`)
 }
 
 await page.goto(`${BASE}/login`, { waitUntil: 'domcontentloaded' })
@@ -60,8 +74,24 @@ await page.waitForSelector('.msg', { timeout: 15000 })
 check('direct chat has message avatars',
   (await page.locator('.msg-avatar-slot .avatar-btn').count()) > 0)
 
-await page.click('.chat-head .head-avatar')
+const headAvatar = page.locator('.chat-head .head-avatar')
+await headAvatar.click()
 const fromHead = await waitCard()
+const popInfo = await page.locator(cardSel).evaluate((el) => ({
+  popover: el.classList.contains('pop'),
+  mask: Boolean(document.querySelector('.mask')),
+  animation: getComputedStyle(el).animationName,
+}))
+check('card is an anchored popover, not a centered modal',
+  popInfo.popover && !popInfo.mask, JSON.stringify(popInfo))
+check('popover slides out instead of popping in',
+  popInfo.animation.startsWith('profile-slide'), popInfo.animation)
+const headBox = await headAvatar.boundingBox()
+const headCard = await page.locator(cardSel).boundingBox()
+const besideHead = Math.abs(headCard.x - (headBox.x + headBox.width) - 10) <= 2 ||
+  Math.abs(headCard.x + headCard.width - headBox.x) <= 12
+check('popover sits next to the clicked avatar', besideHead,
+  JSON.stringify({ headBox, headCard }))
 check('header avatar opens profile', fromHead.includes(DIRECT), fromHead.replace(/\n/g, ' | '))
 check('header card shows region + signature + add-time',
   /地区/.test(fromHead) && /个性签名/.test(fromHead) && /添加时间/.test(fromHead))
@@ -72,7 +102,21 @@ const incoming = page.locator('.msg:not(.out) .msg-avatar-slot .avatar-btn').las
 await incoming.click()
 const fromMsg = await waitCard()
 check('message avatar opens the sender card', fromMsg.includes(DIRECT), fromMsg.replace(/\n/g, ' | '))
-await closeCard()
+const msgBox = await incoming.boundingBox()
+const msgCard = await page.locator(cardSel).boundingBox()
+const besideMsg = Math.abs(msgCard.x - (msgBox.x + msgBox.width) - 10) <= 2 ||
+  Math.abs(msgCard.x + msgCard.width - msgBox.x) <= 12
+check('message popover sits beside its avatar', besideMsg,
+  JSON.stringify({ msgBox, msgCard }))
+await page.mouse.click(1000, 720)
+await page.waitForSelector(cardSel, { state: 'detached', timeout: 5000 })
+check('clicking elsewhere closes the popover', true)
+
+await incoming.click()
+await waitCard()
+await page.keyboard.press('Escape')
+await page.waitForSelector(cardSel, { state: 'detached', timeout: 5000 })
+check('Escape closes the popover', true)
 
 const outgoing = page.locator('.msg.out .msg-avatar-slot .avatar-btn').first()
 await outgoing.click()
@@ -90,6 +134,8 @@ await page.click(`${cardSel} button:has-text("发消息")`)
 await page.waitForSelector(cardSel, { state: 'detached', timeout: 10000 })
 check('chat action closes the card and keeps conversation',
   (await page.locator('.chat-title').innerText()).includes(DIRECT))
+// 「发消息」还会异步补一次会话跳转，等它落定再切群，否则会被拉回单聊。
+await page.waitForTimeout(1500)
 
 // ---------- 5. 群聊：成员 / 陌生人 / 自己 ----------
 await openConversation(GROUP)

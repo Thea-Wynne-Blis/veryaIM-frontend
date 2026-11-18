@@ -20,10 +20,15 @@ const emit = defineEmits<{
   (e: 'toggle-pin'): void
   (e: 'toggle-mute'): void
   (e: 'manage'): void
-  (e: 'profile', userId: string): void
+  (e: 'profile', userId: string, anchor?: HTMLElement): void
 }>()
 
 const isGroup = computed(() => props.conversation.kind === 'group')
+
+/** 点谁的头像就带着这个元素当锚点，资料卡贴着它弹出。 */
+function openUser(userId: string | number, event: MouseEvent) {
+  emit('profile', String(userId), event.currentTarget as HTMLElement)
+}
 const memberList = computed(() => props.members ?? [])
 const memberCount = computed(() => props.conversation.members ?? memberList.value.length)
 const onlineCount = computed(
@@ -84,7 +89,7 @@ watch(
           :disabled="isGroup || !conversation.peerId"
           :title="!isGroup && conversation.peerId ? `查看 ${conversation.name} 的资料` : undefined"
           :aria-label="!isGroup && conversation.peerId ? `查看 ${conversation.name} 的资料` : undefined"
-          @click="!isGroup && conversation.peerId && emit('profile', String(conversation.peerId))"
+          @click="!isGroup && conversation.peerId && openUser(conversation.peerId, $event)"
         >
           <AppAvatar
             :initials="conversation.initials"
@@ -149,7 +154,7 @@ watch(
               class="member-avatar"
               type="button"
               :aria-label="`查看 ${member.nickname} 的资料`"
-              @click="emit('profile', String(member.userId))"
+              @click="openUser(member.userId, $event)"
             >
               <AppAvatar
                 :initials="initialsOf(member.nickname)"

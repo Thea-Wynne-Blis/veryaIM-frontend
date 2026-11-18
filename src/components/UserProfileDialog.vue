@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   X, Loader2, MapPin, PenLine, CalendarClock, MessageSquarePlus, UserPlus,
   Clock, Check, Pencil, Trash2, UserRound, Settings2,
@@ -34,6 +34,8 @@ const props = defineProps<{
   userId: Id | null
   /** 列表里已有昵称/头像时先渲染，避免打开瞬间空白。 */
   fallback?: { nickname?: string; avatar?: string | null } | null
+  /** 传了锚点元素就贴着它弹小卡片；不传退回居中弹窗。 */
+  anchor?: HTMLElement | null
 }>()
 const emit = defineEmits<{
   (e: 'close'): void
@@ -51,6 +53,74 @@ const notice = ref('')
 
 const editingRemark = ref(false)
 const remarkDraft = ref('')
+
+/* ---------- 贴着头像弹出的小卡片 ---------- */
+const POP_WIDTH = 300
+const POP_GAP = 10
+const POP_MARGIN = 12
+
+const cardEl = ref<HTMLElement | null>(null)
+const popover = computed(() => props.anchor !== null && props.anchor !== undefined)
+const geometry = ref({ left: 0, top: 0, width: POP_WIDTH, side: 'right' as 'left' | 'right' })
+
+/** 优先放在头像右侧，右边放不下就翻到左侧，上下贴边收进视口。 */
+function place() {
+  const anchor = props.anchor
+  if (!anchor || !props.open) return
+  const rect = anchor.getBoundingClientRect()
+  const vw = window.innerWidth
+  const vh = window.innerHeight
+  const width = Math.min(POP_WIDTH, vw - POP_MARGIN * 2)
+  let side: 'left' | 'right' = 'right'
+  let left = rect.right + POP_GAP
+  if (left + width > vw - POP_MARGIN) {
+    if (rect.left - POP_GAP - width >= POP_MARGIN) {
+      side = 'left'
+      left = rect.left - POP_GAP - width
+    } else {
+      left = Math.max(POP_MARGIN, vw - POP_MARGIN - width)
+    }
+  }
+  const height = cardEl.value?.offsetHeight || 360
+  let top = rect.top + rect.height / 2 - height / 2
+  top = Math.max(POP_MARGIN, Math.min(top, Math.max(POP_MARGIN, vh - POP_MARGIN - height)))
+  geometry.value = { left, top, width, side }
+}
+
+function onDocPointerDown(event: PointerEvent) {
+  if (!props.open || !popover.value) return
+  const target = event.target as Node | null
+  if (!target) return
+  if (cardEl.value?.contains(target)) return
+  if (props.anchor?.contains(target)) return
+  close()
+}
+
+function onWindowKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape' && props.open) close()
+}
+
+/** 页面滚动后小卡片会跟头像错位，干脆收起来；卡片内部滚动不算。 */
+function onAnyScroll(event: Event) {
+  if (!props.open || !popover.value) return
+  const target = event.target as Node | null
+  if (target && cardEl.value?.contains(target)) return
+  close()
+}
+
+onMounted(() => {
+  document.addEventListener('pointerdown', onDocPointerDown, true)
+  window.addEventListener('keydown', onWindowKeydown)
+  window.addEventListener('resize', place)
+  window.addEventListener('scroll', onAnyScroll, true)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('pointerdown', onDocPointerDown, true)
+  window.removeEventListener('keydown', onWindowKeydown)
+  window.removeEventListener('resize', place)
+  window.removeEventListener('scroll', onAnyScroll, true)
+})
 
 let noticeTimer: number | undefined
 
@@ -176,11 +246,12 @@ async function removeFriend() {
 }
 
 watch(
-  () => [props.open, String(props.userId ?? '')],
+  () => [props.open, String(props.userId ?? ''), props.anchor] as const,
   ([open]) => {
     if (open) {
       card.value = null
       void load()
+      void nextTick(place)
     } else {
       card.value = null
       error.value = ''
@@ -190,12 +261,30 @@ watch(
     }
   },
 )
+
+// 资料加载完高度会变，重新贴一次锚点。
+watch([card, loading], () => {
+  if (props.open && popover.value) void nextTick(place)
+})
 </script>
 
 <template>
-  <Transition name="fade">
-    <div v-if="props.open" class="mask" @click.self="close">
-      <div class="card" role="dialog" aria-label="用户资料">
+  <Teleport to="body">
+    <div
+      v-if="props.open"
+      :class="popover ? 'pop-layer' : 'mask'"
+      @click.self="close"
+    >
+      <div
+        ref="cardEl"
+        class="card"
+        :class="popover ? ['pop', `side-${geometry.side}`] : null"
+        :style="popover
+          ? { left: `${geometry.left}px`, top: `${geometry.top}px`, width: `${geometry.width}px` }
+          : undefined"
+        role="dialog"
+        aria-label="用户资料"
+      >
         <button class="close" aria-label="关闭" @click="close">
           <X :size="15" :stroke-width="2" />
         </button>
@@ -329,7 +418,7 @@ watch(
         </Transition>
       </div>
     </div>
-  </Transition>
+  </Teleport>
 </template>
 
 <style scoped>
@@ -338,6 +427,16 @@ watch(
   display: grid; place-items: center; padding: 24px;
   background: color-mix(in srgb, var(--ink) 28%, transparent);
   backdrop-filter: blur(6px);
+  animation: mask-in 160ms var(--ease-out);
+}
+@keyframes mask-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+/* 贴着头像的小卡片：整层不拦事件，只有卡片本身可交互 */
+.pop-layer {
+  position: fixed; inset: 0; z-index: 80;
+  pointer-events: none;
 }
 .card {
   position: relative;
@@ -349,6 +448,31 @@ watch(
   animation: pop-in 220ms var(--ease-spring);
   overflow: hidden;
 }
+/* 从头像旁边「划出来」：靠右时从左边缘伸展，靠左时从右边缘伸展 */
+.card.pop {
+  position: absolute;
+  max-width: none;
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
+  pointer-events: auto;
+  animation: profile-slide 200ms var(--ease-out);
+}
+.card.pop.side-right { transform-origin: left center; --slide-from: -10px; }
+.card.pop.side-left { transform-origin: right center; --slide-from: 10px; }
+@keyframes profile-slide {
+  from { opacity: 0; transform: translateX(var(--slide-from, -10px)) scale(0.96); }
+  to { opacity: 1; transform: none; }
+}
+/* 小卡片尺寸更紧凑，一屏能看清地区和签名 */
+.card.pop .cover { height: 54px; }
+.card.pop .body { padding: 0 16px 14px; }
+.card.pop .name { font-size: 15.5px; }
+.card.pop .chips { margin-top: 6px; }
+.card.pop .signature { max-width: 100%; margin-top: 10px; font-size: 12px; }
+.card.pop .meta { margin-top: 12px; padding-top: 10px; gap: 6px; }
+.card.pop .meta-row dd { font-size: 11.5px; }
+.card.pop .actions { margin-top: 12px; gap: 7px; }
+.card.pop .primary, .card.pop .ghost { height: 32px; font-size: 12px; }
 .close {
   position: absolute; top: 10px; right: 10px; z-index: 2;
   width: 26px; height: 26px; border-radius: var(--r-xs);
@@ -459,6 +583,4 @@ watch(
   transform: translateX(-50%) translateY(8px) scale(0.94);
 }
 .spin { animation: tick-spin 900ms linear infinite; }
-.fade-enter-active, .fade-leave-active { transition: opacity 160ms var(--ease-out); }
-.fade-enter-from, .fade-leave-to { opacity: 0; }
 </style>

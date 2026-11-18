@@ -61,6 +61,8 @@ const addBusy = ref<Id | null>(null)
 
 /** 资料卡：从搜索结果点开的是陌生人，从群成员点开的是好友/陌生人。 */
 const profileOpen = ref(false)
+/** 点哪一行，卡片就贴着哪一行弹出 */
+const profileAnchor = ref<HTMLElement | null>(null)
 const profileId = ref<Id | null>(null)
 const profileFallback = ref<{ nickname?: string; avatar?: string | null } | null>(null)
 
@@ -160,8 +162,12 @@ function chatWithHit(hit: { userId: Id; nickname: string }) {
 }
 
 /** 打开统一资料卡：搜索结果里的陌生人也能看地区、签名并直接加好友。 */
-function openUserProfile(hit: { userId: Id; nickname?: string; avatar?: string | null }) {
+function openUserProfile(
+  hit: { userId: Id; nickname?: string; avatar?: string | null },
+  event?: MouseEvent,
+) {
   profileId.value = hit.userId
+  profileAnchor.value = (event?.currentTarget as HTMLElement) ?? null
   profileFallback.value = { nickname: hit.nickname, avatar: hit.avatar ?? null }
   profileOpen.value = true
 }
@@ -529,7 +535,7 @@ onMounted(load)
               :key="hit.userId"
               class="row clickable"
               title="查看资料"
-              @click="openUserProfile(hit)"
+              @click="openUserProfile(hit, $event)"
             >
               <AppAvatar :initials="initialsOf(hit.nickname)" :tone="toneOf(hit.userId)" size="md" />
               <span class="row-main">
@@ -566,6 +572,7 @@ onMounted(load)
       :open="profileOpen"
       :user-id="profileId"
       :fallback="profileFallback"
+      :anchor="profileAnchor"
       @close="profileOpen = false"
       @changed="load"
       @chat="onProfileChat"

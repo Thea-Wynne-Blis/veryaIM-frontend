@@ -37,10 +37,12 @@ const theme = ref<'light' | 'dark'>(
 const dialogOpen = ref(false)
 const createGroupOpen = ref(false)
 const manageOpen = ref(false)
-/** 聊天里点任意头像后打开的资料卡 */
+/** 聊天里点任意头像打开的资料卡 */
 const profileOpen = ref(false)
 const profileId = ref<Id | null>(null)
 const profileFallback = ref<{ nickname: string } | null>(null)
+/** 被点的头像元素：资料卡贴着它弹出 */
+const profileAnchor = ref<HTMLElement | null>(null)
 /** 右键「转发」选中的消息 */
 const forwardTarget = ref<ChatMessage | null>(null)
 
@@ -293,10 +295,11 @@ function onForward(message: ChatMessage) {
   forwardTarget.value = message
 }
 
-/** 聊天里点头像/昵称打开资料卡，好友、陌生人、自己走同一个组件。 */
-function openProfile(userId: Id | string, nickname?: string) {
+/** 聊天里点头像打开资料卡，好友、陌生人、自己走同一个组件。 */
+function openProfile(userId: Id | string, anchor?: HTMLElement | null, nickname?: string) {
   if (!userId) return
   profileId.value = String(userId)
+  profileAnchor.value = anchor ?? null
   profileFallback.value = nickname ? { nickname } : null
   profileOpen.value = true
 }
@@ -461,7 +464,7 @@ onBeforeUnmount(() => {
     @mark-unread="onConvUnread"
     @hide="onConvHide"
     @delete="onConvDelete"
-    @profile="(id) => openProfile(id)"
+    @profile="(id, anchor) => openProfile(id, anchor)"
   />
 
   <div v-else class="stage">
@@ -502,7 +505,7 @@ onBeforeUnmount(() => {
         @attach="(file) => chat.activeId && attach(chat.activeId, file)"
         @toggle-detail="detailOpen = !detailOpen"
         @forward="onForward"
-        @profile="(id) => openProfile(id)"
+        @profile="(id, anchor) => openProfile(id, anchor)"
       />
 
       <DetailPanel
@@ -515,7 +518,7 @@ onBeforeUnmount(() => {
         @close="detailOpen = false"
         @toggle-pin="onTogglePin"
         @toggle-mute="onToggleMute"
-        @profile="(id) => openProfile(id)"
+        @profile="(id, anchor) => openProfile(id, anchor)"
       />
     </div>
 
@@ -558,6 +561,7 @@ onBeforeUnmount(() => {
     :open="profileOpen"
     :user-id="profileId"
     :fallback="profileFallback"
+    :anchor="profileAnchor"
     @close="profileOpen = false"
     @changed="onGroupChanged"
     @chat="profileChat"

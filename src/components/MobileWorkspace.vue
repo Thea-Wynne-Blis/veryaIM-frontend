@@ -57,7 +57,7 @@ const emit = defineEmits<{
   (e: 'mark-unread', id: string): void
   (e: 'hide', id: string): void
   (e: 'delete', id: string): void
-  (e: 'profile', userId: string): void
+  (e: 'profile', userId: string, anchor?: HTMLElement): void
 }>()
 
 const chat = useChatStore()
@@ -310,9 +310,9 @@ function cancelPress() {
   press = null
 }
 
-function openProfile(userId?: string | null) {
+function openProfile(userId?: string | null, event?: MouseEvent) {
   if (!userId || suppressTap) return
-  emit('profile', String(userId))
+  emit('profile', String(userId), (event?.currentTarget as HTMLElement) ?? undefined)
 }
 
 function beginPress(event: PointerEvent, message: ChatMessage) {
@@ -815,7 +815,7 @@ document.addEventListener('pointerdown', onDocPointerDown, true)
                   class="avatar-btn"
                   type="button"
                   :aria-label="`查看 ${message.author} 的资料`"
-                  @click.stop="openProfile(message.senderId)"
+                  @click.stop="openProfile(message.senderId, $event)"
                 >
                   <AppAvatar
                     :initials="message.initials"

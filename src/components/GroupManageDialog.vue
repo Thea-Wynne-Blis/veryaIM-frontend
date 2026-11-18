@@ -49,6 +49,8 @@ const requestedIds = ref<Set<string>>(new Set())
 const profileOpen = ref(false)
 const profileId = ref<Id | null>(null)
 const profileName = ref('')
+/** 被点的那一行，资料卡贴着它弹出 */
+const profileAnchor = ref<HTMLElement | null>(null)
 
 let noticeTimer: number | undefined
 let pendingTimer: number | undefined
@@ -256,9 +258,10 @@ async function addFriend(member: GroupMemberProfile) {  const id = String(member
   }
 }
 
-function openProfile(member: GroupMemberProfile) {
+function openProfile(member: GroupMemberProfile, event?: MouseEvent) {
   profileId.value = member.userId
   profileName.value = member.nickname
+  profileAnchor.value = (event?.currentTarget as HTMLElement) ?? null
   profileOpen.value = true
 }
 
@@ -343,6 +346,7 @@ watch(
       profileOpen.value = false
       profileId.value = null
       profileName.value = ''
+      profileAnchor.value = null
     }
   },
 )
@@ -444,7 +448,7 @@ onBeforeUnmount(() => {
                   class="member-open"
                   type="button"
                   :title="`查看 ${m.nickname} 的资料`"
-                  @click="openProfile(m)"
+                  @click="openProfile(m, $event)"
                 >
                   <AppAvatar :initials="initialsOf(m.nickname)" :tone="toneOf(m.userId)" size="sm" />
                   <span class="member-main">
@@ -582,6 +586,7 @@ onBeforeUnmount(() => {
         :open="profileOpen"
         :user-id="profileId"
         :fallback="{ nickname: profileName }"
+        :anchor="profileAnchor"
         @close="profileOpen = false"
         @changed="loadFriends"
         @chat="chatFromProfile"

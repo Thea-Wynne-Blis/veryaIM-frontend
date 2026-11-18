@@ -48,7 +48,7 @@ const emit = defineEmits<{
   (e: 'attach', file: File): void
   (e: 'toggle-detail'): void
   (e: 'forward', message: ChatMessage): void
-  (e: 'profile', userId: string): void
+  (e: 'profile', userId: string, anchor?: HTMLElement): void
 }>()
 
 const chat = useChatStore()
@@ -60,9 +60,9 @@ const mentionMembers = computed(() => props.members ?? [])
  * 聊天里点头像 / 昵称看资料：单聊是对方，群聊是发言人，自己就是自己。
  * 多选状态下点击仍然交给消息本体处理，用来勾选而不是弹资料卡。
  */
-function openProfile(userId?: string | null) {
+function openProfile(userId?: string | null, event?: MouseEvent) {
   if (!userId) return
-  emit('profile', String(userId))
+  emit('profile', String(userId), (event?.currentTarget as HTMLElement) ?? undefined)
 }
 
 function onInput() {
@@ -658,7 +658,7 @@ watch(() => props.messages.length, () => scrollToBottom())
           :disabled="conversation.kind !== 'direct' || !conversation.peerId"
           :title="conversation.kind === 'direct' ? `查看 ${conversation.name} 的资料` : undefined"
           :aria-label="conversation.kind === 'direct' ? `查看 ${conversation.name} 的资料` : undefined"
-          @click="!selecting && openProfile(conversation.peerId)"
+          @click="!selecting && openProfile(conversation.peerId, $event)"
         >
           <AppAvatar
             :initials="conversation.initials"
@@ -780,7 +780,7 @@ watch(() => props.messages.length, () => scrollToBottom())
                 class="avatar-btn"
                 type="button"
                 :title="`查看 ${message.author} 的资料`"
-                @click="selecting ? toggleSelect(message) : openProfile(message.senderId)"
+                @click="selecting ? toggleSelect(message) : openProfile(message.senderId, $event)"
               >
                 <AppAvatar
                   :initials="message.initials"
