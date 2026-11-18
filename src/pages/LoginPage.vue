@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { messageOf } from '../utils/error'
 import { useRoute, useRouter } from 'vue-router'
 import { MessageCircle, Loader2, ArrowRight } from 'lucide-vue-next'
 import { useAuthStore } from '../stores/auth'
@@ -47,7 +48,7 @@ async function submit() {
     chat.reset()
     await router.replace(redirectTarget())
   } catch (e) {
-    error.value = e instanceof Error ? e.message : '登录失败'
+    error.value = messageOf(e, '登录失败')
   } finally {
     submitting.value = false
   }

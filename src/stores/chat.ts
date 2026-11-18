@@ -1,3 +1,4 @@
+import { messageOf } from '../utils/error'
 import { defineStore } from 'pinia'
 import {
   ApiError,
@@ -276,7 +277,7 @@ export const useChatStore = defineStore('chat', {
         await updateConversationPrefs(conversationId, { hidden: true })
       } catch (e) {
         if (card) card.hidden = false
-        this.error = e instanceof Error ? e.message : '操作失败'
+        this.error = messageOf(e, '操作失败')
         throw e
       }
     },
@@ -290,7 +291,7 @@ export const useChatStore = defineStore('chat', {
         await updateConversationPrefs(conversationId, { hidden: false })
       } catch (e) {
         card.hidden = true
-        this.error = e instanceof Error ? e.message : '恢复会话显示失败'
+        this.error = messageOf(e, '恢复会话显示失败')
       }
     },
 
@@ -303,7 +304,7 @@ export const useChatStore = defineStore('chat', {
         await updateConversationPrefs(conversationId, { unread: true })
       } catch (e) {
         if (card) card.unreadCount = previous
-        this.error = e instanceof Error ? e.message : '操作失败'
+        this.error = messageOf(e, '操作失败')
         throw e
       }
     },
@@ -352,7 +353,7 @@ export const useChatStore = defineStore('chat', {
           card.muted = previousCard.muted
           card.hidden = previousCard.hidden
         }
-        this.error = e instanceof Error ? e.message : '操作失败'
+        this.error = messageOf(e, '操作失败')
         throw e
       }
     },
@@ -375,7 +376,7 @@ export const useChatStore = defineStore('chat', {
         this.mutedIds = this.cards.filter((item) => item.muted).map((item) => item.conversationId)
         if (this.error === '加载会话失败') this.error = null
       } catch (e) {
-        this.error = e instanceof Error ? e.message : '加载会话失败'
+        this.error = messageOf(e, '加载会话失败')
       } finally {
         this.loadingCards = false
       }
@@ -423,7 +424,7 @@ export const useChatStore = defineStore('chat', {
         const pending = (this.messages[conversationId] ?? []).filter((item) => item.pending)
         this.messages[conversationId] = [...dedupe(collected), ...pending]
       } catch (e) {
-        this.error = e instanceof Error ? e.message : '加载消息失败'
+        this.error = messageOf(e, '加载消息失败')
       } finally {
         this.loadingMessages = false
       }
@@ -597,7 +598,7 @@ export const useChatStore = defineStore('chat', {
       } catch (e) {
         this.messages[conversationId] = (this.messages[conversationId] ?? [])
           .filter((item) => !(item.pending && item.clientMsgId === clientMessageId))
-        this.error = e instanceof Error ? e.message : '发送失败'
+        this.error = messageOf(e, '发送失败')
         throw e
       }
     },
@@ -799,7 +800,7 @@ export const useChatStore = defineStore('chat', {
         // code -2 = 用户取消，不当作错误提示
         const cancelled = e instanceof ApiError && e.code === -2
         if (!cancelled) {
-          this.error = e instanceof Error ? e.message : '上传失败'
+          this.error = messageOf(e, '上传失败')
         }
         throw e
       } finally {

@@ -1,3 +1,4 @@
+import { messageOf } from '../utils/error'
 import { defineStore } from 'pinia'
 import {
   api,
@@ -47,7 +48,7 @@ export const useAuthStore = defineStore('auth', {
           ...deviceHeaders(),
         })
       } catch (e) {
-        const msg = e instanceof Error ? e.message : ''
+        const msg = messageOf(e, '')
         if (msg.includes('device is bound')) {
           resetDeviceId()
           return await api.post<LoginResult>('/auth/login', {

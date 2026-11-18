@@ -1,5 +1,7 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch, type ObjectDirective } from 'vue'
+import { useToast } from '../composables/useToast'
+import { useMessageActions } from '../composables/useMessageActions'
 import {
   MessageCircle,
   Users,
@@ -31,8 +33,7 @@ import MeView from './MeView.vue'
 import MessageAttachment from './MessageAttachment.vue'
 import { useTranslatePrefs } from '../composables/useTranslatePrefs'
 import { useChatStore } from '../stores/chat'
-import { translateText } from '../api/client'
-import type { ChatMessage, Conversation } from '../data/workspace'
+import type { ChatMessage, Conversation } from '../types/chat'
 
 type ReplyRef = { messageId: string; senderId: string; preview: string }
 
@@ -264,17 +265,9 @@ type MenuState = { x: number; y: number; message: ChatMessage }
 
 const MENU_WIDTH = 176
 const MENU_HEIGHT = 244
-const RECALL_WINDOW_MS = 2 * 60 * 1000
 
 const menu = ref<MenuState | null>(null)
-const notice = ref('')
-let noticeTimer: number | null = null
-
-function showNotice(text: string) {
-  notice.value = text
-  if (noticeTimer !== null) window.clearTimeout(noticeTimer)
-  noticeTimer = window.setTimeout(() => (notice.value = ''), 2200)
-}
+const { message: notice, show: showNotice } = useToast()
 
 function openMenuAt(x: number, y: number, message: ChatMessage) {
   menu.value = {
@@ -349,168 +342,24 @@ function onDocPointerDown(event: PointerEvent) {
   closeMenu()
 }
 
-function midOf(message: ChatMessage): string {
-  return String(message.messageId ?? message.id)
-}
+/* ---------- 消息操作（复制/引用/撤回/删除/定位/翻译）与桌面端共用一份实现 ---------- */
+const {
+  replyTo, translatingId, midOf, copyMessage,
+  canRecall, deleteMessage, canQuote, quoteMessage, cancelQuote,
+  locateMessage, translationOf, translateMessage, forwardMessage,
+} = useMessageActions({
+  conversationId: () => props.activeId ?? undefined,
+  scroller: () => scroller.value,
+  myId: () => String(chat.myId),
+  closeMenu,
+  showNotice,
+  recall: (conversationId, messageId) => chat.recallMessage(conversationId, messageId),
+  hideMessage: (conversationId, messageId) => chat.hideMessage(conversationId, messageId),
+  forward: (message) => emit('forward', message),
+})
 
-/* ---------- 复制 / 删除 ---------- */
-async function copyText(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text)
-    return true
-  } catch {
-    try {
-      const area = document.createElement('textarea')
-      area.value = text
-      area.style.position = 'fixed'
-      area.style.top = '-1000px'
-      area.style.opacity = '0'
-      document.body.appendChild(area)
-      area.select()
-      const ok = document.execCommand('copy')
-      area.remove()
-      return ok
-    } catch {
-      return false
-    }
-  }
-}
-
-function copyMessage(message: ChatMessage) {
-  closeMenu()
-  if (message.recalled) {
-    showNotice('这条消息没有可复制的内容')
-    return
-  }
-  const text = message.attachment
-    ? message.attachment.size
-      ? `${message.attachment.name} (${message.attachment.size})`
-      : message.attachment.name
-    : message.text
-  void copyText(text).then((ok) => showNotice(ok ? '已复制' : '复制失败'))
-}
-
-function canRecall(message: ChatMessage): boolean {
-  if (!message.mine || message.recalled || message.pending) return false
-  const createdAt = message.createdAt ? new Date(message.createdAt).getTime() : 0
-  return !!createdAt && Date.now() - createdAt <= RECALL_WINDOW_MS
-}
-
-async function deleteMessage(message: ChatMessage) {
-  closeMenu()
-  const conversationId = props.activeId
-  if (!conversationId) return
-  if (message.pending) {
-    showNotice('消息还在发送中')
-    return
-  }
-  const messageId = midOf(message)
-  if (canRecall(message)) {
-    try {
-      await chat.recallMessage(conversationId, messageId)
-      showNotice('已撤回')
-    } catch (e) {
-      showNotice(e instanceof Error ? e.message : '撤回失败')
-    }
-    return
-  }
-  chat.hideMessage(conversationId, messageId)
-  showNotice('已从本机删除')
-}
-
-/* ---------- 引用 ---------- */
-const replyTo = ref<(ReplyRef & { author: string }) | null>(null)
-
-function quotePreviewOf(message: ChatMessage): string {
-  if (message.recalled) return '消息已撤回'
-  if (message.attachment) {
-    const kind = message.attachment.kind
-    if (kind === 'image') return '[图片]'
-    if (kind === 'video') return '[视频]'
-    if (kind === 'audio') return '[语音]'
-    return '[文件]'
-  }
-  const text = message.text.replace(/\s+/g, ' ').trim()
-  if (!text) return '消息'
-  return text.length <= 120 ? text : `${text.slice(0, 120)}…`
-}
-
-function canQuote(message: ChatMessage): boolean {
-  return !message.recalled && !message.pending
-}
-
-function quoteMessage(message: ChatMessage) {
-  closeMenu()
-  if (!canQuote(message)) {
-    showNotice('这条消息不能引用')
-    return
-  }
-  replyTo.value = {
-    messageId: midOf(message),
-    senderId: String(message.mine ? chat.myId : (message.senderId ?? '')),
-    author: message.author,
-    preview: quotePreviewOf(message),
-  }
-}
-
-function cancelQuote() {
-  replyTo.value = null
-}
-
-function locateMessage(messageId: string) {
-  const el = scroller.value?.querySelector<HTMLElement>(`[data-mid="${messageId}"]`)
-  if (!el) {
-    showNotice('原消息不在当前已加载的记录里')
-    return
-  }
-  el.scrollIntoView({ block: 'center', behavior: 'smooth' })
-  el.classList.add('flash')
-  window.setTimeout(() => el.classList.remove('flash'), 1200)
-}
-
-/* ---------- 翻译 ---------- */
-const { target: translateTarget, label: translateLabel } = useTranslatePrefs()
-const translations = ref<Record<string, { text: string; to: string }>>({})
-const translatingId = ref<string | null>(null)
-
-function translationOf(message: ChatMessage) {
-  return translations.value[midOf(message)]
-}
-
-async function translateMessage(message: ChatMessage) {
-  closeMenu()
-  const id = midOf(message)
-  if (translations.value[id]) {
-    const next = { ...translations.value }
-    delete next[id]
-    translations.value = next
-    return
-  }
-  if (message.recalled) {
-    showNotice('已撤回的消息不能翻译')
-    return
-  }
-  if (message.attachment) {
-    showNotice('暂不支持翻译附件消息')
-    return
-  }
-  const text = message.text.trim()
-  if (!text) return
-  translatingId.value = id
-  try {
-    const result = await translateText(text, translateTarget.value)
-    translations.value = { ...translations.value, [id]: { text: result.text, to: result.to } }
-  } catch (e) {
-    showNotice(e instanceof Error ? e.message : '翻译失败')
-  } finally {
-    translatingId.value = null
-  }
-}
-
-function forwardMessage(message: ChatMessage) {
-  closeMenu()
-  emit('forward', message)
-}
+/* ---------- 翻译目标语言（菜单文案用） ---------- */
+const { label: translateLabel } = useTranslatePrefs()
 
 /* ---------- 会话列表右滑操作 ---------- */
 const SWIPE_WIDTH = 198
@@ -639,7 +488,6 @@ document.addEventListener('pointerdown', onDocSwipeReset, true)
 
 onBeforeUnmount(() => {
   cancelPress()
-  if (noticeTimer !== null) window.clearTimeout(noticeTimer)
   document.removeEventListener('pointerdown', onDocPointerDown, true)
   document.removeEventListener('pointerdown', onDocSwipeReset, true)
 })

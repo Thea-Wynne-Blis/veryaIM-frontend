@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { messageOf } from '../utils/error'
+import { useToast } from '../composables/useToast'
 import {
   FileText, Download, FolderOpen, Loader2, HardDrive, RefreshCw, Upload, Trash2,
 } from 'lucide-vue-next'
@@ -9,7 +11,7 @@ import { humanBytes, listTime, toneOf } from '../utils/present'
 const rows = ref<FileRow[]>([])
 const loading = ref(false)
 const error = ref('')
-const notice = ref('')
+const { message: notice, show: flash } = useToast()
 const downloading = ref<Id | null>(null)
 const deleting = ref<Id | null>(null)
 const uploading = ref(false)
@@ -28,11 +30,6 @@ function kindOf(contentType: string): string {
   return 'FILE'
 }
 
-function flash(text: string) {
-  notice.value = text
-  window.setTimeout(() => (notice.value = ''), 2200)
-}
-
 async function load() {
   loading.value = true
   error.value = ''
@@ -40,7 +37,7 @@ async function load() {
     const data = await api.get<FileRow[]>('/files/mine')
     rows.value = Array.isArray(data) ? data : []
   } catch (e) {
-    error.value = e instanceof Error ? e.message : '加载文件失败'
+    error.value = messageOf(e, '加载文件失败')
   } finally {
     loading.value = false
   }
@@ -53,7 +50,7 @@ async function download(row: FileRow) {
     // 下载接口需要 Bearer Token，window.open 带不上请求头。
     await downloadFile(row.fileId, row.name)
   } catch (e) {
-    error.value = e instanceof Error ? e.message : '下载失败'
+    error.value = messageOf(e, '下载失败')
   } finally {
     downloading.value = null
   }
@@ -72,7 +69,7 @@ async function onPick(event: Event) {
     flash('上传成功')
     await load()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : '上传失败'
+    error.value = messageOf(e, '上传失败')
   } finally {
     uploading.value = false
   }
@@ -87,7 +84,7 @@ async function remove(row: FileRow) {
     rows.value = rows.value.filter((f) => !sameId(f.fileId, row.fileId))
     flash('文件已删除')
   } catch (e) {
-    error.value = e instanceof Error ? e.message : '删除失败'
+    error.value = messageOf(e, '删除失败')
   } finally {
     deleting.value = null
   }

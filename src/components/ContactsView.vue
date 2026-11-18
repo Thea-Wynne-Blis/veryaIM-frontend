@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { messageOf } from '../utils/error'
+import { useToast } from '../composables/useToast'
 import {
   Users, Search, MessageSquarePlus, Loader2, UserPlus,
   Check, X, Pencil, Inbox, Hash, Send, Trash2,
@@ -43,7 +45,7 @@ const data = ref<Contacts>({ friends: [], groups: [], pendingRequests: 0 })
 const requests = ref<Request[]>([])
 const loading = ref(false)
 const error = ref('')
-const notice = ref('')
+const { message: notice, show: flash } = useToast()
 const keyword = ref('')
 const selected = ref<Friend | null>(null)
 const opening = ref<Id | null>(null)
@@ -93,11 +95,6 @@ const friends = computed(() => {
   )
 })
 
-function flash(text: string) {
-  notice.value = text
-  window.setTimeout(() => (notice.value = ''), 2200)
-}
-
 async function load() {
   loading.value = true
   error.value = ''
@@ -118,7 +115,7 @@ async function load() {
         data.value.friends.find((f) => sameId(f.friendId, selected.value?.friendId)) ?? null
     }
   } catch (e) {
-    error.value = e instanceof Error ? e.message : '加载通讯录失败'
+    error.value = messageOf(e, '加载通讯录失败')
   } finally {
     loading.value = false
   }
@@ -135,7 +132,7 @@ async function openChat(friend: Friend) {
     addOpen.value = false
     window.dispatchEvent(new CustomEvent('veryal:open-chat', { detail: conversationId }))
   } catch (e) {
-    error.value = e instanceof Error ? e.message : '发起会话失败'
+    error.value = messageOf(e, '发起会话失败')
   } finally {
     opening.value = null
   }
@@ -193,7 +190,7 @@ async function openGroup(group: GroupItem) {
     await chat.open(group.groupId)
     window.dispatchEvent(new CustomEvent('veryal:open-chat', { detail: group.groupId }))
   } catch (e) {
-    error.value = e instanceof Error ? e.message : '打开群聊失败'
+    error.value = messageOf(e, '打开群聊失败')
   } finally {
     openingGroup.value = null
   }
@@ -214,7 +211,7 @@ async function saveRemark(friend: Friend) {
     friend.remark = remark || null
     flash('备注已保存')
   } catch (e) {
-    error.value = e instanceof Error ? e.message : '备注保存失败'
+    error.value = messageOf(e, '备注保存失败')
   }
 }
 
@@ -227,7 +224,7 @@ async function removeFriend(friend: Friend) {
     flash('已删除好友')
     await load()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : '删除好友失败'
+    error.value = messageOf(e, '删除好友失败')
   }
 }
 
@@ -238,7 +235,7 @@ async function decide(request: Request, action: 'accept' | 'reject') {
     flash(action === 'accept' ? '已添加为好友' : '已拒绝')
     await load()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : '操作失败'
+    error.value = messageOf(e, '操作失败')
   }
 }
 
@@ -289,7 +286,7 @@ async function sendRequest(hit: { userId: Id; nickname: string }) {
     addMessage.value = ''
     await load()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : '发送申请失败'
+    error.value = messageOf(e, '发送申请失败')
   } finally {
     addBusy.value = null
   }

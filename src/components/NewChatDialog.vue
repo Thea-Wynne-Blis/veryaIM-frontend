@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { messageOf } from '../utils/error'
 import { X, Search, Loader2, MessageSquarePlus } from 'lucide-vue-next'
 import AppAvatar from './AppAvatar.vue'
 import { api, sameId, type Id } from '../api/client'
@@ -50,7 +51,7 @@ async function search() {
       .filter((item) => item.userId && item.userId !== '0')
   } catch (e) {
     if (current !== seq) return
-    error.value = e instanceof Error ? e.message : '搜索失败'
+    error.value = messageOf(e, '搜索失败')
     hits.value = []
   } finally {
     if (current === seq) loading.value = false
@@ -90,7 +91,7 @@ async function pick(hit: UserHit) {
     const conversationId = await chat.createPrivate(hit.userId)
     emit('created', conversationId)
   } catch (e) {
-    error.value = e instanceof Error ? e.message : '创建会话失败'
+    error.value = messageOf(e, '创建会话失败')
   } finally {
     creating.value = null
   }

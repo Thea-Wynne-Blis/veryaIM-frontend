@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { messageOf } from '../utils/error'
 import {
   LogOut, Save, Shield, Smartphone, Loader2, Trash2, User, Languages,
   MapPin, PenLine,
@@ -81,7 +82,7 @@ async function load() {
     privacy.value = pr
     devices.value = Array.isArray(d) ? d : []
   } catch (e) {
-    error.value = e instanceof Error ? e.message : '加载失败'
+    error.value = messageOf(e, '加载失败')
   } finally {
     loading.value = false
   }
@@ -111,7 +112,7 @@ async function saveProfile() {
     })
     flash('个人资料已保存')
   } catch (e) {
-    error.value = e instanceof Error ? e.message : '保存失败'
+    error.value = messageOf(e, '保存失败')
   } finally {
     saving.value = false
   }
@@ -129,7 +130,7 @@ async function savePrivacy(patch: Partial<UserPrivacy>) {
     flash('隐私设置已保存')
   } catch (e) {
     privacy.value = before // 失败回滚
-    error.value = e instanceof Error ? e.message : '隐私设置保存失败'
+    error.value = messageOf(e, '隐私设置保存失败')
   } finally {
     privacyBusy.value = false
   }
@@ -155,7 +156,7 @@ async function removeDevice(d: DeviceInfo) {
     devices.value = devices.value.filter((item) => item.deviceId !== d.deviceId)
     flash(typeof removed === 'number' && removed > 1 ? `已移除 ${removed} 条设备记录` : '已移除该设备')
   } catch (e) {
-    error.value = e instanceof Error ? e.message : '移除设备失败'
+    error.value = messageOf(e, '移除设备失败')
   } finally {
     removingDevice.value = null
   }

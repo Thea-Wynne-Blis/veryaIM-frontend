@@ -6,7 +6,7 @@ import { trackSpotlight } from '../composables/usePointerFx'
 import { api, type GroupModeration } from '../api/client'
 import type { ChatMember } from '../stores/chat'
 import { initialsOf, toneOf } from '../utils/present'
-import type { Conversation } from '../data/workspace'
+import type { Conversation } from '../types/chat'
 
 const props = defineProps<{
   conversation: Conversation

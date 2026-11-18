@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { messageOf } from '../utils/error'
+import { useToast } from '../composables/useToast'
 import {
   X, Loader2, Users, Megaphone, Shield, UserMinus, Crown,
   BellOff, Bell, LogOut, Trash2, Save, UserPlus, UserCheck, Clock, Check,
@@ -37,7 +39,7 @@ const loading = ref(false)
 const refreshing = ref(false)
 const busy = ref('')
 const error = ref('')
-const notice = ref('')
+const { message: notice, show: flash } = useToast()
 const confirmDisband = ref(false)
 const confirmLeave = ref(false)
 const pending = ref('')
@@ -52,7 +54,6 @@ const profileName = ref('')
 /** 被点的那一行，资料卡贴着它弹出 */
 const profileAnchor = ref<HTMLElement | null>(null)
 
-let noticeTimer: number | undefined
 let pendingTimer: number | undefined
 
 const myId = computed(() => String(auth.user?.userId ?? ''))
@@ -68,12 +69,6 @@ const MUTE_OPTIONS: { value: GroupMuteDuration; label: string }[] = [
   { value: 'MUTE_30M', label: '禁言 30 分钟' },
   { value: 'MUTE_FOREVER', label: '永久禁言' },
 ]
-
-function flash(msg: string) {
-  notice.value = msg
-  window.clearTimeout(noticeTimer)
-  noticeTimer = window.setTimeout(() => (notice.value = ''), 2400)
-}
 
 /** 首屏加载才显示整页 loading；操作后的刷新走静默模式，避免整个弹窗闪一下。 */
 async function load(silent = false) {
@@ -100,7 +95,7 @@ async function load(silent = false) {
       announcement.value = m?.announcement ?? ''
     }
   } catch (e) {
-    error.value = e instanceof Error ? e.message : '加载群信息失败'
+    error.value = messageOf(e, '加载群信息失败')
   } finally {
     loading.value = false
     refreshing.value = false
@@ -116,7 +111,7 @@ async function run(key: string, fn: () => Promise<unknown>, successMsg: string) 
     await load(true)
     emit('changed')
   } catch (e) {
-    error.value = e instanceof Error ? e.message : '操作失败'
+    error.value = messageOf(e, '操作失败')
   } finally {
     busy.value = ''
   }
@@ -251,7 +246,7 @@ async function addFriend(member: GroupMemberProfile) {  const id = String(member
     } else if (e instanceof Error && /rejects friend requests/i.test(e.message)) {
       error.value = `${member.nickname} 不接受好友申请`
     } else {
-      error.value = e instanceof Error ? e.message : '发送好友申请失败'
+      error.value = messageOf(e, '发送好友申请失败')
     }
   } finally {
     busy.value = ''
@@ -276,7 +271,7 @@ async function chatFromProfile(userId: Id) {
     emit('close')
     window.dispatchEvent(new CustomEvent('veryal:open-chat', { detail: conversationId }))
   } catch (e) {
-    error.value = e instanceof Error ? e.message : '发起会话失败'
+    error.value = messageOf(e, '发起会话失败')
   } finally {
     busy.value = ''
   }
@@ -297,7 +292,7 @@ async function leave() {
     await groupsApi.leave(props.groupId!)
     emit('removed')
   } catch (e) {
-    const msg = e instanceof Error ? e.message : '退出失败'
+    const msg = messageOf(e, '退出失败')
     error.value = /owner cannot leave/i.test(msg)
       ? '你是群主，不能直接退出：请先转让群主，或解散群聊。'
       : msg
@@ -317,7 +312,7 @@ async function disband() {
     await groupsApi.disband(props.groupId!)
     emit('removed')
   } catch (e) {
-    error.value = e instanceof Error ? e.message : '解散失败'
+    error.value = messageOf(e, '解散失败')
   } finally {
     busy.value = ''
   }
@@ -352,7 +347,6 @@ watch(
 )
 
 onBeforeUnmount(() => {
-  window.clearTimeout(noticeTimer)
   window.clearTimeout(pendingTimer)
 })
 </script>

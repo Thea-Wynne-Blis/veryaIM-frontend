@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { messageOf } from '../utils/error'
 import { X, Search, Loader2, Users, Check, MessageSquarePlus } from 'lucide-vue-next'
 import AppAvatar from './AppAvatar.vue'
 import { api } from '../api/client'
@@ -52,7 +53,7 @@ async function load() {
         (f as unknown as { friendId?: string }).friendId ?? '') as string,
     }))
   } catch (e) {
-    error.value = e instanceof Error ? e.message : '加载好友失败'
+    error.value = messageOf(e, '加载好友失败')
   } finally {
     loading.value = false
   }
@@ -67,7 +68,7 @@ async function create() {
     emit('created', group.groupId)
     reset()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : '创建群聊失败'
+    error.value = messageOf(e, '创建群聊失败')
   } finally {
     busy.value = false
   }

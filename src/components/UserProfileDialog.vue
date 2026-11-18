@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { messageOf } from '../utils/error'
+import { useToast } from '../composables/useToast'
 import {
   X, Loader2, MapPin, PenLine, CalendarClock, MessageSquarePlus, UserPlus,
   Clock, Check, Pencil, Trash2, UserRound, Settings2,
@@ -49,7 +51,7 @@ const card = ref<UserCard | null>(null)
 const loading = ref(false)
 const busy = ref('')
 const error = ref('')
-const notice = ref('')
+const { message: notice, show: flash, clear: clearNotice } = useToast()
 
 const editingRemark = ref(false)
 const remarkDraft = ref('')
@@ -122,20 +124,12 @@ onBeforeUnmount(() => {
   window.removeEventListener('scroll', onAnyScroll, true)
 })
 
-let noticeTimer: number | undefined
-
 const myId = computed(() => String(auth.user?.userId ?? ''))
 const isSelf = computed(() => Boolean(props.userId) && String(props.userId) === myId.value)
 const displayName = computed(
   () => card.value?.remark || card.value?.nickname || props.fallback?.nickname || '用户',
 )
 const avatarSeed = computed(() => card.value?.userId ?? props.userId ?? '')
-
-function flash(text: string) {
-  notice.value = text
-  window.clearTimeout(noticeTimer)
-  noticeTimer = window.setTimeout(() => (notice.value = ''), 2400)
-}
 
 /** 添加时间按「2026年11月18日」展示，比相对时间更适合资料卡。 */
 function fullDate(iso: string | null | undefined): string {
@@ -154,7 +148,7 @@ async function load() {
     card.value = await api.get<UserCard>(`/users/${props.userId}/profile`)
     remarkDraft.value = card.value.remark ?? ''
   } catch (e) {
-    error.value = e instanceof Error ? e.message : '加载资料失败'
+    error.value = messageOf(e, '加载资料失败')
   } finally {
     loading.value = false
   }
@@ -201,7 +195,7 @@ async function addFriend() {
     } else if (e instanceof Error && /rejects friend requests/i.test(e.message)) {
       error.value = '对方不接受好友申请'
     } else {
-      error.value = e instanceof Error ? e.message : '发送好友申请失败'
+      error.value = messageOf(e, '发送好友申请失败')
     }
   } finally {
     busy.value = ''
@@ -222,7 +216,7 @@ async function saveRemark() {
     flash(value ? '备注已保存' : '备注已清除')
     emit('changed')
   } catch (e) {
-    error.value = e instanceof Error ? e.message : '备注保存失败'
+    error.value = messageOf(e, '备注保存失败')
   } finally {
     busy.value = ''
   }
@@ -239,7 +233,7 @@ async function removeFriend() {
     emit('changed')
     close()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : '删除好友失败'
+    error.value = messageOf(e, '删除好友失败')
   } finally {
     busy.value = ''
   }
@@ -255,9 +249,8 @@ watch(
     } else {
       card.value = null
       error.value = ''
-      notice.value = ''
+      clearNotice()
       editingRemark.value = false
-      window.clearTimeout(noticeTimer)
     }
   },
 )

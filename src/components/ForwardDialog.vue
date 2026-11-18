@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { messageOf } from '../utils/error'
 import { Check, Loader2, Search, Send, X } from 'lucide-vue-next'
 import AppAvatar from './AppAvatar.vue'
 import { useChatStore } from '../stores/chat'
 import { initialsOf, toneOf } from '../utils/present'
-import type { ChatMessage } from '../data/workspace'
+import type { ChatMessage } from '../types/chat'
 
 const props = defineProps<{
   open: boolean
@@ -89,7 +90,7 @@ async function pick(conversationId: string) {
       emit('close')
     }, 700)
   } catch (e) {
-    error.value = e instanceof Error ? e.message : '转发失败'
+    error.value = messageOf(e, '转发失败')
     sending.value = null
   }
 }

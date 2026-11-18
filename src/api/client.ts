@@ -90,21 +90,6 @@ export function clearSession(): void {
 
 const BASE = '/api/v1'
 
-/**
- * 无损 JSON 解析。
- *
- * 后端使用雪花 ID（18 位），超出 JS 安全整数范围（2^53≈9e15），
- * 直接 JSON.parse 会被截断（...928 → ...900），导致「user not found」。
- * 这里把对象字段位置与数组元素位置上超过 16 位的整数先加引号，
- * 使其以字符串形式保留精度；seq / count / size 等小整数仍是 number。
- */
-export function parseLossless<T>(text: string): T {
-  const inObjectField = /("(?:[A-Za-z_][A-Za-z0-9_]*)"\s*:\s*)(-?\d{16,})(?=\s*[,}\]])/g
-  const inArray = /([\[,]\s*)(-?\d{16,})(?=\s*[,\]])/g
-  const safe = text.replace(inObjectField, '$1"$2"').replace(inArray, '$1"$2"')
-  return JSON.parse(safe) as T
-}
-
 function authHeaders(extra?: HeadersInit): Headers {
   const headers = new Headers(extra)
   const token = getToken()

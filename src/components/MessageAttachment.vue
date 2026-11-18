@@ -10,7 +10,7 @@ import {
   Volume2,
 } from 'lucide-vue-next'
 import { downloadFile, fileObjectUrl, thumbObjectUrl } from '../api/client'
-import type { Attachment } from '../data/workspace'
+import type { Attachment } from '../types/chat'
 import { formatDuration } from '../utils/media'
 
 const props = defineProps<{ attachment: Attachment }>()

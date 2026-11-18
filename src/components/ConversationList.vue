@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { Search, Plus, Pin, Bell, BellOff, UserPlus, Users, MailOpen, EyeOff, Trash2, PinOff } from 'lucide-vue-next'
 import AppAvatar from './AppAvatar.vue'
 import { trackSpotlight } from '../composables/usePointerFx'
-import type { Conversation } from '../data/workspace'
+import type { Conversation } from '../types/chat'
 
 const props = defineProps<{
   conversations: Conversation[]

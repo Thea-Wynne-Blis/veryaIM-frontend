@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { messageOf } from '../utils/error'
 import { useRoute, useRouter } from 'vue-router'
 import NavRail from '../components/NavRail.vue'
 import ConversationList from '../components/ConversationList.vue'
@@ -17,7 +18,7 @@ import UserProfileDialog from '../components/UserProfileDialog.vue'
 import { useIsMobile } from '../composables/useIsMobile'
 import { useChatStore } from '../stores/chat'
 import { useAuthStore } from '../stores/auth'
-import type { Attachment, ChatMessage, Conversation } from '../data/workspace'
+import type { Attachment, ChatMessage, Conversation } from '../types/chat'
 import { parseJson, sameId, type ConversationCard, type Id, type MessageView } from '../api/client'
 import { clockTime, humanBytes, initialsOf, listTime, toneOf } from '../utils/present'
 
@@ -312,7 +313,7 @@ async function profileChat(userId: Id) {
     await chat.loadCards()
     await select(conversationId)
   } catch (e) {
-    chat.error = e instanceof Error ? e.message : '发起会话失败'
+    chat.error = messageOf(e, '发起会话失败')
   }
 }
 
@@ -399,7 +400,7 @@ async function onConvDelete(id: string) {
 }
 
 function reportActionError(e: unknown) {
-  chat.error = e instanceof Error ? e.message : '操作失败'
+  chat.error = messageOf(e, '操作失败')
 }
 
 watch(
