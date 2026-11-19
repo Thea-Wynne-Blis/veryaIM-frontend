@@ -215,6 +215,16 @@ function cachedObjectUrl(path: string, cacheKey: string): Promise<string> {
   return rememberObjectUrl(cacheKey, task)
 }
 
+/**
+ * 任意需要鉴权的二进制资源 → 缓存 object URL。
+ *
+ * <p>朋友圈媒体走独立的可见性校验地址，不能复用 `fileObjectUrl`；
+ * 但缓存与 LRU 回收逻辑完全一样，这里对外暴露同一套实现。</p>
+ */
+export function authorizedObjectUrl(path: string, cacheKey: string): Promise<string> {
+  return cachedObjectUrl(path, cacheKey)
+}
+
 /** 原图（点击放大、下载用）。 */
 export function fileObjectUrl(fileId: Id): Promise<string> {
   return cachedObjectUrl(`/files/${fileId}/content`, `full:${fileId}`)

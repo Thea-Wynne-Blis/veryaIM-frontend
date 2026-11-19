@@ -86,6 +86,12 @@ export function stopRealtime(host: RealtimeHost) {
 
 export function handleFrame(host: RealtimeHost, frame: RealtimeFrame) {
   host.realtimeLastPing = Date.now()
+  // 朋友圈互动通知：交给 moments store 消费。走窗口事件而不是直接 import store，
+  // 实时模块只认识「帧」，不认识业务模块，避免两个 store 相互依赖。
+  if (frame.cmd === 'moment' && frame.data) {
+    window.dispatchEvent(new CustomEvent('veryal:moment', { detail: frame.data }))
+    return
+  }
   if (frame.cmd !== 'message' || !frame.data) return
   const payload = frame.data as RealtimePayload
   const conversationId = payload.conversationId

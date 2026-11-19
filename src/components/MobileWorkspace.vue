@@ -26,6 +26,7 @@ import {
   Pin,
   BellOff,
   Star,
+  Camera,
 } from 'lucide-vue-next'
 import AppAvatar from './AppAvatar.vue'
 import ContactsView from './ContactsView.vue'
@@ -33,9 +34,11 @@ import MeView from './MeView.vue'
 import MessageAttachment from './MessageAttachment.vue'
 import DetailPanel from './DetailPanel.vue'
 import FavoritesView from './FavoritesView.vue'
+import MomentsView from './moments/MomentsView.vue'
 import { useMessageLocator } from '../composables/useMessageLocator'
 import { useTranslatePrefs } from '../composables/useTranslatePrefs'
 import { useChatStore } from '../stores/chat'
+import { useMomentsStore } from '../stores/moments'
 import type { ChatMessage, Conversation } from '../types/chat'
 
 type ReplyRef = { messageId: string; senderId: string; preview: string }
@@ -71,13 +74,14 @@ const emit = defineEmits<{
 }>()
 
 const chat = useChatStore()
+const moments = useMomentsStore()
 
-type Tab = 'chat' | 'contacts' | 'favorites' | 'me'
+type Tab = 'chat' | 'contacts' | 'moments' | 'favorites' | 'me'
 
 /** 支持 ?tab=favorites 直接落地到指定页，便于演示与截图。 */
 const initialTab = (() => {
   const value = new URLSearchParams(window.location.search).get('tab') ?? props.initialView
-  return value === 'contacts' || value === 'me' || value === 'favorites'
+  return value === 'contacts' || value === 'me' || value === 'favorites' || value === 'moments'
     ? (value as Tab)
     : 'chat'
 })()
@@ -112,6 +116,7 @@ const fileInput = ref<HTMLInputElement | null>(null)
 const tabs = [
   { key: 'chat', label: '消息', icon: MessageCircle },
   { key: 'contacts', label: '通讯录', icon: Users },
+  { key: 'moments', label: '朋友圈', icon: Camera },
   { key: 'me', label: '我的', icon: User },
 ] as const
 
@@ -192,6 +197,7 @@ const tabTitle = computed(
     ({
       chat: '消息',
       contacts: '通讯录',
+      moments: '朋友圈',
       favorites: '收藏',
       me: '我的',
     })[tab.value],
@@ -703,6 +709,12 @@ onMounted(() => {
       </template>
 
       <ContactsView v-else-if="tab === 'contacts'" class="m-embed" />
+      <MomentsView
+        v-else-if="tab === 'moments'"
+        class="m-embed"
+        mobile
+        @profile="(userId, anchor) => emit('profile', String(userId), anchor)"
+      />
       <FavoritesView v-else-if="tab === 'favorites'" class="m-embed" mobile :locate-message="locateFavoriteMessage" @back="tab = 'me'" />
       <MeView v-else class="m-embed" show-favorites @favorites="tab = 'favorites'" />
     </div>
@@ -720,6 +732,9 @@ onMounted(() => {
           <component :is="item.icon" :size="20" :stroke-width="1.85" />
           <span v-if="item.key === 'chat' && totalUnread" class="m-tab-dot">
             {{ totalUnread > 99 ? '99+' : totalUnread }}
+          </span>
+          <span v-else-if="item.key === 'moments' && moments.unread" class="m-tab-dot">
+            {{ moments.unread > 99 ? '99+' : moments.unread }}
           </span>
         </span>
         {{ item.label }}

@@ -4,14 +4,19 @@ import {
   Users,
   Star,
   Settings,
+  Camera,
 } from 'lucide-vue-next'
 import AppAvatar from './AppAvatar.vue'
 import { useAuthStore } from '../stores/auth'
 import { initialsOf } from '../utils/present'
 
-defineProps<{ unread: number }>()
+type ViewKey = 'chat' | 'contacts' | 'moments' | 'favorites' | 'me'
+
+const props = withDefaults(defineProps<{ unread: number; momentUnread?: number }>(), {
+  momentUnread: 0,
+})
 const emit = defineEmits<{
-  (e: 'navigate', view: 'chat' | 'contacts' | 'favorites' | 'me'): void
+  (e: 'navigate', view: ViewKey): void
 }>()
 
 const auth = useAuthStore()
@@ -19,14 +24,22 @@ const auth = useAuthStore()
 const nav = [
   { key: 'chat', icon: MessageCircle, label: '消息' },
   { key: 'contacts', icon: Users, label: '通讯录' },
+  { key: 'moments', icon: Camera, label: '朋友圈' },
   { key: 'favorites', icon: Star, label: '收藏' },
 ] as const
 
 const active = defineModel<string>('active', { default: 'chat' })
 
-function go(view: 'chat' | 'contacts' | 'favorites' | 'me') {
+function go(view: ViewKey) {
   active.value = view
   emit('navigate', view)
+}
+
+/** 聊天未读与朋友圈互动未读共用同一个角标位置。 */
+function badgeOf(key: string): number {
+  if (key === 'chat') return props.unread ?? 0
+  if (key === 'moments') return props.momentUnread ?? 0
+  return 0
 }
 </script>
 
@@ -46,8 +59,8 @@ function go(view: 'chat' | 'contacts' | 'favorites' | 'me') {
         @click="go(item.key)"
       >
         <component :is="item.icon" :size="19" :stroke-width="1.85" />
-        <span v-if="item.key === 'chat' && unread > 0" class="rail-badge num">
-          {{ unread > 99 ? '99+' : unread }}
+        <span v-if="badgeOf(item.key) > 0" class="rail-badge num">
+          {{ badgeOf(item.key) > 99 ? '99+' : badgeOf(item.key) }}
         </span>
       </button>
     </nav>

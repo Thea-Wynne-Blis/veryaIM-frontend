@@ -11,6 +11,7 @@ import ConversationSearchDialog from '../components/ConversationSearchDialog.vue
 import MobileWorkspace from '../components/MobileWorkspace.vue'
 import ContactsView from '../components/ContactsView.vue'
 import FavoritesView from '../components/FavoritesView.vue'
+import MomentsView from '../components/moments/MomentsView.vue'
 import MeView from '../components/MeView.vue'
 import NewChatDialog from '../components/NewChatDialog.vue'
 import CreateGroupDialog from '../components/CreateGroupDialog.vue'
@@ -22,6 +23,7 @@ import { useTheme } from '../composables/useTheme'
 import { useToast } from '../composables/useToast'
 import { useChatStore } from '../stores/chat'
 import { useAuthStore } from '../stores/auth'
+import { useMomentsStore } from '../stores/moments'
 import type { Attachment, ChatMessage, Conversation } from '../types/chat'
 import { parseJson, sameId, api, ApiError, type ConversationCard, type Id, type MessageView, type MessagePage } from '../api/client'
 import { clockTime, conversationPreview, humanBytes, initialsOf, listTime, toneOf, toneOfConversation } from '../utils/present'
@@ -32,6 +34,7 @@ const isMobile = useIsMobile(768)
 const { apply: applyTheme } = useTheme()
 const chat = useChatStore()
 const auth = useAuthStore()
+const moments = useMomentsStore()
 
 const detailOpen = ref(true)
 /** 全局搜索面板与详情面板共用右侧栏位，互斥显示。 */
@@ -73,10 +76,10 @@ async function onGroupRemoved() {
   await chat.loadCards()
 }
 
-/** 当前一级导航：chat / contacts / favorites / me */
+/** 当前一级导航：chat / contacts / moments / favorites / me */
 const view = computed(() => {
   const name = String(route.name ?? 'chat')
-  if (name === 'contacts' || name === 'favorites' || name === 'me') {
+  if (name === 'contacts' || name === 'moments' || name === 'favorites' || name === 'me') {
     return name
   }
   return 'chat'
@@ -352,6 +355,7 @@ function navigate(target: string) {
   const map: Record<string, string> = {
     chat: '/app/chat',
     contacts: '/app/contacts',
+    moments: '/app/moments',
     favorites: '/app/favorites',
     me: '/app/me',
   }
@@ -588,6 +592,7 @@ onMounted(async () => {
   }
   chat.startPolling(3000)
   chat.startRealtime()
+  moments.listen()
 })
 
 onBeforeUnmount(() => {
@@ -596,6 +601,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('keydown', onGlobalKeydown)
   chat.stopRealtime()
   chat.stopPolling()
+  moments.stopListening()
 })
 </script>
 
@@ -692,9 +698,11 @@ onBeforeUnmount(() => {
       <NavRail
         :active="view"
         :unread="chat.totalUnread"
+        :moment-unread="moments.unread"
         @navigate="navigate"
       />
       <ContactsView v-if="view === 'contacts'" />
+      <MomentsView v-else-if="view === 'moments'" @profile="(id, anchor) => openProfile(id, anchor)" />
       <FavoritesView v-else-if="view === 'favorites'" :locate-message="openFavoriteMessage" />
       <MeView v-else />
     </div>
