@@ -5,7 +5,6 @@ import { useMessageActions } from '../composables/useMessageActions'
 import {
   MessageCircle,
   Users,
-  FolderOpen,
   User,
   Search,
   Plus,
@@ -30,7 +29,6 @@ import {
 } from 'lucide-vue-next'
 import AppAvatar from './AppAvatar.vue'
 import ContactsView from './ContactsView.vue'
-import FilesView from './FilesView.vue'
 import MeView from './MeView.vue'
 import MessageAttachment from './MessageAttachment.vue'
 import DetailPanel from './DetailPanel.vue'
@@ -74,12 +72,12 @@ const emit = defineEmits<{
 
 const chat = useChatStore()
 
-type Tab = 'chat' | 'contacts' | 'files' | 'favorites' | 'me'
+type Tab = 'chat' | 'contacts' | 'favorites' | 'me'
 
-/** 支持 ?tab=files 直接落地到指定页，便于演示与截图。 */
+/** 支持 ?tab=favorites 直接落地到指定页，便于演示与截图。 */
 const initialTab = (() => {
   const value = new URLSearchParams(window.location.search).get('tab') ?? props.initialView
-  return value === 'contacts' || value === 'files' || value === 'me' || value === 'favorites'
+  return value === 'contacts' || value === 'me' || value === 'favorites'
     ? (value as Tab)
     : 'chat'
 })()
@@ -114,7 +112,6 @@ const fileInput = ref<HTMLInputElement | null>(null)
 const tabs = [
   { key: 'chat', label: '消息', icon: MessageCircle },
   { key: 'contacts', label: '通讯录', icon: Users },
-  { key: 'files', label: '文件', icon: FolderOpen },
   { key: 'me', label: '我的', icon: User },
 ] as const
 
@@ -195,7 +192,6 @@ const tabTitle = computed(
     ({
       chat: '消息',
       contacts: '通讯录',
-      files: '文件',
       favorites: '收藏',
       me: '我的',
     })[tab.value],
@@ -706,9 +702,6 @@ onMounted(() => {
         </div>
       </template>
 
-      <!-- 文件 -->
-      <FilesView v-else-if="tab === 'files'" class="m-embed" />
-
       <ContactsView v-else-if="tab === 'contacts'" class="m-embed" />
       <FavoritesView v-else-if="tab === 'favorites'" class="m-embed" mobile :locate-message="locateFavoriteMessage" @back="tab = 'me'" />
       <MeView v-else class="m-embed" show-favorites @favorites="tab = 'favorites'" />
@@ -1103,19 +1096,7 @@ onMounted(() => {
   user-select: none;
 }
 
-.msg.flash .msg-main {
-  border-radius: 14px;
-  animation: msg-flash 1.1s var(--ease-out);
-}
 
-@keyframes msg-flash {
-  0% {
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent);
-  }
-  100% {
-    box-shadow: 0 0 0 2px transparent;
-  }
-}
 
 .m-quote-bar {
   display: flex;

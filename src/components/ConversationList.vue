@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Search, Plus, Pin, Bell, BellOff, UserPlus, Users, MailOpen, EyeOff, Trash2, PinOff } from 'lucide-vue-next'
 import AppAvatar from './AppAvatar.vue'
 import { trackSpotlight } from '../composables/usePointerFx'
+import { api, type Id } from '../api/client'
+import { initialsOf, toneOfPerson } from '../utils/present'
 import type { Conversation } from '../types/chat'
 
 const props = defineProps<{
@@ -21,12 +23,59 @@ const emit = defineEmits<{
   (e: 'mute', id: string, muted: boolean): void
   (e: 'hide', id: string): void
   (e: 'remove', id: string): void
-  (e: 'open-search'): void
+  (e: 'open-contact', userId: Id, name: string): void
 }>()
 
 type Filter = 'all' | 'unread'
 const filter = ref<Filter>('all')
 const keyword = ref('')
+const searchInput = ref<HTMLInputElement | null>(null)
+
+/** 搜索框同时查联系人：第一次输入时懒加载好友列表 */
+type Contact = { friendId: Id; nickname: string; remark?: string | null; online?: boolean }
+const contacts = ref<Contact[]>([])
+let contactsLoaded = false
+
+async function ensureContacts() {
+  if (contactsLoaded) return
+  contactsLoaded = true
+  try {
+    const data = await api.get<{ friends?: Contact[] }>('/contacts')
+    contacts.value = Array.isArray(data?.friends) ? data.friends : []
+  } catch {
+    contactsLoaded = false
+  }
+}
+
+watch(keyword, (value) => {
+  if (value.trim()) void ensureContacts()
+})
+
+/** 已经有会话的联系人会出现在上面的会话列表里，这里只补还没聊过的人 */
+const contactHits = computed(() => {
+  const kw = keyword.value.trim().toLowerCase()
+  if (!kw) return []
+  const chatted = new Set(
+    props.conversations.map((item) => item.peerId).filter(Boolean).map(String),
+  )
+  return contacts.value
+    .filter((friend) => {
+      const label = (friend.remark?.trim() || friend.nickname || '').toLowerCase()
+      return label.includes(kw) || friend.nickname.toLowerCase().includes(kw)
+    })
+    .filter((friend) => !chatted.has(String(friend.friendId)))
+    .slice(0, 8)
+})
+
+function contactName(friend: Contact): string {
+  return friend.remark?.trim() || friend.nickname
+}
+
+function focusSearch() {
+  searchInput.value?.focus()
+}
+
+defineExpose({ focusSearch })
 
 const totalUnread = computed(() =>
   props.conversations.reduce((sum, item) => sum + item.unread, 0),
@@ -153,17 +202,15 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <label class="search" @click.prevent="emit('open-search')">
+      <label class="search">
         <Search class="search-icon" :size="15" :stroke-width="2" />
         <input
+          ref="searchInput"
           v-model="keyword"
           type="search"
           placeholder="搜索会话、联系人"
-          aria-label="搜索会话"
-          readonly
-          @click.prevent
+          aria-label="搜索会话、联系人"
         />
-        <kbd>⌘K</kbd>
       </label>
 
       <!-- Rubber Segment -->
@@ -288,8 +335,32 @@ onBeforeUnmount(() => {
         </span>
       </button>
 
-      <p v-if="!visible.length" class="empty-text">
-        没有匹配的会话，换个关键词试试。
+      <template v-if="contactHits.length">
+        <p class="list-group-label">联系人</p>
+        <button
+          v-for="friend in contactHits"
+          :key="`contact-${friend.friendId}`"
+          class="conv spot"
+          @pointermove="trackSpotlight"
+          @click="emit('open-contact', friend.friendId, contactName(friend))"
+        >
+          <AppAvatar
+            :initials="initialsOf(contactName(friend))"
+            :tone="toneOfPerson(friend.friendId)"
+            :presence="friend.online ? 'online' : 'offline'"
+            size="md"
+          />
+          <span class="conv-main">
+            <span class="conv-top">
+              <span class="conv-name">{{ contactName(friend) }}</span>
+            </span>
+            <span class="conv-preview">联系人 · 点击发起聊天</span>
+          </span>
+        </button>
+      </template>
+
+      <p v-if="!visible.length && !contactHits.length" class="empty-text">
+        {{ keyword.trim() ? '没有找到相关会话或联系人，换个关键词试试。' : '还没有会话' }}
       </p>
     </div>
 

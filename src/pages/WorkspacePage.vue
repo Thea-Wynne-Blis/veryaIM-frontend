@@ -10,7 +10,6 @@ import SearchPanel from '../components/SearchPanel.vue'
 import ConversationSearchDialog from '../components/ConversationSearchDialog.vue'
 import MobileWorkspace from '../components/MobileWorkspace.vue'
 import ContactsView from '../components/ContactsView.vue'
-import FilesView from '../components/FilesView.vue'
 import FavoritesView from '../components/FavoritesView.vue'
 import MeView from '../components/MeView.vue'
 import NewChatDialog from '../components/NewChatDialog.vue'
@@ -39,6 +38,7 @@ const detailOpen = ref(true)
 const searchOpen = ref(false)
 const historyConversation = ref<Conversation | null>(null)
 const chatPane = ref<InstanceType<typeof ChatPane> | null>(null)
+const conversationList = ref<InstanceType<typeof ConversationList> | null>(null)
 const mobileWorkspace = ref<InstanceType<typeof MobileWorkspace> | null>(null)
 let navigationVersion = 0
 const dialogOpen = ref(false)
@@ -73,10 +73,10 @@ async function onGroupRemoved() {
   await chat.loadCards()
 }
 
-/** 当前一级导航：chat / contacts / files / favorites / me */
+/** 当前一级导航：chat / contacts / favorites / me */
 const view = computed(() => {
   const name = String(route.name ?? 'chat')
-  if (name === 'contacts' || name === 'files' || name === 'favorites' || name === 'me') {
+  if (name === 'contacts' || name === 'favorites' || name === 'me') {
     return name
   }
   return 'chat'
@@ -352,7 +352,6 @@ function navigate(target: string) {
   const map: Record<string, string> = {
     chat: '/app/chat',
     contacts: '/app/contacts',
-    files: '/app/files',
     favorites: '/app/favorites',
     me: '/app/me',
   }
@@ -369,6 +368,17 @@ async function handleCreated(conversationId: string) {
 function onOpenChatRequest(event: Event) {
   const id = (event as CustomEvent<string>).detail
   if (id) select(id)
+}
+
+/** 左侧搜索里点「联系人」：有会话就直接进，没有就现建一个私聊 */
+async function onOpenContact(userId: Id) {
+  try {
+    const conversationId = await chat.createPrivate(userId)
+    await chat.loadCards()
+    await select(conversationId)
+  } catch (e) {
+    showToast(messageOf(e, '发起会话失败'))
+  }
 }
 
 function onUnauthorized() {
@@ -480,7 +490,7 @@ async function onFavorite(message: ChatMessage) {
   }
 }
 
-/** ⌘K / Ctrl+K 打开搜索，和会话列表里的提示一致。 */
+/** ⌘K / Ctrl+K：桌面端聚焦左侧搜索框，移动端打开搜索页 */
 function onGlobalKeydown(event: KeyboardEvent) {
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f' && view.value === 'chat' && activeConversation.value) {
     event.preventDefault()
@@ -490,7 +500,8 @@ function onGlobalKeydown(event: KeyboardEvent) {
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
     if (view.value !== 'chat') return
     event.preventDefault()
-    openSearch()
+    if (isMobile.value) openSearch()
+    else conversationList.value?.focusSearch()
   }
 }
 
@@ -623,7 +634,7 @@ onBeforeUnmount(() => {
     <div class="grain" aria-hidden="true" />
 
     <!-- 聊天：四栏 -->
-    <div v-if="view === 'chat'" class="frame" :class="{ 'detail-open': detailOpen || searchOpen }">
+    <div v-if="view === 'chat'" class="frame" :class="{ 'detail-open': detailOpen }">
       <NavRail
         :active="view"
         :unread="chat.totalUnread"
@@ -631,6 +642,7 @@ onBeforeUnmount(() => {
       />
 
       <ConversationList
+        ref="conversationList"
         :conversations="conversations"
         :active-id="chat.activeId"
         @select="select"
@@ -641,7 +653,7 @@ onBeforeUnmount(() => {
         @mute="onConvMute"
         @hide="onConvHide"
         @remove="onConvDelete"
-        @open-search="openSearch"
+        @open-contact="onOpenContact"
       />
 
       <ChatPane
@@ -660,16 +672,8 @@ onBeforeUnmount(() => {
         @profile="(id, anchor) => openProfile(id, anchor)"
       />
 
-      <SearchPanel
-        v-if="searchOpen"
-        @close="closeSearch"
-        @open-conversation="openFromSearch"
-        @open-user-chat="openUserChat"
-        @profile="(id, anchor) => openProfile(id, anchor)"
-      />
-
       <DetailPanel
-        v-else-if="detailOpen && activeConversation"
+        v-if="detailOpen && activeConversation"
         :conversation="activeConversation"
         :members="activeMembers"
         :pinned="chat.isPinned(activeConversation.id)"
@@ -691,7 +695,6 @@ onBeforeUnmount(() => {
         @navigate="navigate"
       />
       <ContactsView v-if="view === 'contacts'" />
-      <FilesView v-else-if="view === 'files'" />
       <FavoritesView v-else-if="view === 'favorites'" :locate-message="openFavoriteMessage" />
       <MeView v-else />
     </div>

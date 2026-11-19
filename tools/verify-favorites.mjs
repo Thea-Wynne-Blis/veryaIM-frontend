@@ -39,6 +39,10 @@ async function assertLocated(selector) {
     return !!area && !!row && row.top >= area.top - 2 && row.bottom <= area.bottom + 2
   }, { selector, id: mid(12) })
   assert.equal(await inside(), true)
+  assert.equal(await page.evaluate(() => window.scrollY === 0 && window.scrollX === 0 &&
+    [...document.querySelectorAll('.stage, .frame')].every(el => el.scrollTop === 0 && el.scrollLeft === 0)), true, '定位只能滚动消息列表')
+  const frame = await page.locator('.frame').count() ? await page.locator('.frame').boundingBox() : null
+  if (frame) assert.ok(frame.y >= 0 && frame.y + frame.height <= page.viewportSize().height + 1, '外框必须保持完整可见')
   await page.waitForTimeout(300)
   assert.equal(await inside(), true)
 }
@@ -106,6 +110,10 @@ try {
   await page.locator(`[data-mid="${mid(12)}"].flash`).waitFor()
   assert.equal(contextCalls.at(-1), mid(12))
   await assertLocated('.messages')
+  await page.setViewportSize({ width: 1688, height: 842 })
+  await assertLocated('.messages')
+  await page.screenshot({ path: '.shots/workspace-compact.png' })
+  assert.ok((await page.locator('.frame').boundingBox()).width <= 1280)
   await page.setViewportSize({ width: 1440, height: 860 })
   await assertLocated('.messages')
   await page.getByRole('button', { name: '收藏', exact: true }).click()

@@ -4,6 +4,7 @@ import type { ChatMessage } from '../types/chat'
 import { messageOf } from '../utils/error'
 import { canRecallAt, copyTextOf, midOf, quotePreviewOf } from '../utils/message'
 import { useTranslatePrefs } from './useTranslatePrefs'
+import { centerMessage } from '../utils/scroll'
 
 export type ReplyDraft = { messageId: string; senderId: string; author: string; preview: string }
 
@@ -130,12 +131,13 @@ export function useMessageActions(options: MessageActionsOptions) {
 
   /** 点击引用块定位原消息；不在已加载范围时给出提示。 */
   function locateMessage(messageId: string) {
-    const el = options.scroller()?.querySelector<HTMLElement>(`[data-mid="${messageId}"]`)
-    if (!el) {
+    const container = options.scroller()
+    const el = container?.querySelector<HTMLElement>(`[data-mid="${CSS.escape(messageId)}"]`)
+    if (!container || !el) {
       options.showNotice('原消息不在当前已加载的记录里')
       return
     }
-    el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    centerMessage(container, el)
     el.classList.add('flash')
     window.setTimeout(() => el.classList.remove('flash'), 1200)
   }

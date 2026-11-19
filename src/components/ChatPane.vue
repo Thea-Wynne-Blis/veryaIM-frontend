@@ -986,19 +986,7 @@ watch(() => props.messages.length, () => scrollToBottom())
 }
 
 /* 定位原消息时闪一下描边，不动画布局。 */
-.msg.flash .msg-main {
-  border-radius: 14px;
-  animation: msg-flash 1.1s var(--ease-out);
-}
 
-@keyframes msg-flash {
-  0% {
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent);
-  }
-  100% {
-    box-shadow: 0 0 0 2px transparent;
-  }
-}
 
 /* ---------- 译文 ---------- */
 .bubble.translation {

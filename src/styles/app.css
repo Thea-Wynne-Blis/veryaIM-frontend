@@ -11,7 +11,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 40px;
+  padding: 28px;
   overflow: hidden;
   background: var(--page);
   transition: background var(--dur-3) var(--ease-out);
@@ -47,7 +47,7 @@
   inset: -18%;
   pointer-events: none;
   filter: blur(96px);
-  opacity: 0.34;
+  opacity: 0.18;
 }
 
 .aura i {
@@ -105,9 +105,9 @@
   display: grid;
   grid-template-columns: var(--rail-w) var(--list-w) minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
-  width: min(1400px, 100%);
-  height: min(900px, calc(100vh - 80px));
-  border-radius: var(--r-xl);
+  width: min(1280px, 100%);
+  height: min(800px, calc(100dvh - 56px));
+  border-radius: 18px;
   overflow: hidden;
   background: var(--canvas);
   border: 1px solid var(--line);
@@ -139,14 +139,14 @@
   -webkit-mask-composite: xor;
   mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   mask-composite: exclude;
-  opacity: 0.55;
+  opacity: 0.18;
   pointer-events: none;
   transition: opacity var(--dur-3) var(--ease-out);
 }
 
 .frame:focus-within::after,
 .frame:hover::after {
-  opacity: 0.9;
+  opacity: 0.3;
 }
 
 /* ===========================================================
@@ -937,6 +937,14 @@
 .msg.enter {
   animation-delay: min(calc(var(--enter-order, 0) * 10ms), 100ms);
 }
+
+.msg.flash .bubble { animation: message-locate-pulse 1.3s ease-out; }
+@keyframes message-locate-pulse {
+  0%, 35% { box-shadow: 0 0 0 4px var(--accent-ring), 0 4px 16px -6px var(--accent); }
+  65% { box-shadow: 0 0 0 2px var(--accent-ring); }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+@media (prefers-reduced-motion: reduce) { .msg.flash .bubble { animation-duration: .1s; outline: 2px solid var(--accent); outline-offset: 2px; } }
 
 /* 日期分隔：两侧渐隐发丝线 */
 .day-divider {
@@ -2315,7 +2323,7 @@
     padding: 24px;
   }
   .frame {
-    height: min(900px, calc(100vh - 48px));
+    height: min(800px, calc(100dvh - 48px));
   }
   .frame,
   .frame.detail-open {
@@ -2331,7 +2339,7 @@
     padding: 16px;
   }
   .frame {
-    height: min(900px, calc(100vh - 32px));
+    height: min(800px, calc(100dvh - 32px));
     border-radius: var(--r-lg);
   }
   .frame,

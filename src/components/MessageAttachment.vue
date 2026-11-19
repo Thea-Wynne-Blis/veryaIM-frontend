@@ -12,8 +12,10 @@ import {
 import { downloadFile, fileObjectUrl, thumbObjectUrl } from '../api/client'
 import type { Attachment } from '../types/chat'
 import { formatDuration } from '../utils/media'
+import { useFilePreview } from '../composables/useFilePreview'
 
 const props = defineProps<{ attachment: Attachment }>()
+const { openFilePreview } = useFilePreview()
 
 /** 气泡里显示缩略图/封面；原图、视频、音频都只在点开时才下载。 */
 const thumb = ref('')
@@ -179,19 +181,12 @@ async function download() {
   }
 }
 
-/** 点击才取原图；object URL 由 api 层缓存，反复打开不会重复下载。 */
-async function openPreview() {
+/** 文件名与图片点击统一进入站内预览，下载保留为独立操作。 */
+function openPreview() {
   const fileId = props.attachment.fileId
-  if (!fileId || opening.value) return
-  opening.value = true
-  try {
-    const url = await fileObjectUrl(fileId)
-    window.open(url, '_blank', 'noopener')
-  } catch {
-    failed.value = true
-  } finally {
-    opening.value = false
-  }
+  if (fileId == null) return
+  openFilePreview({ fileId, name: props.attachment.name, contentType: props.attachment.contentType
+    || (props.attachment.kind === 'image' ? 'image/jpeg' : undefined) })
 }
 
 onMounted(() => {
@@ -225,7 +220,7 @@ watch(
 
 <template>
   <div v-if="isImage" class="bubble media">
-    <button class="image-wrap" type="button" title="打开原图" @click="openPreview">
+    <button class="image-wrap" type="button" title="预览图片" :aria-label="`预览 ${attachment.name}`" @click="openPreview">
       <img
         v-if="thumb"
         :src="thumb"
@@ -325,22 +320,27 @@ watch(
     />
   </div>
 
-  <div v-else class="bubble" style="padding: 9px">
-    <button class="attach" type="button" :disabled="downloading" @click="download">
+  <div v-else class="bubble file-bubble" style="padding: 9px">
+    <button class="attach" type="button" :aria-label="`预览 ${attachment.name}`" @click="openPreview">
       <span class="attach-icon">
         <Loader2 v-if="downloading" :size="16" class="spin" />
         <FileText v-else :size="17" :stroke-width="1.8" />
       </span>
       <span class="attach-meta">
         <span class="attach-name">{{ attachment.name }}</span>
-        <span class="attach-size">{{ attachment.size }}</span>
+        <span class="attach-size">{{ attachment.size }} · 点击预览</span>
       </span>
-      <Download :size="14" :stroke-width="1.9" class="attach-download" />
     </button>
+    <button class="file-bubble-download" :aria-label="`下载 ${attachment.name}`" :disabled="downloading" @click="download"><Loader2 v-if="downloading" :size="15" class="spin" /><Download v-else :size="15" /></button>
   </div>
 </template>
 
 <style scoped>
+.file-bubble { position: relative; }
+.file-bubble .attach { padding-right: 32px; }
+.file-bubble-download { position: absolute; right: 5px; top: 50%; transform: translateY(-50%); width: 32px; height: 36px; display: grid; place-items: center; color: inherit; opacity: .65; border-radius: 5px; }
+.file-bubble-download:hover { opacity: 1; background: color-mix(in srgb, currentColor 8%, transparent); }
+.attach-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .image-wrap {
   display: block;
   padding: 0;

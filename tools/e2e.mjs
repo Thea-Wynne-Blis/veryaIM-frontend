@@ -87,11 +87,10 @@ try {
   if ((await page.locator('.bubble', { hasText: text }).count()) > 0) ok('刷新后消息仍在')
   else bad('刷新后消息丢失')
 
-  /* ---------- 5. 通讯录 / 文件 / 我的 ---------- */
+  /* ---------- 5. 通讯录 / 我的 ---------- */
   step('5. 页面切换')
   for (const [label, path, marker] of [
     ['通讯录', '/app/contacts', '.view-title'],
-    ['文件', '/app/files', '.files-title'],
     ['我的', '/app/me', '.me-card'],
   ]) {
     await page.goto(`${BASE}${path}`, { waitUntil: 'domcontentloaded' })

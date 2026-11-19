@@ -2,11 +2,12 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   Search, X, ArrowLeft, Loader2, Users, MessageSquare, FileText,
-  Image as ImageIcon, Film, Mic, Download, CornerDownLeft,
+  Image as ImageIcon, Film, Mic, CornerDownLeft,
 } from 'lucide-vue-next'
 import AppAvatar from './AppAvatar.vue'
 import SearchHighlight from './SearchHighlight.vue'
-import { api, downloadFile, type Id, type SearchResults } from '../api/client'
+import { api, type Id, type SearchResults } from '../api/client'
+import { useFilePreview } from '../composables/useFilePreview'
 import { useAuthStore } from '../stores/auth'
 import { humanBytes, initialsOf, listTime, toneOfPerson } from '../utils/present'
 
@@ -20,12 +21,12 @@ const emit = defineEmits<{
 }>()
 
 const auth = useAuthStore()
+const { openFilePreview } = useFilePreview()
 const keyword = ref('')
 const loading = ref(false)
 const error = ref('')
 const result = ref<SearchResults | null>(null)
 const input = ref<HTMLInputElement | null>(null)
-const downloading = ref<Id | null>(null)
 let debounce: number | null = null
 let requestVersion = 0
 const composing = ref(false)
@@ -102,17 +103,6 @@ function openConversation(conversationId: string, messageId?: string) {
 
 function openUser(userId: Id, event: MouseEvent) {
   emit('profile', String(userId), event.currentTarget as HTMLElement)
-}
-
-async function download(fileId: Id, name: string) {
-  downloading.value = fileId
-  try {
-    await downloadFile(fileId, name)
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : '下载失败'
-  } finally {
-    downloading.value = null
-  }
 }
 
 onMounted(() => input.value?.focus())
@@ -251,7 +241,7 @@ onBeforeUnmount(() => {
             <span class="hit-icon">
               <component :is="iconOf(hit.type)" :size="15" :stroke-width="1.9" />
             </span>
-            <button class="hit-main as-button" @click="openConversation(hit.conversationId, String(hit.messageId))">
+            <button class="hit-main as-button" :aria-label="`预览 ${hit.name}`" @click="openFilePreview({ fileId: hit.fileId, name: hit.name, contentType: hit.contentType, sizeBytes: hit.sizeBytes })">
               <SearchHighlight class="hit-name" :text="hit.name" :keyword="keyword" />
               <span class="hit-sub">
                 {{ humanBytes(hit.sizeBytes) }} · {{ hit.senderName }} ·
@@ -261,12 +251,10 @@ onBeforeUnmount(() => {
             <button
               class="hit-download"
               type="button"
-              :aria-label="`下载 ${hit.name}`"
-              :disabled="downloading === hit.fileId"
-              @click="download(hit.fileId, hit.name)"
+              :aria-label="`查看原消息：${hit.name}`"
+              @click="openConversation(hit.conversationId, String(hit.messageId))"
             >
-              <Loader2 v-if="downloading === hit.fileId" :size="14" class="spin" />
-              <Download v-else :size="14" :stroke-width="1.9" />
+              <CornerDownLeft :size="14" :stroke-width="1.9" />
             </button>
           </div>
         </section>

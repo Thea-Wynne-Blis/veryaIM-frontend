@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { Search, X, ArrowLeft, Loader2, FileText, Image as ImageIcon, Film, Mic, Download, MessageSquare, RotateCcw } from 'lucide-vue-next'
+import { Search, X, ArrowLeft, CornerDownLeft, Loader2, FileText, Image as ImageIcon, Film, Mic, MessageSquare, RotateCcw } from 'lucide-vue-next'
 import AppAvatar from './AppAvatar.vue'
 import SearchHighlight from './SearchHighlight.vue'
-import { api, downloadFile, type ConversationSearchHit, type ConversationSearchPage, type Id } from '../api/client'
+import { api, type ConversationSearchHit, type ConversationSearchPage } from '../api/client'
+import { useFilePreview } from '../composables/useFilePreview'
 import { useAuthStore } from '../stores/auth'
 import type { ChatMember } from '../stores/chat'
 import type { Conversation } from '../types/chat'
@@ -15,6 +16,7 @@ const emit = defineEmits<{
   (e: 'locate', conversationId: string, messageId: string, seq: number): void
 }>()
 const auth = useAuthStore()
+const { openFilePreview } = useFilePreview()
 const dialog = ref<HTMLDialogElement | null>(null)
 const input = ref<HTMLInputElement | null>(null)
 const keyword = ref('')
@@ -26,8 +28,6 @@ const cursor = ref<string | null>(null)
 const hasMore = ref(false)
 const loading = ref(true)
 const error = ref('')
-const downloadError = ref('')
-const downloading = ref<Id | null>(null)
 const composing = ref(false)
 const results = ref<HTMLElement | null>(null)
 let debounce: ReturnType<typeof setTimeout> | undefined
@@ -110,13 +110,9 @@ function timestamp(value: string) {
   return new Date(value).toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })
 }
 
-async function download(row: ConversationSearchHit) {
-  if (row.fileId == null || downloading.value != null) return
-  downloading.value = row.fileId
-  downloadError.value = ''
-  try { await downloadFile(row.fileId, row.fileName ?? '文件') }
-  catch (e) { downloadError.value = e instanceof Error ? e.message : '下载失败，请重试' }
-  finally { downloading.value = null }
+function openResult(row: ConversationSearchHit) {
+  if (row.fileId != null) openFilePreview({ fileId: row.fileId, name: row.fileName || '附件', contentType: row.contentType, sizeBytes: row.sizeBytes })
+  else emit('locate', props.conversation.id, String(row.messageId), row.seq)
 }
 
 onMounted(() => {
@@ -163,9 +159,8 @@ onBeforeUnmount(() => {
       </div>
       <div ref="results" class="history-results" :aria-busy="loading">
         <div class="history-count" role="status" aria-live="polite">{{ loading && !rows.length ? '正在查找…' : `${filtered ? '找到' : '最近'} ${rows.length}${hasMore ? '+' : ''} 条记录` }}<span v-if="rows.length">按时间从新到旧排列 · 点击查看上下文</span></div>
-        <p v-if="downloadError" class="history-error" role="alert">{{ downloadError }}</p>
         <article v-for="row in rows" :key="String(row.messageId)" class="history-hit">
-          <button class="history-hit-main" :aria-label="`定位 ${row.senderName} 的消息：${row.fileName || row.text}`" @click="emit('locate', conversation.id, String(row.messageId), row.seq)">
+          <button class="history-hit-main" :aria-label="row.fileId != null ? `预览 ${row.fileName}` : `定位 ${row.senderName} 的消息：${row.text}`" @click="openResult(row)">
             <AppAvatar :initials="initialsOf(row.senderName)" :tone="toneOfPerson(row.senderId, auth.user?.userId)" size="md" />
             <span class="history-hit-content">
               <span class="history-hit-meta"><span>{{ row.senderName }}</span><time :datetime="row.createdAt">{{ timestamp(row.createdAt) }}</time></span>
@@ -176,7 +171,7 @@ onBeforeUnmount(() => {
               <SearchHighlight v-else class="history-message" :text="row.text" :keyword="keyword" />
             </span>
           </button>
-          <button v-if="row.fileId != null" class="icon-btn history-download" :disabled="downloading != null" :aria-label="`下载 ${row.fileName}`" @click="download(row)"><Loader2 v-if="downloading === row.fileId" :size="17" class="spin" /><Download v-else :size="17" /></button>
+          <button v-if="row.fileId != null" class="icon-btn history-download" :aria-label="`查看原消息：${row.fileName}`" @click="emit('locate', conversation.id, String(row.messageId), row.seq)"><CornerDownLeft :size="17" /></button>
         </article>
         <div v-if="!rows.length && !loading && !error" class="history-empty"><MessageSquare :size="34" :stroke-width="1.2" /><p>{{ filtered ? '没有找到相关聊天内容' : '暂无聊天记录' }}</p><span>{{ filtered ? '试试其他关键词，或调整分类、发送人与日期' : '聊天中的文字、文件和图片都会出现在这里' }}</span><button v-if="filtered" @click="reset">清除筛选</button></div>
         <div v-if="error" class="history-error" role="alert"><p>{{ error }}</p><button @click="run(rows.length > 0)">重试</button></div>

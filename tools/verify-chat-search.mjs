@@ -250,7 +250,8 @@ try {
     const box = await bubble.boundingBox()
     assert.ok(box.x >= 0 && box.x + box.width <= 320)
   }
-  assert.ok(messageArea.width <= 320)
+  // 入场过渡中的矩形可能存在亚像素舍入误差。
+  assert.ok(messageArea.width <= 320.5)
   await mobileChat.getByRole('button', { name: '返回', exact: true }).click()
   for (const tab of ['文件', '通讯录', '我的']) {
     await page.getByRole('navigation', { name: '主导航' }).getByRole('button', { name: tab, exact: true }).click()

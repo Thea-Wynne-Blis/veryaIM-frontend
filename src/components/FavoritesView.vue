@@ -4,13 +4,13 @@ import { Star, Search, Loader2, RefreshCw, Download, FileText, Image as ImageIco
 import AppAvatar from './AppAvatar.vue'
 import FavoriteMedia from './FavoriteMedia.vue'
 import SearchHighlight from './SearchHighlight.vue'
-import MessageAttachment from './MessageAttachment.vue'
+import FilePreviewContent from './FilePreviewContent.vue'
 import { api, downloadFile, type Favorite, type Id } from '../api/client'
 import { useToast } from '../composables/useToast'
 import { messageOf } from '../utils/error'
 import { humanBytes, initialsOf, listTime, toneOfPerson } from '../utils/present'
 import { favoriteExcerpt, favoriteKind, favoriteTitle, type FavoriteKind } from '../utils/favorites'
-import type { Attachment } from '../types/chat'
+import type { PreviewFile } from '../utils/filePreview'
 
 const props = withDefaults(defineProps<{
   mobile?: boolean
@@ -45,12 +45,11 @@ const filtered = computed(() => rows.value.filter(row =>
     value?.toLowerCase().includes(query.value.toLowerCase())),
 ))
 const narrowed = computed(() => !!query.value || category.value !== 'ALL')
-const attachment = computed<Attachment | null>(() => selected.value?.fileId ? {
+const attachment = computed<PreviewFile | null>(() => selected.value?.fileId ? {
   fileId: selected.value.fileId,
   name: selected.value.fileName || '收藏附件',
-  size: humanBytes(selected.value.sizeBytes ?? 0),
-  contentType: selected.value.contentType || undefined,
-  kind: selected.value.type === 'VIDEO' ? 'video' : 'audio',
+  sizeBytes: selected.value.sizeBytes,
+  contentType: selected.value.contentType || (selected.value.type === 'IMAGE' ? 'image/jpeg' : selected.value.type === 'AUDIO' ? 'audio/webm' : selected.value.type === 'VIDEO' ? 'video/mp4' : undefined),
 } : null)
 
 function iconOf(row: Favorite) {
@@ -167,9 +166,7 @@ onBeforeUnmount(() => { locationRequest?.abort(); dialog.value?.close() })
         <header class="favorite-detail-head"><span class="favorite-bookmark"><Star :size="20" :stroke-width="1.7" /></span><h2 id="favorite-detail-title">收藏详情</h2><button class="icon-btn" aria-label="关闭收藏详情" @click="closeDetail"><X :size="20" /></button></header>
         <div class="favorite-detail-body">
           <div class="favorite-origin"><AppAvatar :initials="initialsOf(selected.senderName)" :tone="toneOfPerson(selected.senderId)" size="md" /><div><p>{{ selected.senderName }}<span> · {{ selected.conversationTitle }}</span></p><time :datetime="selected.createdAt">收藏于 {{ fullTime(selected.createdAt) }}</time></div></div>
-          <FavoriteMedia v-if="selected.type === 'IMAGE' && selected.fileId" :key="String(selected.id)" :file-id="selected.fileId" :name="favoriteTitle(selected)" full />
-          <div v-else-if="selected.type === 'FILE'" class="favorite-file-detail"><span class="fav-document"><FileText :size="32" :stroke-width="1.4" /><span>{{ extension(selected) }}</span></span><h3>{{ favoriteTitle(selected) }}</h3><p>{{ extension(selected) }}<template v-if="selected.sizeBytes != null"> · {{ humanBytes(selected.sizeBytes) }}</template></p></div>
-          <div v-else-if="attachment && (selected.type === 'AUDIO' || selected.type === 'VIDEO')" class="favorite-player"><MessageAttachment :key="String(selected.id)" :attachment="attachment" /></div>
+          <FilePreviewContent v-if="attachment" :key="String(selected.id)" :file="attachment" />
           <p v-else class="favorite-full-text">{{ favoriteTitle(selected) }}</p>
           <p v-if="detailError" class="favorite-detail-error" role="alert">{{ detailError }}</p>
         </div>
