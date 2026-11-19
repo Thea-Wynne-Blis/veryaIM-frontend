@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref, watch } from 'vue'
-import { Film, Play } from 'lucide-vue-next'
+import { ImageOff, Play } from 'lucide-vue-next'
 import { momentThumbUrl, type MomentMediaItem } from '../../api/moments'
 import type { Id } from '../../api/client'
 
@@ -49,10 +49,11 @@ function thumbOf(item: MomentMediaItem): string | undefined {
   return thumbs.value[String(item.fileId)]
 }
 
-function ratioOf(item: MomentMediaItem): string {
-  if (!item.width || !item.height) return '4 / 3'
-  const ratio = item.width / item.height
-  return `${Math.min(2.2, Math.max(0.62, ratio))}`
+function ratioOf(item: MomentMediaItem): number {
+  if (item.width > 0 && item.height > 0) {
+    return Math.min(2.2, Math.max(0.62, item.width / item.height))
+  }
+  return 4 / 3
 }
 
 function durationOf(seconds: number | null | undefined): string {
@@ -71,7 +72,7 @@ function durationOf(seconds: number | null | undefined): string {
       type="button"
       class="mm-cell"
       :class="{ video: item.kind === 'VIDEO', single: media.length === 1 }"
-      :style="media.length === 1 ? { aspectRatio: ratioOf(item) } : undefined"
+      :style="media.length === 1 ? { '--mm-ratio': ratioOf(item) } : undefined"
       :aria-label="item.kind === 'VIDEO' ? '播放视频' : '查看大图'"
       @click="emit('open', index)"
     >
@@ -83,9 +84,8 @@ function durationOf(seconds: number | null | undefined): string {
         loading="lazy"
         decoding="async"
       />
-      <span v-else-if="item.kind === 'IMAGE'" class="mm-placeholder" :class="{ failed: failed[String(item.fileId)] }" />
-      <span v-else class="mm-placeholder video-track">
-        <Film :size="22" :stroke-width="1.4" />
+      <span v-else-if="item.kind === 'IMAGE'" class="mm-placeholder" aria-hidden="true">
+        <ImageOff v-if="failed[String(item.fileId)]" :size="22" :stroke-width="1.5" />
       </span>
       <span v-if="item.kind === 'VIDEO'" class="mm-play"><Play :size="16" fill="currentColor" /></span>
       <span v-if="item.kind === 'VIDEO' && durationOf(item.durationSeconds)" class="mm-duration num">
@@ -96,16 +96,28 @@ function durationOf(seconds: number | null | undefined): string {
 </template>
 
 <style scoped>
-.mm-grid { display: grid; gap: 6px; margin-top: 12px; max-width: 420px; }
-.mm-grid.count-1 { grid-template-columns: minmax(0, 320px); }
+.mm-grid {
+  --mm-default-width: 420px;
+  --mm-default-single: 360px;
+  display: grid;
+  gap: var(--mm-gap, 6px);
+  margin-top: var(--mm-top, 14px);
+  max-width: var(--mm-max-width, var(--mm-default-width));
+}
+.mm-grid.count-1 { max-width: var(--mm-single-width, var(--mm-default-single)); grid-template-columns: minmax(0, 1fr); }
 .mm-grid.count-2,
-.mm-grid.count-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.mm-grid.count-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); max-width: min(var(--mm-pair-width, var(--mm-default-width)), 540px); }
 .mm-grid.count-3,
 .mm-grid.count-5,
 .mm-grid.count-6,
 .mm-grid.count-7,
 .mm-grid.count-8,
 .mm-grid.count-9 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.mm-grid.count-5,
+.mm-grid.count-6,
+.mm-grid.count-7,
+.mm-grid.count-8,
+.mm-grid.count-9 { max-width: min(var(--mm-max-width, var(--mm-default-width)), 540px); }
 
 .mm-cell {
   position: relative;
@@ -113,24 +125,23 @@ function durationOf(seconds: number | null | undefined): string {
   width: 100%;
   aspect-ratio: 1;
   overflow: hidden;
-  border-radius: 8px;
+  border-radius: var(--mm-radius, var(--r-sm));
   background: var(--surface-3);
-  border: 1px solid var(--hairline);
-  transition: transform var(--dur-2) var(--ease-out);
+  box-shadow: inset 0 0 0 1px var(--hairline);
 }
-.mm-cell.single { aspect-ratio: 4 / 3; }
-.mm-cell:hover { transform: translateY(-1px); }
+.mm-grid.count-2 .mm-cell,
+.mm-grid.count-4 .mm-cell { aspect-ratio: var(--mm-pair-ratio, 4 / 3); }
+.mm-cell.single { max-width: calc(var(--mm-single-height, 310px) * var(--mm-ratio)); aspect-ratio: var(--mm-ratio); }
+.mm-cell.video { background: radial-gradient(ellipse at 50% 40%, #3a4b52, #182226 76%); }
 .mm-cell:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.mm-image { width: 100%; height: 100%; object-fit: cover; display: block; }
+.mm-image { width: 100%; height: 100%; object-fit: cover; transition: filter var(--dur-2); }
+.mm-cell:hover .mm-image { filter: brightness(.94); }
 .mm-placeholder { display: grid; place-items: center; width: 100%; height: 100%; color: var(--ink-3); background: linear-gradient(135deg, var(--surface-2), var(--surface-3)); }
-.mm-placeholder.failed { background: var(--danger-soft); color: var(--danger); }
-.mm-placeholder.video-track { background: linear-gradient(135deg, #202628, #101416); color: #cfd6d9; }
-.mm-play { position: absolute; inset: 0; display: grid; place-items: center; color: #fff; }
-.mm-play > svg { display: grid; place-items: center; width: 34px; height: 34px; padding: 9px; border-radius: 50%; background: rgba(12, 16, 18, 0.55); backdrop-filter: blur(2px); }
+.mm-play { position: absolute; top: 50%; left: 50%; display: grid; place-items: center; width: 40px; height: 40px; transform: translate(-50%, -50%); border: 1px solid #ffffff55; border-radius: 50%; color: #fff; background: #0c10186b; transition: background var(--dur-2); }
+.mm-cell:hover .mm-play { background: #0c1018b3; }
+.mm-play > svg { margin-left: 2px; }
 .mm-duration { position: absolute; right: 6px; bottom: 6px; padding: 1px 5px; border-radius: 4px; font-size: 11px; color: #fff; background: rgba(12, 16, 18, 0.62); }
 @media (max-width: 768px) {
-  .mm-grid { max-width: none; }
-  .mm-grid.count-1 { grid-template-columns: minmax(0, 1fr); }
-  .mm-cell.single { max-height: 320px; }
+  .mm-grid { --mm-default-width: 100%; --mm-default-single: 100%; gap: var(--mm-gap, 5px); margin-top: var(--mm-top, 12px); }
 }
 </style>

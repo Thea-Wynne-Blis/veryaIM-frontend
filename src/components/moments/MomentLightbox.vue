@@ -21,11 +21,14 @@ const emit = defineEmits<{ (e: 'close'): void }>()
 const dialog = ref<HTMLDialogElement | null>(null)
 const index = ref(Math.min(Math.max(0, props.startIndex), Math.max(0, props.media.length - 1)))
 const urls = ref<Record<string, string>>({})
-const loading = ref(false)
-const failed = ref(false)
+const failedItems = ref(new Set<string>())
+const pendingItems = new Set<string>()
 
 const current = computed(() => props.media[index.value])
-const currentUrl = computed(() => current.value ? urls.value[String(current.value.fileId)] : undefined)
+const currentKey = computed(() => current.value ? String(current.value.fileId) : '')
+const currentUrl = computed(() => urls.value[currentKey.value])
+const failed = computed(() => failedItems.value.has(currentKey.value))
+const loading = computed(() => Boolean(current.value && !currentUrl.value && !failed.value))
 const hasPrev = computed(() => index.value > 0)
 const hasNext = computed(() => index.value < props.media.length - 1)
 
@@ -46,16 +49,16 @@ async function ensure(target: number) {
   const item = props.media[target]
   if (!item) return
   const key = String(item.fileId)
-  if (urls.value[key]) return
-  loading.value = true
-  failed.value = false
+  if (urls.value[key] || pendingItems.has(key)) return
+  pendingItems.add(key)
+  failedItems.value.delete(key)
   try {
     const url = await momentMediaUrl(props.momentId, item.fileId)
     urls.value = { ...urls.value, [key]: url }
   } catch {
-    failed.value = true
+    failedItems.value.add(key)
   } finally {
-    loading.value = false
+    pendingItems.delete(key)
   }
 }
 
@@ -77,13 +80,13 @@ function close() {
 </script>
 
 <template>
-  <dialog ref="dialog" class="lightbox" aria-label="查看动态图片" @cancel.prevent="close" @click="close">
+  <dialog ref="dialog" class="lightbox" aria-label="动态媒体预览" @cancel.prevent="close" @click="close">
     <div class="lightbox-stage" @click.stop>
       <button type="button" class="lightbox-close" aria-label="关闭" @click="close"><X :size="20" /></button>
       <button v-if="hasPrev" type="button" class="lightbox-nav prev" aria-label="上一张" @click="go(-1)"><ChevronLeft :size="22" /></button>
       <div class="lightbox-media">
         <p v-if="loading" class="lightbox-hint"><Loader2 :size="22" class="spin" /></p>
-        <p v-else-if="failed" class="lightbox-hint">这张图片暂时无法加载</p>
+        <p v-else-if="failed" class="lightbox-hint">暂时无法加载这项媒体</p>
         <video v-else-if="current?.kind === 'VIDEO' && currentUrl" :src="currentUrl" controls autoplay playsinline />
         <img v-else-if="currentUrl" :src="currentUrl" alt="" />
       </div>
@@ -113,6 +116,7 @@ function close() {
   .lightbox-stage { padding: 52px 8px calc(env(safe-area-inset-bottom, 0px) + 48px); }
   .lightbox-media img,
   .lightbox-media video { max-height: calc(var(--mobile-viewport-height, 100dvh) - 120px); }
-  .lightbox-nav { display: none; }
+  .lightbox-nav { top: auto; bottom: calc(env(safe-area-inset-bottom, 0px) + 12px); transform: none; }
+  .lightbox-count { bottom: calc(env(safe-area-inset-bottom, 0px) + 22px); }
 }
 </style>

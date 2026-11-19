@@ -235,33 +235,33 @@ function replyLabel(comment: MomentComment): string {
 </template>
 
 <style scoped>
-.detail-dialog { width: min(660px, calc(100vw - 40px)); max-width: none; height: min(780px, calc(100dvh - 60px)); padding: 0; margin: auto; border: 1px solid var(--line-strong); border-radius: var(--r-md); color: var(--ink); background: var(--surface); box-shadow: var(--shadow-lg); }
-.detail-dialog::backdrop { background: #101b2445; backdrop-filter: blur(2px); }
+.detail-dialog { width: min(660px, calc(100vw - 32px)); max-width: none; height: min(740px, calc(100dvh - 48px)); padding: 0; margin: auto; border: 1px solid var(--line-strong); border-radius: var(--r-lg); color: var(--ink); background: var(--surface); box-shadow: var(--shadow-lg); }
+.detail-dialog::backdrop { background: #101b245c; backdrop-filter: blur(3px); }
 .detail { display: flex; flex-direction: column; height: 100%; }
-.detail-head { display: flex; align-items: center; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--line); }
-.detail-head h2 { flex: 1; font-size: 15px; font-weight: 600; }
+.detail-head { display: flex; align-items: center; gap: 12px; padding: 13px 20px; border-bottom: 1px solid var(--line); }
+.detail-head h2 { flex: 1; font-size: 17px; font-weight: 650; }
 
 .detail-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
-.detail-moment { padding: 18px; border-bottom: 1px solid var(--line); }
+.detail-moment { padding: 18px 20px; border-bottom: 1px solid var(--line); }
 .detail-author { display: flex; align-items: center; gap: 10px; }
 .detail-avatar { flex-shrink: 0; border-radius: var(--r-full); }
 .detail-avatar.sm { width: 30px; height: 30px; }
 .detail-author > div { flex: 1; min-width: 0; }
-.detail-name { font-size: 13px; font-weight: 600; color: var(--accent-ink); }
+.detail-name { max-width: 100%; font-size: 14px; font-weight: 650; color: var(--ink); overflow-wrap: anywhere; }
 .detail-name:hover { text-decoration: underline; }
-.detail-author time { display: block; margin-top: 2px; font-size: 11px; color: var(--ink-3); }
+.detail-author time { display: block; margin-top: 2px; font-size: 12px; color: var(--mv-muted); }
 .detail-delete { display: inline-flex; align-items: center; gap: 5px; padding: 6px 8px; border-radius: var(--r-xs); font-size: 12px; color: var(--ink-3); }
 .detail-delete:hover { color: var(--danger); background: var(--danger-soft); }
 .detail-content { margin-top: 12px; font-size: 15px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
-.detail-actions { display: flex; gap: 16px; margin-top: 14px; }
-.detail-action { display: inline-flex; align-items: center; gap: 5px; min-height: 30px; padding: 0 10px; border-radius: var(--r-xs); font-size: 12px; color: var(--ink-3); }
+.detail-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
+.detail-action { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 0 10px; border-radius: var(--r-sm); font-size: 13px; color: var(--mv-muted); }
 .detail-action:hover:not(.static) { color: var(--ink); background: var(--surface-hover); }
-.detail-action.active { color: var(--danger); }
+.detail-action.active { color: var(--danger); background: var(--danger-soft); }
 .detail-action.static { cursor: default; }
 .detail-likers { margin-top: 10px; font-size: 12px; color: var(--accent-ink); overflow-wrap: anywhere; }
 .detail-likers > span { color: var(--ink-3); }
 
-.detail-comments { padding: 14px 18px 18px; }
+.detail-comments { padding: 14px 20px 18px; }
 .detail-hint { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 26px 0; font-size: 12px; color: var(--ink-3); }
 .detail-error { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border-radius: var(--r-xs); font-size: 12px; color: var(--danger); background: var(--danger-soft); }
 .detail-error button { text-decoration: underline; }
@@ -270,7 +270,7 @@ function replyLabel(comment: MomentComment): string {
 .detail-comment + .detail-comment { border-top: 1px solid var(--line); }
 .detail-comment-body { flex: 1; min-width: 0; }
 .detail-comment-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
-.detail-comment-head time { font-size: 11px; color: var(--ink-4); white-space: nowrap; }
+.detail-comment-head time { font-size: 11px; color: var(--mv-muted); white-space: nowrap; }
 .detail-comment-text { margin-top: 3px; font-size: 13px; line-height: 1.65; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
 .detail-reply { color: var(--accent-ink); }
 .detail-comment-ops { display: flex; gap: 12px; margin-top: 4px; font-size: 11px; color: var(--ink-3); }
@@ -279,13 +279,14 @@ function replyLabel(comment: MomentComment): string {
 .detail-comment-ops button.danger:hover { color: var(--danger); }
 .detail-more { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; min-height: 36px; margin-top: 8px; border-radius: var(--r-xs); font-size: 12px; color: var(--accent); background: var(--surface-2); }
 
-.detail-compose { padding: 12px 18px; border-top: 1px solid var(--line); }
+.detail-compose { padding: 12px 20px; border-top: 1px solid var(--line); background: var(--surface-2); }
 .detail-reply-bar { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; padding: 4px 8px; border-radius: var(--r-xs); font-size: 11px; color: var(--ink-2); background: var(--surface-3); }
 .detail-reply-bar .icon-btn { width: 22px; height: 22px; margin-left: auto; }
 .detail-input-row { display: flex; align-items: flex-end; gap: 8px; }
-.detail-input-row textarea { flex: 1; min-height: 38px; max-height: 120px; padding: 9px 12px; resize: none; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface-2); font-size: 13px; line-height: 1.5; }
-.detail-input-row textarea:focus-visible { outline: none; border-color: var(--accent); background: var(--surface); }
-.detail-send { display: grid; place-items: center; width: 38px; height: 38px; flex-shrink: 0; border-radius: var(--r-sm); color: #fff; background: var(--accent); }
+.detail-input-row textarea { flex: 1; min-width: 0; min-height: 42px; max-height: 120px; padding: 9px 12px; resize: none; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); font-size: 14px; line-height: 1.5; }
+.detail-input-row textarea:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
+.detail-send { display: grid; place-items: center; width: 42px; height: 42px; flex-shrink: 0; border-radius: var(--r-md); color: var(--surface); background: var(--mv-primary); }
+.detail-send:hover:not(:disabled) { background: var(--mv-primary-hover); }
 .detail-send:disabled { opacity: 0.45; cursor: not-allowed; }
 .detail-notice { margin-top: 8px; font-size: 11px; color: var(--accent-ink); }
 .spin { animation: tick-spin 900ms linear infinite; }
@@ -297,5 +298,7 @@ function replyLabel(comment: MomentComment): string {
   .detail-comments { padding: 12px 14px 16px; }
   .detail-compose { padding: 10px 12px calc(env(safe-area-inset-bottom, 0px) + 10px); }
   .detail-input-row textarea { font-size: 16px; }
+  .detail-action { min-height: 44px; }
+  .detail-send { width: 44px; height: 44px; }
 }
 </style>
