@@ -1,4 +1,5 @@
 import { api, authorizedObjectUrl, uploadFile, type Id } from './client'
+import { shrinkImage } from './image-upload'
 
 /**
  * 朋友圈 API 与数据模型。
@@ -123,8 +124,14 @@ export function momentMediaUrl(momentId: Id, fileId: Id): Promise<string> {
 }
 
 /** 发布前上传：朋友圈文件不挂在会话上，conversationId 传 null。 */
-export function uploadMomentFile(file: File, onProgress?: (ratio: number) => void) {
-  return uploadFile(file, null, { onProgress })
+export async function uploadMomentFile(file: File, onProgress?: (ratio: number) => void) {
+  // 先压缩再上传：压缩阶段占前 10%，其余按已发送字节推进
+  onProgress?.(0.02)
+  const prepared = await shrinkImage(file)
+  onProgress?.(0.1)
+  return uploadFile(prepared, null, {
+    onProgress: (ratio) => onProgress?.(0.1 + ratio * 0.9),
+  })
 }
 
 /* ---------- 接口 ---------- */

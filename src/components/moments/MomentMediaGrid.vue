@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ImageOff, Play } from 'lucide-vue-next'
 import { momentThumbUrl, type MomentMediaItem } from '../../api/moments'
 import type { Id } from '../../api/client'
@@ -10,6 +10,9 @@ import type { Id } from '../../api/client'
  * <p>缩略图要带 Bearer Token，只能先拉成 object URL；按 (动态, 文件) 缓存，
  * 切页回来不会重复下载。视频没有服务端缩略图（缩略图只支持图片），
  * 用统一占位卡 + 时长，播放放到灯箱里。</p>
+ *
+ * <p>进入视口前 400px 才开始拉图：信息流一屏可能有几十张图，
+ * 全部在挂载时发起会把可见区域自己的请求挤到 6 条连接后面。</p>
  */
 const props = defineProps<{
   momentId: Id
@@ -18,32 +21,70 @@ const props = defineProps<{
 
 const emit = defineEmits<{ (e: 'open', index: number): void }>()
 
+const grid = ref<HTMLElement | null>(null)
 const thumbs = ref<Record<string, string>>({})
 const failed = ref<Record<string, boolean>>({})
+const visible = ref(false)
 let disposed = false
+let observer: IntersectionObserver | null = null
+
+/** 按版式选宽度：多图格子约 120px，320 够 2 倍屏；单图最宽要 640。 */
+const thumbWidth = computed(() => {
+  const count = props.media.length
+  if (count <= 1) return 640
+  if (count === 2 || count === 4) return 480
+  return 320
+})
 
 watch(
   () => props.media,
-  (items) => {
-    for (const item of items) {
-      if (item.kind !== 'IMAGE') continue
-      const key = String(item.fileId)
-      if (thumbs.value[key] || failed.value[key]) continue
-      momentThumbUrl(props.momentId, item.fileId)
-        .then((url) => {
-          if (!disposed) thumbs.value = { ...thumbs.value, [key]: url }
-        })
-        .catch(() => {
-          if (!disposed) failed.value = { ...failed.value, [key]: true }
-        })
-    }
+  () => {
+    void loadThumbs()
   },
-  { immediate: true },
 )
+
+onMounted(() => {
+  if (typeof IntersectionObserver === 'undefined') {
+    reveal()
+    return
+  }
+  observer = new IntersectionObserver((entries) => {
+    if (!entries.some((entry) => entry.isIntersecting)) return
+    observer?.disconnect()
+    observer = null
+    reveal()
+  }, { rootMargin: '400px 0px' })
+  if (grid.value) observer.observe(grid.value)
+  else reveal()
+})
 
 onBeforeUnmount(() => {
   disposed = true
+  observer?.disconnect()
+  observer = null
 })
+
+function reveal() {
+  if (visible.value) return
+  visible.value = true
+  void loadThumbs()
+}
+
+async function loadThumbs() {
+  if (!visible.value) return
+  const width = thumbWidth.value
+  for (const item of props.media) {
+    if (item.kind !== 'IMAGE') continue
+    const key = String(item.fileId)
+    if (thumbs.value[key] || failed.value[key]) continue
+    try {
+      const url = await momentThumbUrl(props.momentId, item.fileId, width)
+      if (!disposed) thumbs.value = { ...thumbs.value, [key]: url }
+    } catch {
+      if (!disposed) failed.value = { ...failed.value, [key]: true }
+    }
+  }
+}
 
 function thumbOf(item: MomentMediaItem): string | undefined {
   return thumbs.value[String(item.fileId)]
@@ -65,7 +106,7 @@ function durationOf(seconds: number | null | undefined): string {
 </script>
 
 <template>
-  <div class="mm-grid" :class="`count-${Math.min(media.length, 9)}`">
+  <div ref="grid" class="mm-grid" :class="`count-${Math.min(media.length, 9)}`">
     <button
       v-for="(item, index) in media"
       :key="String(item.fileId)"

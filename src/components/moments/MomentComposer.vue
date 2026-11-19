@@ -12,6 +12,7 @@ import {
 import { useAuthStore } from '../../stores/auth'
 import { useMomentsStore } from '../../stores/moments'
 import { useToast } from '../../composables/useToast'
+import { createTaskQueue } from '../../utils/async'
 import { messageOf } from '../../utils/error'
 import { initialsOf } from '../../utils/present'
 
@@ -52,6 +53,8 @@ const fileInput = ref<HTMLInputElement | null>(null)
 const content = ref('')
 const visibility = ref<MomentVisibility>('ALL_FRIENDS')
 const drafts = reactive<Draft[]>([])
+// 多选时最多 3 个同时上传：一起发只会互相抢带宽，进度反而都变慢
+const enqueueUpload = createTaskQueue(3)
 const friends = ref<Friend[]>([])
 const audience = ref<Id[]>([])
 const audienceKeyword = ref('')
@@ -126,7 +129,7 @@ async function addFiles(event: Event) {
     })
     drafts.push(draft)
     void probe(draft)
-    void upload(draft, file)
+    enqueueUpload(() => upload(draft, file))
   }
   if (files.length > room) flash(`最多 ${MAX_MEDIA} 个图片或视频`)
 }

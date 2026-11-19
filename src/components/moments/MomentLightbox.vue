@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ChevronLeft, ChevronRight, Loader2, X } from 'lucide-vue-next'
-import { momentMediaUrl, type MomentMediaItem } from '../../api/moments'
+import { momentMediaUrl, momentThumbUrl, type MomentMediaItem } from '../../api/moments'
 import type { Id } from '../../api/client'
 
 /**
@@ -52,11 +52,24 @@ async function ensure(target: number) {
   if (urls.value[key] || pendingItems.has(key)) return
   pendingItems.add(key)
   failedItems.value.delete(key)
+  let previewReady = false
+  if (item.kind === 'IMAGE') {
+    // 先出 1280 预览：原图动辄几 MB，等它下完再显示会明显卡顿
+    try {
+      const preview = await momentThumbUrl(props.momentId, item.fileId, 1280)
+      if (!urls.value[key]) {
+        urls.value = { ...urls.value, [key]: preview }
+        previewReady = true
+      }
+    } catch {
+      /* 预览拿不到就退回直接等原图 */
+    }
+  }
   try {
     const url = await momentMediaUrl(props.momentId, item.fileId)
     urls.value = { ...urls.value, [key]: url }
   } catch {
-    failedItems.value.add(key)
+    if (!previewReady) failedItems.value.add(key)
   } finally {
     pendingItems.delete(key)
   }

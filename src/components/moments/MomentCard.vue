@@ -170,6 +170,9 @@ function closeMenu() {
   gap: var(--mv-post-gap);
   min-width: 0;
   padding-block: 22px 18px;
+  /* 屏外卡片跳过布局与绘制；高度记住上次的实测值，滚动条不会跳动 */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 260px;
 }
 .moment + .moment { border-top: 1px solid var(--line); }
 

@@ -331,6 +331,8 @@ export function uploadWithProgress<T>(
 
 /** 超过这个体积改走分片：单次 multipart 上限 32MB，且只有分片才能断点续传。 */
 export const CHUNKED_UPLOAD_THRESHOLD = 8 * 1024 * 1024
+/** 分片并发数：3 路足以吃满常见上行，又不至于占满浏览器连接数。 */
+const CHUNK_UPLOAD_CONCURRENCY = 3
 
 export type UploadSession = {
   uploadId: Id
@@ -386,24 +388,48 @@ async function uploadChunked(
   for (const index of uploaded) uploadedBytes += chunkLength(index)
   onProgress?.(Math.min(1, uploadedBytes / Math.max(1, file.size)))
 
+  const totalBytes = Math.max(1, file.size)
+  const inflight = new Map<number, number>()
+  const report = () => {
+    let loaded = uploadedBytes
+    for (const value of inflight.values()) loaded += value
+    onProgress?.(Math.min(1, loaded / totalBytes))
+  }
+
+  const jobs: number[] = []
+  for (let index = 0; index < totalChunks; index++) {
+    if (!uploaded.has(index)) jobs.push(index)
+  }
+  let cursor = 0
+
   try {
-    for (let index = 0; index < totalChunks; index++) {
-      if (uploaded.has(index)) continue
-      const start = index * chunkSize
-      const blob = file.slice(start, start + chunkLength(index))
-      await putChunk(session.uploadId, index, blob, {
-        signal,
-        onProgress: (loaded) => {
-          onProgress?.(Math.min(1, (uploadedBytes + loaded) / Math.max(1, file.size)))
-        },
-      })
-      uploadedBytes += chunkLength(index)
-      onProgress?.(Math.min(1, uploadedBytes / Math.max(1, file.size)))
+    // 3 路并发：单路 PUT 在弱网下吃不满上行，串行传 25MB 视频会明显慢
+    const worker = async (): Promise<void> => {
+      while (cursor < jobs.length) {
+        if (signal?.aborted) throw new ApiError(0, -2, '已取消')
+        const index = jobs[cursor++]
+        const start = index * chunkSize
+        const blob = file.slice(start, start + chunkLength(index))
+        inflight.set(index, 0)
+        await putChunk(session.uploadId, index, blob, {
+          signal,
+          onProgress: (loaded) => {
+            inflight.set(index, Math.min(loaded, chunkLength(index)))
+            report()
+          },
+        })
+        inflight.delete(index)
+        uploadedBytes += chunkLength(index)
+        report()
+      }
     }
+    const workers = Math.min(CHUNK_UPLOAD_CONCURRENCY, Math.max(1, jobs.length))
+    await Promise.all(Array.from({ length: workers }, worker))
     return await request<FileRow>(`/files/uploads/${session.uploadId}/complete`, {
       method: 'POST',
     })
   } catch (error) {
+    inflight.clear()
     // 只有主动取消才丢弃暂存分片；网络抖动时保留，重试可以续传
     if (signal?.aborted) {
       void request(`/files/uploads/${session.uploadId}`, { method: 'DELETE' }).catch(() => {})
