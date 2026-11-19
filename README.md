@@ -20,7 +20,7 @@ npm run e2e      # Playwright 端到端脚本
 | 入口 | 路由 | 用途 |
 |---|---|---|
 | `index.html` | `/app/chat` | IM 客户端：消息、通讯录、收藏、我的 |
-| `system.html` | `/system.html` | 运营后台：概览、用户、群、举报、敏感词、管理员、审计 |
+| `system.html` | `/system/` 或 `/system.html` | 运营后台：概览、用户、群、举报、敏感词、管理员、审计 |
 
 两个入口共享组件与设计令牌，但登录态、路由和 Token 完全分开。IM 客户端接真实后端（`/api/v1` + Bearer），不是本地演示数据。
 
