@@ -2339,8 +2339,22 @@
   .frame.detail-open {
     grid-template-columns: var(--rail-w) 288px minmax(0, 1fr);
   }
-  .detail-pane {
-    display: none;
+  /*
+   * 这个宽度放不下第五列，详情改成右侧浮层：
+   * 之前直接把 .detail-pane 隐藏掉，点「会话详情」看起来像没反应。
+   */
+  .frame.detail-open .detail-pane {
+    display: flex;
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    bottom: 10px;
+    z-index: 6;
+    width: min(320px, calc(100% - 96px));
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    box-shadow: var(--shadow-lg);
   }
 }
 

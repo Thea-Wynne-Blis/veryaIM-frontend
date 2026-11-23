@@ -37,7 +37,11 @@ const chat = useChatStore()
 const auth = useAuthStore()
 const moments = useMomentsStore()
 
-const detailOpen = ref(true)
+/**
+ * 右侧详情默认收起：之前初始化成 true，刷新页面就会自动弹出来，把聊天区挤窄。
+ * 只有用户点「会话详情」才展开，切会话或刷新都回到收起状态。
+ */
+const detailOpen = ref(false)
 /** 全局搜索面板与详情面板共用右侧栏位，互斥显示。 */
 const searchOpen = ref(false)
 const historyConversation = ref<Conversation | null>(null)
@@ -567,13 +571,21 @@ watch(
 )
 
 /**
- * 右侧详情描述的是「当前这个会话」：切到别的会话时收起，
+ * 右侧详情描述的是「当前这个会话」：切到别的会话（包括从路由恢复的会话）时收起，
  * 否则新会话会继承上一个会话的置顶/免打扰/成员状态，看起来像串台。
  */
 watch(
   () => chat.activeId,
   (next, prev) => {
-    if (prev && next !== prev) detailOpen.value = false
+    if (next !== prev) detailOpen.value = false
+  },
+)
+
+/** 离开聊天页（通讯录 / 朋友圈 / 收藏）也收起，回来时不会莫名其妙又占一栏。 */
+watch(
+  () => view.value,
+  (next) => {
+    if (next !== 'chat') detailOpen.value = false
   },
 )
 
@@ -638,7 +650,11 @@ onBeforeUnmount(() => {
     <div class="grain" aria-hidden="true" />
 
     <!-- 聊天：四栏 -->
-    <div v-if="view === 'chat'" class="frame" :class="{ 'detail-open': detailOpen }">
+    <div
+      v-if="view === 'chat'"
+      class="frame"
+      :class="{ 'detail-open': detailOpen && activeConversation }"
+    >
       <NavRail
         :active="view"
         :unread="chat.totalUnread"
