@@ -34,7 +34,7 @@ ok "旧目录已删除"
 info "创建新目录 $APP_HOME"
 mkdir -p "$APP_HOME"/{backend,bin,logs,web}
 mkdir -p "$APP_HOME"/data/{files,uploads}
-chmod 0755 "$APP_HOME" "$APP_HOME"/web
+chmod 0755 "$APP_HOME"
 
 # ---------- 2. 后端 ----------
 info "安装后端"
@@ -60,15 +60,18 @@ else
 fi
 
 # ---------- 3. 前端 ----------
+# web 目录属于 www-data（nginx 用户），后端部署脚本以 ubuntu 运行，
+# 所以清空、拷贝、改权限都要 sudo。
 info "安装前端静态文件"
-rm -rf "${WEB_ROOT:?}"/*
-cp -r "$UP/dist/." "$WEB_ROOT"/
-find "$WEB_ROOT" -type d -exec chmod 0755 {} +
-find "$WEB_ROOT" -type f -exec chmod 0644 {} +
+sudo rm -rf "${WEB_ROOT:?}"/*
+sudo cp -r "$UP/dist/." "$WEB_ROOT"/
+sudo find "$WEB_ROOT" -type d -exec chmod 0755 {} +
+sudo find "$WEB_ROOT" -type f -exec chmod 0644 {} +
+sudo chown -R www-data:www-data "$WEB_ROOT"
 ok "前端文件数: $(find "$WEB_ROOT" -type f | wc -l)"
 
 # Nginx 以 www-data 运行，需要能穿过家目录读到静态文件
-chmod o+x /home/ubuntu 2>/dev/null || true
+sudo chmod o+x /home/ubuntu 2>/dev/null || true
 
 # ---------- 4. 运维脚本 ----------
 info "安装运维脚本"
@@ -92,7 +95,9 @@ if ! command -v nginx >/dev/null 2>&1; then
 fi
 sudo install -m 0644 "$UP/veryal.conf" "$NGINX_SITE"
 sudo ln -sf "$NGINX_SITE" /etc/nginx/sites-enabled/veryal.conf
-[ -e /etc/nginx/sites-enabled/default ] && sudo rm -f /etc/nginx/sites-enabled/default
+if [ -e /etc/nginx/sites-enabled/default ]; then
+  sudo rm -f /etc/nginx/sites-enabled/default
+fi
 sudo nginx -t
 sudo systemctl enable nginx >/dev/null
 sudo systemctl restart nginx
