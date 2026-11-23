@@ -219,54 +219,6 @@ svg {
   }
 }
 
-/* 极光缓慢漂移 */
-@keyframes aura-drift-1 {
-  0% {
-    transform: translate3d(-6%, -4%, 0) scale(1);
-  }
-  50% {
-    transform: translate3d(10%, 6%, 0) scale(1.14);
-  }
-  100% {
-    transform: translate3d(-6%, -4%, 0) scale(1);
-  }
-}
-
-@keyframes aura-drift-2 {
-  0% {
-    transform: translate3d(8%, 6%, 0) scale(1.08);
-  }
-  50% {
-    transform: translate3d(-8%, -6%, 0) scale(0.94);
-  }
-  100% {
-    transform: translate3d(8%, 6%, 0) scale(1.08);
-  }
-}
-
-@keyframes aura-drift-3 {
-  0% {
-    transform: translate3d(0, 10%, 0) scale(1);
-  }
-  50% {
-    transform: translate3d(-10%, -8%, 0) scale(1.16);
-  }
-  100% {
-    transform: translate3d(0, 10%, 0) scale(1);
-  }
-}
-
-/* 文字光泽扫过 */
-@keyframes shine-sweep {
-  0% {
-    background-position: -180% 0;
-  }
-  55%,
-  100% {
-    background-position: 180% 0;
-  }
-}
-
 /* 数字翻滚 */
 @keyframes count-roll {
   0% {

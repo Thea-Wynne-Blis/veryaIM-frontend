@@ -1,62 +1,66 @@
-/* ============================================================
-   VERYAL Design Tokens
-   结构学 BoardUI（密度、发丝线、分段控件、等宽数字）
-   手感学 ReactBits（极光底、聚光卡片、磁吸、光泽扫过、计数翻滚）
-   ============================================================ */
+/* VERYAL 的浅色与深色主题令牌，由客户端界面共用。 */
 
 :root {
   /* ---------- 画布层级 ---------- */
-  --canvas: #f5f5f2;
-  --canvas-2: #efefeb;
+  --canvas: #f5f7fb;
+  --canvas-2: #f3f5f9;
 
   /* 外层留白 */
-  --page: #e8e8e3;
-  --page-grain: 0.02;
-
-  /* 极光（很淡，只做空气感，不抢主体） */
-  --aura-1: rgba(18, 135, 111, 0.28);
-  --aura-2: rgba(64, 118, 214, 0.18);
-  --aura-3: rgba(204, 158, 84, 0.18);
-
+  --page: #e9edf4;
   /* ---------- 表面 ---------- */
   --surface: #ffffff;
-  --surface-2: #fbfbf9;
-  --surface-3: #f3f3f0;
-  --surface-hover: rgba(22, 24, 26, 0.042);
-  --surface-active: rgba(22, 24, 26, 0.075);
+  --surface-2: #fcfdff;
+  --surface-3: #eff2f7;
+  --surface-hover: rgba(30, 31, 67, 0.054);
+  --surface-active: rgba(30, 31, 67, 0.090);
 
   /* ---------- 文字 ---------- */
-  --ink: #14161a;
-  --ink-2: #545a61;
-  --ink-3: #878e95;
-  --ink-4: #b2b7bd;
+  --ink: #1c2638;
+  --ink-2: #37455b;
+  --ink-3: #56647a;
+  --ink-4: #627087;
 
   /* ---------- 线 ---------- */
-  --line: #e6e6e2;
-  --line-strong: #d6d6d1;
-  --hairline: rgba(20, 22, 26, 0.07);
+  --line: #e2e7ef;
+  --line-strong: #cbd4e2;
+  --hairline: rgba(28, 38, 56, 0.09);
 
   /* ---------- 主色 ---------- */
-  --accent: #12876f;
-  --accent-hover: #0e7761;
-  --accent-2: #1eb08f;
-  --accent-soft: #e5f4ef;
-  --accent-soft-2: #d3ece4;
-  --accent-ink: #075546;
-  --accent-grad: linear-gradient(135deg, #17a184 0%, #0b6d59 100%);
-  --accent-ring: rgba(18, 135, 111, 0.24);
+  --accent: #3155be;
+  --accent-hover: #2949a8;
+  --accent-2: #5975d4;
+  --accent-soft: #e8effd;
+  --accent-soft-2: #d7e3fb;
+  --accent-ink: #2847a1;
+  --primary: var(--accent);
+  --primary-hover: var(--accent-hover);
+  --primary-foreground: #fff;
+  --accent-grad: var(--primary);
+  --accent-ring: rgba(49, 85, 190, 0.22);
 
-  --danger: #cf4040;
-  --danger-soft: #fceceb;
+  --danger: #ae2742;
+  --danger-soft: #fcebf0;
   --warn: #b37419;
   --info: #2c6dd0;
-  /* 未读角标：微信式红色，和主色区分开，一眼能看到 */
-  --unread: #fa5151;
+  /* 未读与错误分别使用强调色与警示色。 */
+  --unread: #3155be;
 
   /* ---------- 聚光 / 光泽 ---------- */
   --spot-size: 260px;
-  --spot-color: rgba(18, 135, 111, 0.11);
+  --spot-color: rgba(48, 72, 199, 0.10);
   --glare: rgba(255, 255, 255, 0.55);
+
+  --rail-bg: #f6f8fc;
+  --rail-ink: #24324a;
+  --rail-muted: #526178;
+  --rail-line: #e4e8f0;
+  --rail-hover: #edf1f8;
+  --rail-active: #e6edfc;
+  --rail-badge: #3155be;
+  --rail-badge-ink: #ffffff;
+  --conversation-width: 840px;
+  --message-out: #e9f0ff;
+  --message-out-ink: #213963;
 
   /* ---------- 窗口高光与阴影 ---------- */
   --frame-ring: inset 0 1px 0 rgba(255, 255, 255, 0.75);
@@ -68,7 +72,7 @@
   --r-sm: 9px;
   --r-md: 13px;
   --r-lg: 18px;
-  --r-xl: 24px;
+  --r-xl: 20px;
   --r-2xl: 32px;
   --r-full: 999px;
 
@@ -92,57 +96,79 @@
   --mono: "SF Mono", ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
 
   /* ---------- 尺寸 ---------- */
-  --rail-w: 60px;
-  --list-w: 288px;
-  --detail-w: 272px;
-  --header-h: 58px;
+  --rail-w: 82px;
+  --list-w: 320px;
+  --header-h: 64px;
+  --view-gutter: clamp(16px, 3.2vw, 36px);
+  --view-title-size: 27px;
+
+  /* 聊天背景上的可读性遮罩：浅色压白、深色压暗 */
+  --chat-bg-veil: linear-gradient(rgba(255, 255, 255, 0.56), rgba(255, 255, 255, 0.56));
+
+  /* 笔记代码块的语法高亮配色 */
+  --code-keyword: #a626a4;
+  --code-string: #3f8f45;
+  --code-number: #986801;
+  --code-comment: #8b93a5;
+  --code-function: #3155be;
+  --code-type: #b37419;
+  --code-attr: #986801;
+  --code-tag: #c22b45;
 
   color-scheme: light;
 }
 
 [data-theme="dark"] {
-  --canvas: #0c0e10;
-  --canvas-2: #121516;
+  --canvas: #20232d;
+  --canvas-2: #1d2029;
 
-  --page: #060708;
-  --page-grain: 0.045;
+  --chat-bg-veil: linear-gradient(rgba(16, 19, 26, 0.6), rgba(16, 19, 26, 0.6));
 
-  --aura-1: rgba(46, 196, 160, 0.22);
-  --aura-2: rgba(88, 118, 232, 0.18);
-  --aura-3: rgba(212, 132, 92, 0.14);
-
-  --surface: #15181a;
-  --surface-2: #1a1e20;
-  --surface-3: #202527;
+  --page: #11131a;
+  --surface: #22252f;
+  --surface-2: #272b36;
+  --surface-3: #2f3443;
   --surface-hover: rgba(255, 255, 255, 0.055);
   --surface-active: rgba(255, 255, 255, 0.095);
 
-  --ink: #eef1f2;
-  --ink-2: #a2aab1;
-  --ink-3: #727a80;
-  --ink-4: #4f5559;
+  --ink: #f0f2f8;
+  --ink-2: #d2d8e7;
+  --ink-3: #b4bfd4;
+  --ink-4: #a4afc6;
 
-  --line: #24282b;
-  --line-strong: #323739;
+  --line: #333947;
+  --line-strong: #485167;
   --hairline: rgba(255, 255, 255, 0.07);
 
-  --accent: #2ec4a0;
-  --accent-hover: #3fd3ae;
-  --accent-2: #56dcbb;
-  --accent-soft: #12302a;
-  --accent-soft-2: #1a3f37;
-  --accent-ink: #8ff0d8;
-  --accent-grad: linear-gradient(135deg, #31c8a4 0%, #178b74 100%);
-  --accent-ring: rgba(46, 196, 160, 0.3);
+  --accent: #a0b8ff;
+  --accent-hover: #b3c7ff;
+  --accent-2: #a5b4ff;
+  --accent-soft: #2a3651;
+  --accent-soft-2: #33466d;
+  --accent-ink: #bdd0ff;
+  --primary: #3659b9;
+  --primary-hover: #4165c8;
+  --accent-ring: rgba(165, 180, 255, 0.30);
 
-  --danger: #f06a66;
-  --danger-soft: #331f1e;
-  --unread: #fa5151;
+  --danger: #ff889c;
+  --danger-soft: #482936;
+  --unread: #4b53c7;
   --warn: #e0a44d;
   --info: #6ba4f5;
 
-  --spot-color: rgba(46, 196, 160, 0.13);
+  --spot-color: rgba(165, 180, 255, 0.14);
   --glare: rgba(255, 255, 255, 0.13);
+
+  --rail-bg: #1b1e28;
+  --rail-ink: #edf1fa;
+  --rail-muted: #bac5da;
+  --rail-line: #313747;
+  --rail-hover: #292e3b;
+  --rail-active: #2a3651;
+  --rail-badge: #adc2ff;
+  --rail-badge-ink: #192b51;
+  --message-out: #314368;
+  --message-out-ink: #f1f5ff;
 
   --frame-ring: inset 0 1px 0 rgba(255, 255, 255, 0.07);
   --frame-shadow: 0 28px 72px -32px rgba(0, 0, 0, 0.8),
@@ -153,6 +179,16 @@
   --shadow-md: 0 12px 28px -14px rgba(0, 0, 0, 0.65);
   --shadow-lg: 0 32px 72px -28px rgba(0, 0, 0, 0.8);
   --shadow-pop: 0 18px 44px -16px rgba(0, 0, 0, 0.7);
+
+  /* 深色主题下的代码高亮：保持低饱和，不抢正文 */
+  --code-keyword: #c678dd;
+  --code-string: #98c379;
+  --code-number: #d19a66;
+  --code-comment: #7f889c;
+  --code-function: #82b1ff;
+  --code-type: #e5c07b;
+  --code-attr: #d19a66;
+  --code-tag: #ef8f9f;
 
   color-scheme: dark;
 }

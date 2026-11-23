@@ -11,6 +11,7 @@ import ConversationSearchDialog from '../components/ConversationSearchDialog.vue
 import MobileWorkspace from '../components/MobileWorkspace.vue'
 import ContactsView from '../components/ContactsView.vue'
 import FavoritesView from '../components/FavoritesView.vue'
+import NotesView from '../components/NotesView.vue'
 import MomentsView from '../components/moments/MomentsView.vue'
 import MeView from '../components/MeView.vue'
 import NewChatDialog from '../components/NewChatDialog.vue'
@@ -19,7 +20,6 @@ import GroupManageDialog from '../components/GroupManageDialog.vue'
 import ForwardDialog from '../components/ForwardDialog.vue'
 import UserProfileDialog from '../components/UserProfileDialog.vue'
 import { useIsMobile } from '../composables/useIsMobile'
-import { useTheme } from '../composables/useTheme'
 import { useToast } from '../composables/useToast'
 import { useChatStore } from '../stores/chat'
 import { useAuthStore } from '../stores/auth'
@@ -31,7 +31,6 @@ import { buildChatMessages, buildConversations, toConversation } from '../utils/
 const route = useRoute()
 const router = useRouter()
 const isMobile = useIsMobile(768)
-const { apply: applyTheme } = useTheme()
 const chat = useChatStore()
 const auth = useAuthStore()
 const moments = useMomentsStore()
@@ -60,6 +59,118 @@ const profileAnchor = ref<HTMLElement | null>(null)
 /** 右键「转发」选中的消息 */
 const forwardTarget = ref<ChatMessage | null>(null)
 
+/* ---------- 会话列表宽度拖拽 ---------- */
+const frameRef = ref<HTMLElement | null>(null)
+const LIST_WIDTH_KEY = 'veryal.listWidth'
+const MIN_LIST_WIDTH = 220
+const MIN_CHAT_WIDTH = 380
+const MAX_LIST_WIDTH = 560
+
+function storedListWidth(): number | null {
+  try {
+    const saved = Number(window.localStorage.getItem(LIST_WIDTH_KEY))
+    return Number.isFinite(saved) && saved >= MIN_LIST_WIDTH ? saved : null
+  } catch {
+    return null
+  }
+}
+
+const listWidth = ref<number | null>(storedListWidth())
+const resizing = ref(false)
+let resizeStartX = 0
+let resizeStartWidth = 0
+
+const frameStyle = computed<Record<string, string>>(
+  (): Record<string, string> => (listWidth.value ? { '--list-width': `${listWidth.value}px` } : {}),
+)
+
+function listElement(): HTMLElement | null {
+  return (conversationList.value?.$el as HTMLElement | undefined) ?? null
+}
+
+/** 列表能拉到多宽：至少给聊天区留 380px，窗口变窄时自动收回来。 */
+function clampListWidth(width: number): number {
+  let max = MAX_LIST_WIDTH
+  const frame = frameRef.value
+  const list = listElement()
+  if (frame && list) {
+    const frameRect = frame.getBoundingClientRect()
+    const railWidth = list.getBoundingClientRect().left - frameRect.left
+    max = Math.min(MAX_LIST_WIDTH, Math.max(MIN_LIST_WIDTH, frameRect.width - railWidth - MIN_CHAT_WIDTH))
+  }
+  return Math.round(Math.min(Math.max(width, MIN_LIST_WIDTH), max))
+}
+
+function onResizeStart(event: PointerEvent) {
+  if (event.button !== 0 || view.value !== 'chat') return
+  const list = listElement()
+  if (!list) return
+  event.preventDefault()
+  resizeStartX = event.clientX
+  resizeStartWidth = list.getBoundingClientRect().width
+  resizing.value = true
+  document.body.classList.add('is-resizing')
+  window.addEventListener('pointermove', onResizeMove)
+  window.addEventListener('pointerup', onResizeEnd)
+  window.addEventListener('pointercancel', onResizeEnd)
+}
+
+function onResizeMove(event: PointerEvent) {
+  if (!resizing.value) return
+  listWidth.value = clampListWidth(resizeStartWidth + event.clientX - resizeStartX)
+}
+
+function persistListWidth() {
+  try {
+    if (listWidth.value) window.localStorage.setItem(LIST_WIDTH_KEY, String(listWidth.value))
+    else window.localStorage.removeItem(LIST_WIDTH_KEY)
+  } catch {
+    // 隐私模式下 localStorage 可能不可写，忽略即可
+  }
+}
+
+function onResizeEnd() {
+  if (!resizing.value) return
+  resizing.value = false
+  document.body.classList.remove('is-resizing')
+  window.removeEventListener('pointermove', onResizeMove)
+  window.removeEventListener('pointerup', onResizeEnd)
+  window.removeEventListener('pointercancel', onResizeEnd)
+  persistListWidth()
+}
+
+function onResizeKey(event: KeyboardEvent) {
+  if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+  event.preventDefault()
+  const current = listWidth.value ?? listElement()?.getBoundingClientRect().width ?? 320
+  listWidth.value = clampListWidth(current + (event.key === 'ArrowRight' ? 16 : -16))
+  persistListWidth()
+}
+
+/** 双击分隔条恢复默认宽度。 */
+function resetListWidth() {
+  listWidth.value = null
+  persistListWidth()
+}
+
+/** 窗口变窄时把持久化的宽度收回来，保证聊天区至少 380px。 */
+function onWindowResize() {
+  if (listWidth.value) listWidth.value = clampListWidth(listWidth.value)
+}
+
+onMounted(() => {
+  window.addEventListener('resize', onWindowResize)
+  window.requestAnimationFrame(onWindowResize)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', onWindowResize)
+  document.body.classList.remove('is-resizing')
+  window.removeEventListener('pointermove', onResizeMove)
+  window.removeEventListener('pointerup', onResizeEnd)
+  window.removeEventListener('pointercancel', onResizeEnd)
+})
+
 /** 建群成功后直接进入该群会话 */
 async function onGroupCreated(groupId: string) {
   createGroupOpen.value = false
@@ -80,10 +191,10 @@ async function onGroupRemoved() {
   await chat.loadCards()
 }
 
-/** 当前一级导航：chat / contacts / moments / favorites / me */
+/** 当前一级导航：chat / contacts / moments / favorites / notes / me */
 const view = computed(() => {
   const name = String(route.name ?? 'chat')
-  if (name === 'contacts' || name === 'moments' || name === 'favorites' || name === 'me') {
+  if (name === 'contacts' || name === 'moments' || name === 'favorites' || name === 'notes' || name === 'me') {
     return name
   }
   return 'chat'
@@ -232,6 +343,7 @@ function navigate(target: string) {
     contacts: '/app/contacts',
     moments: '/app/moments',
     favorites: '/app/favorites',
+    notes: '/app/notes',
     me: '/app/me',
   }
   router.push(map[target] ?? '/app/chat')
@@ -451,7 +563,6 @@ watch(
 )
 
 onMounted(async () => {
-  applyTheme()
   window.addEventListener('veryal:open-chat', onOpenChatRequest)
   window.addEventListener('veryal:unauthorized', onUnauthorized)
   document.addEventListener('keydown', onGlobalKeydown)
@@ -491,6 +602,7 @@ onBeforeUnmount(() => {
     :loading="chat.loadingMessages"
     :inert="searchOpen"
     @select="select"
+    @navigate="navigate"
     @close="closeMobileChat"
     @send="(payload) => send(payload.conversationId, payload.text, payload.reply)"
     @attach="(payload) => attach(payload.conversationId, payload.file)"
@@ -507,78 +619,82 @@ onBeforeUnmount(() => {
   />
 
   <div v-else class="stage">
-    <div class="aura" aria-hidden="true"><i /><i /><i /></div>
-    <div class="grain" aria-hidden="true" />
-
-    <!-- 聊天：四栏 -->
     <div
-      v-if="view === 'chat'"
+      ref="frameRef"
       class="frame"
-      :class="{ 'detail-open': detailOpen && activeConversation }"
+      :style="frameStyle"
+      :class="{ single: view !== 'chat', 'detail-open': view === 'chat' && detailOpen && activeConversation }"
     >
-      <NavRail
-        :active="view"
-        :unread="chat.totalUnread"
-        @navigate="navigate"
-      />
-
-      <ConversationList
-        ref="conversationList"
-        :conversations="conversations"
-        :active-id="chat.activeId"
-        @select="select"
-        @new-chat="dialogOpen = true"
-        @new-group="createGroupOpen = true"
-        @pin="onConvPin"
-        @unread="onConvUnread"
-        @mute="onConvMute"
-        @hide="onConvHide"
-        @remove="onConvDelete"
-        @open-contact="onOpenContact"
-      />
-
-      <ChatPane
-        ref="chatPane"
-        :conversation="activeConversation"
-        :messages="messages"
-        :detail-open="detailOpen"
-        :error="chat.error"
-        :members="activeMembers"
-        :loading="chat.loadingMessages"
-        @send="(text, reply) => chat.activeId && send(chat.activeId, text, reply)"
-        @attach="(file) => chat.activeId && attach(chat.activeId, file)"
-        @toggle-detail="onToggleDetail"
-        @favorite="onFavorite"
-        @forward="onForward"
-        @profile="(id, anchor) => openProfile(id, anchor)"
-      />
-
-      <DetailPanel
-        v-if="detailOpen && activeConversation"
-        :conversation="activeConversation"
-        :members="activeMembers"
-        :pinned="chat.isPinned(activeConversation.id)"
-        :muted="chat.isMuted(activeConversation.id)"
-        @manage="manageOpen = true"
-        @open-search="openConversationSearch"
-        @close="detailOpen = false"
-        @toggle-pin="onTogglePin"
-        @toggle-mute="onToggleMute"
-        @profile="(id, anchor) => openProfile(id, anchor)"
-      />
-    </div>
-
-    <!-- 通讯录 / 文件 / 收藏 / 我的：两栏 -->
-    <div v-else class="frame single">
       <NavRail
         :active="view"
         :unread="chat.totalUnread"
         :moment-unread="moments.unread"
         @navigate="navigate"
       />
-      <ContactsView v-if="view === 'contacts'" />
+
+      <template v-if="view === 'chat'">
+        <ConversationList
+          ref="conversationList"
+          :conversations="conversations"
+          :active-id="chat.activeId"
+          @select="select"
+          @new-chat="dialogOpen = true"
+          @new-group="createGroupOpen = true"
+          @pin="onConvPin"
+          @unread="onConvUnread"
+          @mute="onConvMute"
+          @hide="onConvHide"
+          @remove="onConvDelete"
+          @open-contact="onOpenContact"
+        />
+
+        <div
+          class="pane-resizer"
+          :class="{ active: resizing }"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="拖拽调整会话列表宽度"
+          :aria-valuenow="listWidth ?? undefined"
+          tabindex="0"
+          @pointerdown="onResizeStart"
+          @keydown="onResizeKey"
+          @dblclick="resetListWidth"
+        />
+
+        <ChatPane
+          ref="chatPane"
+          :conversation="activeConversation"
+          :messages="messages"
+          :detail-open="detailOpen"
+          :error="chat.error"
+          :members="activeMembers"
+          :loading="chat.loadingMessages"
+          @send="(text, reply) => chat.activeId && send(chat.activeId, text, reply)"
+          @attach="(file) => chat.activeId && attach(chat.activeId, file)"
+          @toggle-detail="onToggleDetail"
+          @favorite="onFavorite"
+          @forward="onForward"
+          @profile="(id, anchor) => openProfile(id, anchor)"
+        />
+
+        <DetailPanel
+          v-if="detailOpen && activeConversation"
+          :conversation="activeConversation"
+          :members="activeMembers"
+          :pinned="chat.isPinned(activeConversation.id)"
+          :muted="chat.isMuted(activeConversation.id)"
+          @manage="manageOpen = true"
+          @open-search="openConversationSearch"
+          @close="detailOpen = false"
+          @toggle-pin="onTogglePin"
+          @toggle-mute="onToggleMute"
+          @profile="(id, anchor) => openProfile(id, anchor)"
+        />
+      </template>
+      <ContactsView v-else-if="view === 'contacts'" />
       <MomentsView v-else-if="view === 'moments'" @profile="(id, anchor) => openProfile(id, anchor)" />
       <FavoritesView v-else-if="view === 'favorites'" :locate-message="openFavoriteMessage" />
+      <NotesView v-else-if="view === 'notes'" />
       <MeView v-else />
     </div>
   </div>

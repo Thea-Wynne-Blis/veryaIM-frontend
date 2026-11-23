@@ -11,7 +11,7 @@ import AppAvatar from './AppAvatar.vue'
 import { groupAvatarSrc, userAvatarSrc } from '../utils/avatar'
 import type { Conversation } from '../types/chat'
 
-defineProps<{ conversations: Conversation[] }>()
+defineProps<{ conversations: Conversation[]; unreadOnly: boolean }>()
 
 const emit = defineEmits<{
   (e: 'select', id: string): void
@@ -61,6 +61,8 @@ function rowStyle(id: string): Record<string, string> | undefined {
 
 function onConvPointerDown(event: PointerEvent, id: string) {
   if (event.pointerType === 'mouse' && event.button !== 0) return
+  // 新的按下是主动点击，前一次滑动只拦截它自己产生的点击。
+  lastSwipeAt = 0
   // 按住另一行时先收起已展开的行
   if (swipeId.value && swipeId.value !== id) resetSwipe()
   track = {
@@ -154,14 +156,15 @@ defineExpose({ resetSwipe })
 
 <template>
   <div
-    v-for="(item, index) in conversations"
+    v-for="item in conversations"
     :key="item.id"
     class="m-swipe"
-    :style="{
-      animation: `fade-up 320ms var(--ease-out) ${Math.min(index * 30, 180)}ms backwards`,
-    }"
   >
-    <div class="m-swipe-actions" :class="{ armed: deleteArmedId === item.id }">
+    <div
+      class="m-swipe-actions"
+      :class="{ armed: deleteArmedId === item.id, revealed: swipeId === item.id || draggingId === item.id }"
+      :inert="swipeId !== item.id"
+    >
       <template v-if="deleteArmedId === item.id">
         <button class="m-swipe-btn danger wide" @click.stop="confirmSwipeDelete(item.id)">
           <Trash2 :size="17" :stroke-width="1.9" />
@@ -220,22 +223,31 @@ defineExpose({ resetSwipe })
   </div>
 
   <div v-if="!conversations.length" class="m-list-empty">
-    <MessageCircle :size="38" :stroke-width="1.2" />
-    <p>还没有聊天</p><span>从通讯录选择好友，或发起新的会话</span>
-    <button @click="emit('new-chat')">发起聊天</button>
+    <div class="empty-mark"><MessageCircle :size="24" :stroke-width="1.7" aria-hidden="true" /></div>
+    <p>{{ unreadOnly ? '没有未读消息' : '还没有聊天' }}</p>
+    <template v-if="!unreadOnly">
+      <span>从通讯录选择好友，或发起新的会话</span>
+      <button @click="emit('new-chat')">发起聊天</button>
+    </template>
   </div>
 </template>
 
 <style scoped>
-.m-conv { min-height: 84px; padding: 14px 16px; background: var(--surface); border-bottom: 1px solid var(--line); }
-.m-conv.pinned { background: color-mix(in srgb, var(--surface) 95%, var(--accent)); }
+.m-swipe { margin-inline: 12px; isolation: isolate; }
+.m-swipe-actions { visibility: hidden; transition: visibility 220ms; }
+.m-swipe-actions.revealed { visibility: visible; transition: none; }
+.m-swipe:first-of-type { margin-top: 10px; border-radius: var(--r-md) var(--r-md) 0 0; }
+.m-swipe:last-of-type { margin-bottom: 12px; border-radius: 0 0 var(--r-md) var(--r-md); }
+.m-swipe:only-of-type { border-radius: var(--r-md); }
+.m-conv { min-height: 73px; padding: 11px 10px; background: var(--surface); border-bottom: 1px solid var(--line); }
+.m-conv.pinned { background: var(--surface-2); }
 .m-conv-top { min-width: 0; }
-.m-conv-name { font-size: 16px; font-weight: 600; }
+.m-conv-name { font-size: 15px; font-weight: 620; }
 .m-conv-preview { font-size: 13px; margin-top: 3px; }
 .m-conv-status { flex-shrink: 0; color: var(--ink-3); }
 .m-conv-meta { align-self: stretch; justify-content: space-between; padding: 2px 0; }
-.m-list-empty { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 80px 24px; color: var(--ink-3); text-align: center; }
+.m-list-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 60px 24px; color: var(--ink-3); text-align: center; }
 .m-list-empty p { font-size: 16px; color: var(--ink-2); }
 .m-list-empty span { font-size: 13px; }
-.m-list-empty button { padding: 10px 18px; border-radius: 8px; color: var(--accent-ink); background: var(--accent-soft); margin-top: 6px; }
+.m-list-empty button { min-height: 44px; padding: 0 16px; border-radius: var(--r-sm); color: var(--accent-ink); background: var(--accent-soft); margin-top: 6px; }
 </style>

@@ -4,6 +4,7 @@ import AppAvatar from '../AppAvatar.vue'
 import { authorName, type MomentNotice } from '../../api/moments'
 import type { Id } from '../../api/client'
 import { initialsOf, relativeTime, toneOfPerson } from '../../utils/present'
+import { userAvatarSrc } from '../../utils/avatar'
 
 /**
  * 互动通知列表：谁赞了、谁评论了、谁回复了。
@@ -61,7 +62,7 @@ function toneOf(notice: MomentNotice): string {
       <li v-for="notice in notices" :key="String(notice.id)">
         <button type="button" class="notice" :class="{ unread: !notice.read }" @click="emit('open', notice.momentId)">
           <span class="notice-avatar">
-            <AppAvatar :initials="initialsOf(authorName(notice.actor))" :tone="toneOf(notice)" size="sm" />
+            <AppAvatar :initials="initialsOf(authorName(notice.actor))" :tone="toneOf(notice)" :src="notice.actor.avatar || userAvatarSrc(notice.actor.userId)" size="sm" />
             <span class="notice-icon" :class="'type-' + notice.type.toLowerCase()" aria-hidden="true">
               <component :is="iconOf(notice.type)" :size="11" :stroke-width="2.2" />
             </span>

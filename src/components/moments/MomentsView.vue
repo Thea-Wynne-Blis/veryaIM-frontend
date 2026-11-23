@@ -369,13 +369,11 @@ function dayLabel(days: number): string {
 
 <style scoped>
 .moments {
-  --mv-gutter: 28px;
+  --mv-gutter: var(--view-gutter);
   --mv-avatar-size: 42px;
   --mv-post-gap: 12px;
   --mv-muted: color-mix(in srgb, var(--ink-2) 75%, var(--ink-3));
   --mv-link: color-mix(in srgb, var(--info) 73%, var(--ink-2));
-  --mv-primary: var(--accent-ink);
-  --mv-primary-hover: color-mix(in srgb, var(--accent-ink) 78%, var(--accent));
   position: relative;
   display: flex;
   flex-direction: column;
@@ -388,20 +386,20 @@ function dayLabel(days: number): string {
 
 .mv-inner {
   width: 100%;
-  max-width: 716px;
+  max-width: 800px;
   margin-inline: auto;
   padding-inline: var(--mv-gutter);
 }
 
 .mv-header {
   flex: none;
-  padding: 24px 0 16px;
+  padding: 17px 0 12px;
   border-bottom: 1px solid var(--line);
-  background: var(--surface-2);
+  background: var(--surface);
 }
 
 .mv-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.mv-head h1 { font-size: 30px; font-weight: 680; line-height: 1.2; letter-spacing: -.045em; }
+.mv-head h1 { font-size: var(--view-title-size); font-weight: 700; line-height: 1.2; letter-spacing: -.045em; }
 .mv-actions { display: flex; align-items: center; gap: 7px; flex-shrink: 0; }
 .mv-tool,
 .mv-publish {
@@ -422,15 +420,15 @@ function dayLabel(days: number): string {
 .mv-tool:hover:not(:disabled) { color: var(--ink); border-color: var(--line-strong); background: var(--surface-2); }
 .mv-tool:disabled { cursor: wait; }
 .mv-refresh { min-width: 38px; padding: 0; }
-.mv-publish { padding-inline: 13px; border-color: transparent; font-weight: 600; color: var(--surface); background: var(--mv-primary); }
-.mv-publish:hover { background: var(--mv-primary-hover); }
+.mv-publish { padding-inline: 13px; border-color: transparent; font-weight: 600; color: var(--primary-foreground); background: var(--primary); }
+.mv-publish:hover { background: var(--primary-hover); }
 
 .mv-tabs {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 3px;
   width: min(100%, 408px);
-  margin-top: 18px;
+  margin-top: 14px;
   padding: 3px;
   border: 1px solid var(--hairline);
   border-radius: var(--r-md);
@@ -465,7 +463,8 @@ function dayLabel(days: number): string {
 }
 
 .mv-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable both-edges; }
-.mv-feed { --mv-panel-top: 2px; background: var(--surface); }
+.mv-feed { --mv-panel-top: 18px; }
+.mv-list { display: grid; gap: 12px; }
 .mv-scroll:focus-visible { outline-offset: -2px; }
 .mv-container { padding-block: var(--mv-panel-top, 20px) 40px; }
 .mv-error {
@@ -516,7 +515,7 @@ function dayLabel(days: number): string {
 }
 .mv-more:hover:not(:disabled) { color: var(--ink); border-color: var(--line-strong); }
 
-.mv-empty { display: grid; justify-items: center; gap: 6px; padding: 56px 16px; text-align: center; }
+.mv-empty { display: grid; justify-items: center; gap: 6px; padding: 56px 16px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface); text-align: center; }
 .mv-empty-icon { display: grid; place-items: center; width: 48px; height: 48px; margin-bottom: 7px; border-radius: var(--r-md); color: var(--accent-ink); background: var(--accent-soft); }
 .mv-empty h2 { font-size: 16px; font-weight: 650; }
 .mv-empty p { font-size: 13px; color: var(--mv-muted); }
@@ -550,7 +549,6 @@ function dayLabel(days: number): string {
 .moments.mobile { --mv-gutter: 14px; --mv-avatar-size: 38px; --mv-post-gap: 9px; }
 .mobile .mv-header { padding-block: 12px; }
 .mobile .mv-head { gap: 8px; }
-.mobile .mv-head h1 { font-size: 25px; }
 .mobile .mv-actions { gap: 5px; }
 .mobile .mv-tool,
 .mobile .mv-publish { min-height: 44px; }
@@ -558,7 +556,7 @@ function dayLabel(days: number): string {
 .mobile .mv-publish { padding-inline: 10px; }
 .mobile .mv-privacy-label { display: none; }
 .mobile .mv-tabs { width: 100%; margin-top: 12px; }
-.mobile .mv-tabs > button { gap: 5px; min-height: 40px; padding-inline: 4px; }
+.mobile .mv-tabs > button { gap: 5px; min-height: 44px; padding-inline: 4px; }
 .mobile .mv-scroll { scrollbar-gutter: auto; }
 .mobile .mv-container { padding-block: var(--mv-panel-top, 12px) 28px; }
 .mobile .mv-skeleton { padding-block: 17px 13px; }

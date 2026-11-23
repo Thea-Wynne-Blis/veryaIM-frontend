@@ -25,6 +25,10 @@ export function useTheme() {
   function apply() {
     if (typeof document !== 'undefined') {
       document.documentElement.dataset.theme = theme.value
+      document.querySelector('meta[name="theme-color"]')?.setAttribute(
+        'content',
+        getComputedStyle(document.documentElement).getPropertyValue('--surface').trim(),
+      )
     }
   }
 

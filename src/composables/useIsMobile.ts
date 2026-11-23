@@ -1,23 +1,16 @@
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 
-/**
- * 响应式断点。移动端判定：宽度 <= 768 或粗指针（触屏）且窄屏。
- */
+/** 与 CSS 共用宽度断点，只在跨越断点时更新布局。 */
 export function useIsMobile(breakpoint = 768) {
-  const isMobile = ref(false)
+  const media = typeof window === 'undefined' ? null : window.matchMedia(`(max-width: ${breakpoint}px)`)
+  const isMobile = ref(media?.matches ?? false)
 
-  const update = () => {
-    isMobile.value = window.innerWidth <= breakpoint
+  const update = (event: MediaQueryListEvent) => {
+    isMobile.value = event.matches
   }
 
-  onMounted(() => {
-    update()
-    window.addEventListener('resize', update, { passive: true })
-  })
-
-  onBeforeUnmount(() => {
-    window.removeEventListener('resize', update)
-  })
+  onMounted(() => media?.addEventListener('change', update))
+  onBeforeUnmount(() => media?.removeEventListener('change', update))
 
   return isMobile
 }

@@ -3,15 +3,17 @@ import {
   MessageCircle,
   Users,
   Star,
-  Settings,
+  MessagesSquare,
   Camera,
+  NotebookPen,
+  Github,
 } from 'lucide-vue-next'
 import AppAvatar from './AppAvatar.vue'
 import { useAuthStore } from '../stores/auth'
 import { initialsOf } from '../utils/present'
 import { userAvatarSrc } from '../utils/avatar'
 
-type ViewKey = 'chat' | 'contacts' | 'moments' | 'favorites' | 'me'
+type ViewKey = 'chat' | 'contacts' | 'moments' | 'favorites' | 'notes' | 'me'
 
 const props = withDefaults(defineProps<{ unread: number; momentUnread?: number }>(), {
   momentUnread: 0,
@@ -26,6 +28,7 @@ const nav = [
   { key: 'chat', icon: MessageCircle, label: '消息' },
   { key: 'contacts', icon: Users, label: '通讯录' },
   { key: 'moments', icon: Camera, label: '朋友圈' },
+  { key: 'notes', icon: NotebookPen, label: '笔记' },
   { key: 'favorites', icon: Star, label: '收藏' },
 ] as const
 
@@ -46,9 +49,12 @@ function badgeOf(key: string): number {
 
 <template>
   <aside class="rail">
-    <button class="rail-brand tip" data-tip="VERYAL" aria-label="VERYAL">V</button>
+    <button class="rail-brand tip" data-tip="VERYAL" aria-label="VERYAL 消息首页" @click="go('chat')">
+      <span class="brand-mark"><MessagesSquare :size="19" :stroke-width="2" aria-hidden="true" /></span>
+      <span class="rail-copy rail-wordmark">VERYAL</span>
+    </button>
 
-    <nav class="rail-nav">
+    <nav class="rail-nav" aria-label="主导航">
       <button
         v-for="item in nav"
         :key="item.key"
@@ -59,7 +65,8 @@ function badgeOf(key: string): number {
         :aria-current="active === item.key ? 'page' : undefined"
         @click="go(item.key)"
       >
-        <component :is="item.icon" :size="19" :stroke-width="1.85" />
+        <component :is="item.icon" :size="18" :stroke-width="1.85" aria-hidden="true" />
+        <span class="rail-copy">{{ item.label }}</span>
         <span v-if="badgeOf(item.key) > 0" class="rail-badge num">
           {{ badgeOf(item.key) > 99 ? '99+' : badgeOf(item.key) }}
         </span>
@@ -68,18 +75,33 @@ function badgeOf(key: string): number {
 
     <div class="rail-spacer" />
 
+    <!-- 仓库入口：点一下直接去 GitHub -->
+    <a
+      class="rail-github tip"
+      data-tip="GitHub 仓库"
+      aria-label="打开项目 GitHub 仓库"
+      href="https://github.com/Thea-Wynne-Blis/veryaIM"
+      target="_blank"
+      rel="noopener noreferrer"
+    >
+      <Github :size="18" :stroke-width="1.85" aria-hidden="true" />
+    </a>
+
     <button
-      class="rail-item tip"
+      class="rail-avatar tip"
       :class="{ active: active === 'me' }"
-      data-tip="我的"
+      :data-tip="auth.user?.nickname || '我的'"
       aria-label="我的"
+      :aria-current="active === 'me' ? 'page' : undefined"
       @click="go('me')"
     >
-      <Settings :size="18" :stroke-width="1.85" />
-    </button>
-
-    <button class="rail-avatar tip" data-tip="我的账号" aria-label="我的账号" @click="go('me')">
-      <AppAvatar :initials="initialsOf(auth.user?.nickname || '我')" :src="auth.user?.avatar || userAvatarSrc(auth.user?.userId)" tone="jade" size="sm" />
+      <AppAvatar
+        :initials="initialsOf(auth.user?.nickname || '我')"
+        :src="auth.user?.avatar || userAvatarSrc(auth.user?.userId)"
+        tone="jade"
+        size="sm"
+      />
+      <span class="rail-copy">我的</span>
     </button>
   </aside>
 </template>

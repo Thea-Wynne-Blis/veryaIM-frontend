@@ -6,6 +6,7 @@ import MomentMediaGrid from './MomentMediaGrid.vue'
 import { VISIBILITY_LABEL, authorName, type Moment, type MomentComment } from '../../api/moments'
 import type { Id } from '../../api/client'
 import { initialsOf, relativeTime, toneOfPerson } from '../../utils/present'
+import { userAvatarSrc } from '../../utils/avatar'
 
 /**
  * 信息流里的一条动态。
@@ -34,7 +35,7 @@ const failedAvatar = ref('')
 
 const name = computed(() => authorName(props.moment.author))
 const avatarUrl = computed(() => {
-  const url = props.moment.author.avatar?.trim()
+  const url = props.moment.author.avatar?.trim() || userAvatarSrc(props.moment.author.userId)
   return url && /^(https?:\/\/|\/(?!\/))/i.test(url) ? url : ''
 })
 const contentLink = computed(() => {
@@ -169,25 +170,26 @@ function closeMenu() {
   align-items: start;
   gap: var(--mv-post-gap);
   min-width: 0;
-  padding-block: 22px 18px;
+  padding: 17px 18px 15px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--surface);
   /* 屏外卡片跳过布局与绘制；高度记住上次的实测值，滚动条不会跳动 */
   content-visibility: auto;
   contain-intrinsic-size: auto 260px;
 }
-.moment + .moment { border-top: 1px solid var(--line); }
-
-.m-avatar { position: relative; display: block; width: var(--mv-avatar-size); height: var(--mv-avatar-size); border-radius: var(--r-xs); }
+.m-avatar { position: relative; display: block; width: var(--mv-avatar-size); height: var(--mv-avatar-size); border-radius: var(--r-full); }
 .m-avatar .avatar,
 .m-avatar img { width: 100%; height: 100%; border-radius: inherit; }
 .m-avatar img { position: absolute; inset: 0; object-fit: cover; }
 .moment-body { min-width: 0; }
-.m-name { display: block; max-width: 100%; font-size: 14px; font-weight: 650; color: var(--mv-link); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.m-name { display: block; max-width: 100%; font-size: 14px; font-weight: 680; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .m-name:hover { text-decoration: underline; text-underline-offset: 3px; }
 
 .m-hidden { display: flex; align-items: center; gap: 6px; margin-top: 7px; font-size: 12px; color: var(--warn); }
 .m-hidden svg { flex-shrink: 0; }
 
-.m-content { display: block; width: 100%; margin-top: 3px; text-align: left; font-size: 15px; line-height: 1.55; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+.m-content { display: block; width: 100%; margin-top: 5px; text-align: left; font-size: 15px; line-height: 1.65; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
 .m-link { color: var(--mv-link); }
 .m-link:hover { text-decoration: underline; text-underline-offset: 3px; }
 .m-media {
@@ -196,8 +198,8 @@ function closeMenu() {
   --mm-pair-ratio: 1;
   --mm-single-width: 268px;
   --mm-single-height: 264px;
-  --mm-gap: 4px;
-  --mm-radius: 4px;
+  --mm-gap: 5px;
+  --mm-radius: var(--r-xs);
   --mm-top: 8px;
 }
 
@@ -233,7 +235,7 @@ button.m-comment-name:hover { text-decoration: underline; }
 .m-more-comments:hover { text-decoration: underline; }
 
 @media (max-width: 768px) {
-  .moment { padding-block: 17px 13px; }
+  .moment { padding: 14px 12px 11px; }
   .m-media { --mm-single-width: 244px; --mm-single-height: 244px; }
   .m-trigger { width: 44px; height: 44px; }
   .m-trigger::before { inset: 9px 4px; }

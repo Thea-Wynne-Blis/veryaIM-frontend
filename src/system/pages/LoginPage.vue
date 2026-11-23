@@ -61,7 +61,7 @@ async function submit(): Promise<void> {
 
       <div class="field">
         <span>管理员账号</span>
-        <input v-model="username" type="text" autocomplete="username" placeholder="platform_admin" />
+        <input v-model="username" type="text" autocomplete="username" placeholder="admin" />
       </div>
       <div class="field">
         <span>密码</span>
