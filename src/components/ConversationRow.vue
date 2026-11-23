@@ -7,15 +7,12 @@
  */
 import { BellOff, Pin } from 'lucide-vue-next'
 import AppAvatar from './AppAvatar.vue'
-import { trackSpotlight } from '../composables/usePointerFx'
 import { groupAvatarSrc, userAvatarSrc } from '../utils/avatar'
 import type { Conversation } from '../types/chat'
 
 defineProps<{
   item: Conversation
   active: boolean
-  /** 入场动画的错峰序号 */
-  index?: number
 }>()
 
 const emit = defineEmits<{
@@ -26,10 +23,9 @@ const emit = defineEmits<{
 
 <template>
   <button
-    class="conv spot"
+    class="conv"
     :class="{ active }"
-    :style="index === undefined ? undefined : { animationDelay: `${index * 26}ms` }"
-    @pointermove="trackSpotlight"
+    :aria-current="active ? 'true' : undefined"
     @click="emit('select', item.id)"
     @contextmenu.prevent="emit('menu', $event, item)"
   >

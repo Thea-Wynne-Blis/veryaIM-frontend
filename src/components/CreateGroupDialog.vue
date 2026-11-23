@@ -6,6 +6,7 @@ import AppAvatar from './AppAvatar.vue'
 import { api } from '../api/client'
 import { groupsApi } from '../api/groups'
 import { initialsOf, toneOf } from '../utils/present'
+import { userAvatarSrc } from '../utils/avatar'
 
 const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{
@@ -13,7 +14,7 @@ const emit = defineEmits<{
   (e: 'created', groupId: string): void
 }>()
 
-type Friend = { userId: string; nickname: string; remark?: string | null }
+type Friend = { userId: string; nickname: string; remark?: string | null; avatar?: string | null }
 
 const friends = ref<Friend[]>([])
 const name = ref('')
@@ -135,7 +136,7 @@ watch(
             :class="{ on: selected.has(f.userId) }"
             @click="toggle(f.userId)"
           >
-            <AppAvatar :initials="initialsOf(f.remark || f.nickname)" :tone="toneOf(f.userId)" size="md" />
+            <AppAvatar :initials="initialsOf(f.remark || f.nickname)" :tone="toneOf(f.userId)" :src="f.avatar || userAvatarSrc(f.userId)" size="md" />
             <span class="pick-main">
               <span class="pick-name">{{ f.remark || f.nickname }}</span>
               <span class="pick-sub">ID {{ f.userId }}</span>

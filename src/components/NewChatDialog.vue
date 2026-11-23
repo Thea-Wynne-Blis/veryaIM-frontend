@@ -6,6 +6,7 @@ import AppAvatar from './AppAvatar.vue'
 import { api, sameId, type Id } from '../api/client'
 import { useChatStore } from '../stores/chat'
 import { initialsOf, toneOf } from '../utils/present'
+import { userAvatarSrc } from '../utils/avatar'
 
 const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{
@@ -13,7 +14,7 @@ const emit = defineEmits<{
   (e: 'created', conversationId: string): void
 }>()
 
-type UserHit = { userId: Id; nickname: string; username: string }
+type UserHit = { userId: Id; nickname: string; username: string; avatar?: string | null }
 
 const chat = useChatStore()
 const keyword = ref('')
@@ -47,6 +48,7 @@ async function search() {
         userId: String(item.userId ?? ''),
         nickname: String(item.nickname ?? item.username ?? '用户'),
         username: String(item.username ?? ''),
+        avatar: typeof item.avatar === 'string' && item.avatar ? item.avatar : null,
       }))
       .filter((item) => item.userId && item.userId !== '0')
   } catch (e) {
@@ -136,6 +138,7 @@ async function pick(hit: UserHit) {
             <AppAvatar
               :initials="initialsOf(hit.nickname)"
               :tone="toneOf(hit.userId)"
+              :src="hit.avatar || userAvatarSrc(hit.userId)"
               size="md"
             />
             <span class="hit-main">

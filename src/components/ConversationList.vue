@@ -3,7 +3,6 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Search, Plus, Pin, Bell, BellOff, UserPlus, Users, MailOpen, EyeOff, Trash2, PinOff } from 'lucide-vue-next'
 import AppAvatar from './AppAvatar.vue'
 import ConversationRow from './ConversationRow.vue'
-import { trackSpotlight } from '../composables/usePointerFx'
 import { api, type Id } from '../api/client'
 import { initialsOf, toneOfPerson } from '../utils/present'
 import { userAvatarSrc } from '../utils/avatar'
@@ -166,6 +165,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('keydown', onKeydown)
   document.removeEventListener('pointerdown', onDocPointerDown, true)
 })
+const searchShortcut = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘ K' : 'Ctrl K'
 </script>
 
 <template>
@@ -174,8 +174,9 @@ onBeforeUnmount(() => {
       <div class="list-title-row">
         <h1 class="list-title">消息</h1>
         <div class="new-wrap">
-          <button class="icon-btn glide" aria-label="新建会话" @click.stop="menuOpen = !menuOpen">
-            <Plus :size="18" :stroke-width="2" />
+          <button class="new-conversation" aria-label="新建会话" :aria-expanded="menuOpen" @click.stop="menuOpen = !menuOpen">
+            <Plus :size="15" :stroke-width="2" aria-hidden="true" />
+            新建
           </button>
           <Transition name="fade">
             <div v-if="menuOpen" class="new-menu" @click.stop>
@@ -212,30 +213,29 @@ onBeforeUnmount(() => {
           type="search"
           placeholder="搜索会话、联系人"
           aria-label="搜索会话、联系人"
+          aria-keyshortcuts="Control+K Meta+K"
         />
+        <kbd aria-hidden="true">{{ searchShortcut }}</kbd>
       </label>
 
-      <!-- Rubber Segment -->
       <div
         class="seg"
         :style="{ '--idx': filterIndex }"
-        role="tablist"
+        role="group"
         aria-label="会话筛选"
       >
         <span class="seg-thumb" aria-hidden="true" />
         <button
-          role="tab"
           :class="{ on: filter === 'all' }"
-          :aria-selected="filter === 'all'"
+          :aria-pressed="filter === 'all'"
           @click="filter = 'all'"
         >
           全部
           <span class="seg-count num">{{ conversations.length }}</span>
         </button>
         <button
-          role="tab"
           :class="{ on: filter === 'unread' }"
-          :aria-selected="filter === 'unread'"
+          :aria-pressed="filter === 'unread'"
           @click="filter = 'unread'"
         >
           未读
@@ -248,11 +248,10 @@ onBeforeUnmount(() => {
       <template v-if="pinned.length">
         <p class="list-group-label">置顶</p>
         <ConversationRow
-          v-for="(item, index) in pinned"
+          v-for="item in pinned"
           :key="item.id"
           :item="item"
           :active="item.id === activeId"
-          :index="index"
           @select="emit('select', $event)"
           @menu="openConvMenu"
         />
@@ -262,11 +261,10 @@ onBeforeUnmount(() => {
         {{ pinned.length ? '其他会话' : '全部会话' }}
       </p>
       <ConversationRow
-        v-for="(item, index) in rest"
+        v-for="item in rest"
         :key="item.id"
         :item="item"
         :active="item.id === activeId"
-        :index="index"
         @select="emit('select', $event)"
         @menu="openConvMenu"
       />
@@ -276,8 +274,7 @@ onBeforeUnmount(() => {
         <button
           v-for="friend in contactHits"
           :key="`contact-${friend.friendId}`"
-          class="conv spot"
-          @pointermove="trackSpotlight"
+          class="conv"
           @click="emit('open-contact', friend.friendId, contactName(friend))"
         >
           <AppAvatar

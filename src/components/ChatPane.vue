@@ -4,10 +4,9 @@ import { useToast } from '../composables/useToast'
 import { useMessageActions } from '../composables/useMessageActions'
 import { useMessageLocator } from '../composables/useMessageLocator'
 import { useEnterAnimation } from '../composables/useEnterAnimation'
+import { useChatBackground } from '../composables/useChatBackground'
 import {
-  Search,
-  Phone,
-  Video,
+  MessageSquare,
   Info,
   Paperclip,
   AtSign,
@@ -15,7 +14,6 @@ import {
   Image as ImageIcon,
   Mic,
   Send,
-  Sparkles,
   Users,
   Loader2,
   X,
@@ -27,7 +25,6 @@ import AppAvatar from './AppAvatar.vue'
 import MessageActionMenu from './MessageActionMenu.vue'
 import EmojiPanel from './EmojiPanel.vue'
 import MessageContent from './MessageContent.vue'
-import { resetMagnet, trackMagnet, trackSpotlight } from '../composables/usePointerFx'
 import { useTranslatePrefs } from '../composables/useTranslatePrefs'
 import { useChatStore } from '../stores/chat'
 import { useAuthStore } from '../stores/auth'
@@ -61,6 +58,12 @@ const chat = useChatStore()
 const auth = useAuthStore()
 const draft = ref('')
 const mentionOpen = ref(false)
+/** 当前会话的聊天背景：会话级优先，没有设置时回退到全局。 */
+const backgroundTarget = computed(() => props.conversation?.id ?? null)
+const {
+  hasBackground,
+  style: backgroundStyle,
+} = useChatBackground(backgroundTarget)
 /** @ 面板的候选：群聊取成员（排除自己），单聊直接用会话对端。 */
 const mentionPeople = computed(() =>
   mentionCandidates(props.conversation, props.members ?? [], String(auth.user?.userId ?? '')),
@@ -77,7 +80,8 @@ function openProfile(userId?: string | null, event?: MouseEvent) {
 
 function onInput() {
   autoGrow()
-  mentionOpen.value = draft.value.endsWith('@')
+  // @ 提及只在群聊里生效，私聊不弹候选面板
+  mentionOpen.value = props.conversation?.kind === 'group' && draft.value.endsWith('@')
 }
 
 function insertMention(label: string) {
@@ -385,8 +389,10 @@ watch(
     }
     armEnter()
     restoreScroll(newId)
-    // 有缓存的会话是同步渲染的：这一帧结束就收掉门控，避免把下一帧的实时消息也带上动画
+    // 打开会话后把焦点落在输入框，切进来就能直接打字
     nextTick(() => {
+      focusComposer()
+      // 有缓存的会话是同步渲染的：这一帧结束就收掉门控，避免把下一帧的实时消息也带上动画
       if (props.messages.length) disarmEnter()
     })
   },
@@ -439,12 +445,6 @@ watch(() => props.messages.length, () => scrollToBottom())
         </div>
 
         <div class="chat-actions">
-          <button class="icon-btn" aria-label="语音通话" @click="showNotice('语音通话暂未开放')">
-            <Phone :size="16" :stroke-width="1.9" />
-          </button>
-          <button class="icon-btn" aria-label="视频通话" @click="showNotice('视频通话暂未开放')">
-            <Video :size="16" :stroke-width="1.9" />
-          </button>
           <button
             class="icon-btn"
             :class="{ on: detailOpen }"
@@ -460,6 +460,8 @@ watch(() => props.messages.length, () => scrollToBottom())
       <div
         ref="scroller"
         class="messages"
+        :class="{ 'has-bg': hasBackground }"
+        :style="backgroundStyle"
         @scroll.passive="onScroll"
         @load.capture="onContentLoad"
       >
@@ -583,11 +585,7 @@ watch(() => props.messages.length, () => scrollToBottom())
           </button>
         </div>
 
-        <div
-          class="composer spot"
-          style="--spot-size: 420px"
-          @pointermove="trackSpotlight"
-        >
+        <div class="composer">
           <div v-if="mentionOpen" class="mention-pop">
             <p class="mention-title">选择要提及的成员</p>
             <button
@@ -601,71 +599,66 @@ watch(() => props.messages.length, () => scrollToBottom())
             <p v-if="!mentionPeople.length" class="mention-empty">成员资料还没加载好，稍后再试</p>
           </div>
 
-          <div class="composer-tools">
-            <button
-              class="icon-btn sm"
-              aria-label="提及成员"
-              :class="{ on: mentionOpen }"
-              :aria-expanded="mentionOpen"
-              @click="mentionOpen = !mentionOpen; emojiOpen = false"
-            >
-              <AtSign :size="15" :stroke-width="1.9" />
-            </button>
-            <button class="icon-btn sm" aria-label="附件" @click="pickAttachment('file')">
-              <Paperclip :size="15" :stroke-width="1.9" />
-            </button>
-            <button
-              class="icon-btn sm"
-              aria-label="表情"
-              :class="{ on: emojiOpen }"
-              :aria-expanded="emojiOpen"
-              aria-controls="chat-emoji-panel"
-              @click="emojiOpen = !emojiOpen; mentionOpen = false"
-            >
-              <Smile :size="15" :stroke-width="1.9" />
-            </button>
-            <button class="icon-btn sm" aria-label="图片、视频或音频" @click="pickAttachment('image')">
-              <ImageIcon :size="15" :stroke-width="1.9" />
-            </button>
-            <button class="icon-btn sm" aria-label="语音" @click="showNotice('语音消息暂未开放')">
-              <Mic :size="15" :stroke-width="1.9" />
-            </button>
-            <input
-              ref="attachmentInput"
-              type="file"
-              hidden
-              @change="onFilePicked"
-            />
-            <input
-              ref="imageInput"
-              type="file"
-              accept="image/*,video/*,audio/*"
-              hidden
-              @change="onFilePicked"
-            />
-          </div>
-
           <textarea
             id="composer-input"
             v-model="draft"
             class="composer-input"
             rows="1"
-            placeholder="输入消息，Enter 发送，Shift + Enter 换行"
+            placeholder="输入消息…"
             aria-label="输入消息"
             @input="onInput"
             @keydown.enter.exact.prevent="send"
           />
 
           <div class="composer-bar">
-            <span class="composer-hint">
-              <Sparkles :size="10" :stroke-width="2.2" />
-              支持发送图片、视频与文件
-            </span>
+            <div class="composer-tools">
+              <button
+                v-if="conversation.kind === 'group'"
+                class="icon-btn sm"
+                aria-label="提及成员"
+                :class="{ on: mentionOpen }"
+                :aria-expanded="mentionOpen"
+                @click="mentionOpen = !mentionOpen; emojiOpen = false"
+              >
+                <AtSign :size="15" :stroke-width="1.9" />
+              </button>
+              <button class="icon-btn sm" aria-label="附件" @click="pickAttachment('file')">
+                <Paperclip :size="15" :stroke-width="1.9" />
+              </button>
+              <button
+                class="icon-btn sm"
+                aria-label="表情"
+                :class="{ on: emojiOpen }"
+                :aria-expanded="emojiOpen"
+                aria-controls="chat-emoji-panel"
+                @click="emojiOpen = !emojiOpen; mentionOpen = false"
+              >
+                <Smile :size="15" :stroke-width="1.9" />
+              </button>
+              <button class="icon-btn sm" aria-label="图片、视频或音频" @click="pickAttachment('image')">
+                <ImageIcon :size="15" :stroke-width="1.9" />
+              </button>
+              <button class="icon-btn sm" aria-label="语音" @click="showNotice('语音消息暂未开放')">
+                <Mic :size="15" :stroke-width="1.9" />
+              </button>
+              <input
+                ref="attachmentInput"
+                type="file"
+                hidden
+                @change="onFilePicked"
+              />
+              <input
+                ref="imageInput"
+                type="file"
+                accept="image/*,video/*,audio/*"
+                hidden
+                @change="onFilePicked"
+              />
+            </div>
+
             <button
               class="send-btn"
               :disabled="!canSend"
-              @pointermove="(e) => canSend && trackMagnet(e, 0.14)"
-              @pointerleave="resetMagnet"
               @click="send"
             >
               <Send :size="12" :stroke-width="2.3" />
@@ -678,7 +671,7 @@ watch(() => props.messages.length, () => scrollToBottom())
 
     <div v-else class="empty">
       <div class="empty-mark">
-        <Search :size="22" :stroke-width="1.6" />
+        <MessageSquare :size="24" :stroke-width="1.7" aria-hidden="true" />
       </div>
       <h3 class="empty-title">选择一个会话</h3>
       <p class="empty-text">从左侧列表挑一个对话，或者新建一个开始聊天。</p>

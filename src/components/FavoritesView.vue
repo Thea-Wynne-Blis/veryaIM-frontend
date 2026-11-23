@@ -1,15 +1,17 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
-import { Star, Search, Loader2, RefreshCw, Download, FileText, Image as ImageIcon, Film, Mic, ArrowUpRight, X, ArrowLeft, Link, MessageSquare, BookmarkMinus } from 'lucide-vue-next'
+import { Star, Search, Loader2, RefreshCw, Download, FileText, Image as ImageIcon, Film, ArrowUpRight, X, ArrowLeft, Link, MessageSquare, BookmarkMinus } from 'lucide-vue-next'
 import AppAvatar from './AppAvatar.vue'
 import FavoriteMedia from './FavoriteMedia.vue'
+import LinkCard from './LinkCard.vue'
 import SearchHighlight from './SearchHighlight.vue'
 import FilePreviewContent from './FilePreviewContent.vue'
 import { api, downloadFile, type Favorite, type Id } from '../api/client'
 import { useToast } from '../composables/useToast'
 import { messageOf } from '../utils/error'
 import { humanBytes, initialsOf, listTime, toneOfPerson } from '../utils/present'
-import { favoriteExcerpt, favoriteKind, favoriteTitle, type FavoriteKind } from '../utils/favorites'
+import { favoriteExcerpt, favoriteKind, favoriteLink, favoriteTitle, visibleFavorites, type FavoriteKind } from '../utils/favorites'
+import { userAvatarSrc } from '../utils/avatar'
 import type { PreviewFile } from '../utils/filePreview'
 
 const props = withDefaults(defineProps<{
@@ -36,7 +38,6 @@ const categories = [
   { key: 'FILE', label: '文件', icon: FileText },
   { key: 'MEDIA', label: '图片与视频', icon: ImageIcon },
   { key: 'LINK', label: '链接', icon: Link },
-  { key: 'AUDIO', label: '语音', icon: Mic },
 ] as const
 const query = computed(() => keyword.value.trim())
 const filtered = computed(() => rows.value.filter(row =>
@@ -45,11 +46,12 @@ const filtered = computed(() => rows.value.filter(row =>
     value?.toLowerCase().includes(query.value.toLowerCase())),
 ))
 const narrowed = computed(() => !!query.value || category.value !== 'ALL')
+const selectedLink = computed(() => selected.value ? favoriteLink(selected.value) : null)
 const attachment = computed<PreviewFile | null>(() => selected.value?.fileId ? {
   fileId: selected.value.fileId,
   name: selected.value.fileName || '收藏附件',
   sizeBytes: selected.value.sizeBytes,
-  contentType: selected.value.contentType || (selected.value.type === 'IMAGE' ? 'image/jpeg' : selected.value.type === 'AUDIO' ? 'audio/webm' : selected.value.type === 'VIDEO' ? 'video/mp4' : undefined),
+  contentType: selected.value.contentType || (selected.value.type === 'IMAGE' ? 'image/jpeg' : selected.value.type === 'VIDEO' ? 'video/mp4' : undefined),
 } : null)
 
 function iconOf(row: Favorite) {
@@ -73,7 +75,7 @@ async function load() {
   error.value = ''
   try {
     const data = await api.get<Favorite[]>('/favorites?limit=200')
-    rows.value = Array.isArray(data) ? data : []
+    rows.value = visibleFavorites(Array.isArray(data) ? data : [])
   } catch (e) { error.value = messageOf(e, '加载收藏失败') }
   finally { loading.value = false }
 }
@@ -129,33 +131,55 @@ onBeforeUnmount(() => { locationRequest?.abort(); dialog.value?.close() })
 
 <template>
   <section class="favorites" :class="{ mobile }" aria-label="我的收藏">
-    <header class="fav-head">
+    <div class="fav-top">
+      <header class="fav-head">
       <button v-if="mobile" class="icon-btn fav-back" aria-label="返回我的" @click="emit('back')"><ArrowLeft :size="22" /></button>
       <div class="fav-heading"><h1>我的收藏</h1><p>{{ rows.length }} 条收藏<span v-if="rows.length === 200"> · 最近 200 条</span></p></div>
       <button class="icon-btn fav-refresh" :disabled="loading" aria-label="刷新收藏" @click="load"><Loader2 v-if="loading" :size="18" class="spin" /><RefreshCw v-else :size="18" :stroke-width="1.7" /></button>
-    </header>
-    <div class="fav-controls">
-      <label class="fav-search"><Search :size="18" /><input v-model="keyword" type="search" placeholder="搜索收藏内容、文件名或来源" aria-label="搜索收藏" maxlength="128" /><button v-if="keyword" class="icon-btn" aria-label="清空收藏搜索" @click="keyword = ''"><X :size="16" /></button></label>
-      <div class="fav-categories" role="group" aria-label="收藏分类"><button v-for="item in categories" :key="item.key" :class="{ active: category === item.key }" :aria-pressed="category === item.key" @click="category = item.key"><component :is="item.icon" :size="15" />{{ item.label }}</button></div>
+      </header>
+
+      <div class="fav-controls">
+        <div class="fav-search" role="search">
+          <Search :size="17" aria-hidden="true" />
+          <input v-model="keyword" type="search" placeholder="搜索内容、文件名或来源" aria-label="搜索收藏" maxlength="128" />
+          <button v-if="keyword" class="icon-btn" aria-label="清空收藏搜索" @click="keyword = ''"><X :size="16" /></button>
+        </div>
+        <div class="fav-categories" role="group" aria-label="收藏分类">
+          <button v-for="item in categories" :key="item.key" :class="{ active: category === item.key }" :aria-pressed="category === item.key" @click="category = item.key">
+            <component :is="item.icon" v-if="item.icon" :size="15" aria-hidden="true" />{{ item.label }}
+          </button>
+        </div>
+      </div>
     </div>
     <div class="fav-scroll" :aria-busy="loading">
       <div class="fav-container">
         <div v-if="error" class="fav-error" role="alert"><span>{{ error }}</span><button @click="load">重新加载</button></div>
         <p v-if="notice" class="fav-notice" role="status">{{ notice }}</p>
-        <p v-if="filtered.length" class="fav-section-label">{{ narrowed ? `找到 ${filtered.length} 条收藏` : '最近收藏' }}<span>按收藏时间排列</span></p>
+        <p v-if="filtered.length" class="fav-section-label">{{ narrowed ? `找到 ${filtered.length} 条收藏` : '最近收藏' }}</p>
         <div v-if="loading && !rows.length" class="fav-grid" aria-label="正在加载收藏"><div v-for="i in 4" :key="i" class="fav-skeleton"><span /><span /><span /></div></div>
         <div v-else-if="filtered.length" class="fav-grid">
           <article v-for="row in filtered" :key="String(row.id)" class="fav-card">
-            <button class="fav-preview" :aria-label="`查看收藏：${favoriteTitle(row)}`" @click="preview(row)">
+            <div
+              class="fav-preview"
+              role="button"
+              tabindex="0"
+              :aria-label="`查看收藏：${favoriteTitle(row)}`"
+              @click="preview(row)"
+              @keydown.enter.prevent="preview(row)"
+              @keydown.space.prevent="preview(row)"
+            >
               <span class="fav-card-head"><span class="fav-kind"><component :is="iconOf(row)" :size="15" />{{ labelOf(row) }}</span><time :datetime="row.createdAt" :title="fullTime(row.createdAt)">{{ listTime(row.createdAt) }}</time></span>
               <span class="fav-content">
                 <FavoriteMedia v-if="row.type === 'IMAGE' && row.fileId" :file-id="row.fileId" :name="favoriteTitle(row)" />
                 <span v-else-if="row.type === 'FILE'" class="fav-document"><FileText :size="28" :stroke-width="1.4" /><span>{{ extension(row) }}</span></span>
-                <span v-else-if="row.type === 'VIDEO' || row.type === 'AUDIO'" class="fav-media-icon"><component :is="row.type === 'VIDEO' ? Film : Mic" :size="30" :stroke-width="1.4" /></span>
-                <span class="fav-copy"><SearchHighlight class="fav-text" :class="{ filename: !!row.fileId }" :text="favoriteExcerpt(favoriteTitle(row), query)" :keyword="query" /><span v-if="row.fileId" class="fav-file-meta">{{ row.type === 'FILE' ? extension(row) : labelOf(row) }}<template v-if="row.sizeBytes != null"> · {{ humanBytes(row.sizeBytes) }}</template></span></span>
+                <span v-else-if="row.type === 'VIDEO'" class="fav-media-icon"><Film :size="30" :stroke-width="1.4" /></span>
+                <span v-else-if="favoriteLink(row)" class="fav-link" @click.stop>
+                  <LinkCard :link="favoriteLink(row)!" compact />
+                </span>
+                <span v-else class="fav-copy"><SearchHighlight class="fav-text" :class="{ filename: !!row.fileId }" :text="favoriteExcerpt(favoriteTitle(row), query)" :keyword="query" /><span v-if="row.fileId" class="fav-file-meta">{{ row.type === 'FILE' ? extension(row) : labelOf(row) }}<template v-if="row.sizeBytes != null"> · {{ humanBytes(row.sizeBytes) }}</template></span></span>
               </span>
-              <span class="fav-source"><AppAvatar :initials="initialsOf(row.senderName)" :tone="toneOfPerson(row.senderId)" size="sm" /><SearchHighlight :text="`${row.senderName} · ${row.conversationTitle}`" :keyword="query" /></span>
-            </button>
+              <span class="fav-source"><AppAvatar :initials="initialsOf(row.senderName)" :tone="toneOfPerson(row.senderId)" :src="userAvatarSrc(row.senderId)" size="sm" /><SearchHighlight :text="`${row.senderName} · ${row.conversationTitle}`" :keyword="query" /></span>
+            </div>
           </article>
         </div>
         <div v-else-if="!loading && !error" class="fav-empty"><span class="fav-empty-icon"><Search v-if="narrowed" :size="30" :stroke-width="1.3" /><Star v-else :size="30" :stroke-width="1.3" /></span><h2>{{ narrowed ? '没有找到相关收藏' : '把重要的内容收藏在这里' }}</h2><p>{{ narrowed ? '试试其他关键词，或切换内容分类。' : '在聊天中右键或长按消息，选择“收藏”。' }}</p><button v-if="narrowed" @click="reset">清除筛选</button></div>
@@ -165,8 +189,9 @@ onBeforeUnmount(() => { locationRequest?.abort(); dialog.value?.close() })
       <div class="favorite-detail">
         <header class="favorite-detail-head"><span class="favorite-bookmark"><Star :size="20" :stroke-width="1.7" /></span><h2 id="favorite-detail-title">收藏详情</h2><button class="icon-btn" aria-label="关闭收藏详情" @click="closeDetail"><X :size="20" /></button></header>
         <div class="favorite-detail-body">
-          <div class="favorite-origin"><AppAvatar :initials="initialsOf(selected.senderName)" :tone="toneOfPerson(selected.senderId)" size="md" /><div><p>{{ selected.senderName }}<span> · {{ selected.conversationTitle }}</span></p><time :datetime="selected.createdAt">收藏于 {{ fullTime(selected.createdAt) }}</time></div></div>
+          <div class="favorite-origin"><AppAvatar :initials="initialsOf(selected.senderName)" :tone="toneOfPerson(selected.senderId)" :src="userAvatarSrc(selected.senderId)" size="md" /><div><p>{{ selected.senderName }}<span> · {{ selected.conversationTitle }}</span></p><time :datetime="selected.createdAt">收藏于 {{ fullTime(selected.createdAt) }}</time></div></div>
           <FilePreviewContent v-if="attachment" :key="String(selected.id)" :file="attachment" />
+          <LinkCard v-else-if="selectedLink" :link="selectedLink" />
           <p v-else class="favorite-full-text">{{ favoriteTitle(selected) }}</p>
           <p v-if="detailError" class="favorite-detail-error" role="alert">{{ detailError }}</p>
         </div>
@@ -178,28 +203,31 @@ onBeforeUnmount(() => { locationRequest?.abort(); dialog.value?.close() })
 
 <style scoped>
 .favorites { height: 100%; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--canvas); overflow: hidden; }
-.fav-head { display: flex; align-items: center; gap: 12px; padding: 28px 32px 22px; background: var(--surface); }
+.fav-top { background: var(--surface); border-bottom: 1px solid var(--line); }
+.fav-head, .fav-controls { width: 100%; max-width: 1240px; margin-inline: auto; }
+.fav-head { display: flex; align-items: center; gap: 12px; padding: 15px var(--view-gutter) 13px; }
 .fav-heading { flex: 1; }
-.fav-heading h1 { font-size: 24px; font-weight: 650; letter-spacing: -.6px; }
+.fav-heading h1 { font-size: var(--view-title-size); font-weight: 680; letter-spacing: -.6px; }
 .fav-heading p { margin-top: 5px; font-size: 12px; color: var(--ink-3); }
 .fav-refresh { width: 38px; height: 38px; color: var(--ink-3); }
-.fav-controls { padding: 0 32px; border-bottom: 1px solid var(--line); background: var(--surface); }
-.fav-search { display: flex; align-items: center; gap: 10px; min-height: 42px; padding: 4px 12px; max-width: 480px; background: var(--surface-3); border: 1px solid transparent; border-radius: 7px; color: var(--ink-3); }
+.fav-controls { display: grid; gap: 11px; padding: 0 var(--view-gutter) 12px; }
+.fav-search { display: flex; align-items: center; gap: 10px; min-height: 42px; padding: 4px 12px; max-width: 480px; background: var(--surface-3); border: 1px solid var(--line); border-radius: var(--r-sm); color: var(--ink-3); }
 .fav-search:focus-within { border-color: var(--accent); background: var(--surface); }
 .fav-search input { flex: 1; min-width: 0; font-size: 13px; }
 .fav-search input:focus-visible { outline: none; }
 .fav-search .icon-btn { height: 30px; width: 30px; }
-.fav-categories { display: flex; gap: 24px; padding-top: 14px; overflow-x: auto; scrollbar-width: none; }
-.fav-categories button { display: flex; align-items: center; flex-shrink: 0; gap: 7px; padding: 12px 0 14px; border-bottom: 2px solid transparent; font-size: 13px; color: var(--ink-3); }
-.fav-categories button.active { color: var(--accent); border-color: var(--accent); font-weight: 600; }
+.fav-categories { display: flex; gap: 6px; padding: 3px; overflow-x: auto; scrollbar-width: none; }
+.fav-categories button { display: flex; align-items: center; flex-shrink: 0; gap: 7px; min-height: 34px; padding: 0 11px; border: 1px solid transparent; border-radius: var(--r-sm); font-size: 13px; color: var(--ink-3); transition: background var(--dur-1), color var(--dur-1); }
+.fav-categories button:hover { background: var(--surface-hover); }
+.fav-categories button.active { color: var(--accent-ink); background: var(--accent-soft); font-weight: 640; }
 .fav-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
-.fav-container { max-width: 1160px; margin: 0 auto; padding: 24px 32px 40px; }
-.fav-section-label { display: flex; justify-content: space-between; margin-bottom: 14px; font-size: 12px; color: var(--ink-2); }
-.fav-section-label > span { color: var(--ink-3); font-size: 11px; }
-.fav-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
-.fav-card { min-width: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; transition: border-color 150ms; }
-.fav-card:hover { border-color: var(--line-strong); }
-.fav-preview { display: flex; flex-direction: column; width: 100%; height: 100%; text-align: left; padding: 18px; }
+.fav-container { max-width: 1240px; margin: 0 auto; padding: 20px var(--view-gutter) 40px; }
+.fav-section-label { margin-bottom: 12px; font-size: 13px; font-weight: 650; color: var(--ink-2); }
+.fav-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 270px), 1fr)); gap: 14px; }
+.fav-card { min-width: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; box-shadow: var(--shadow-xs); transition: border-color var(--dur-1), box-shadow var(--dur-1); }
+.fav-card:hover { border-color: var(--line-strong); box-shadow: var(--shadow-sm); }
+.fav-preview:focus-visible { outline-offset: -3px; }
+.fav-preview { display: flex; flex-direction: column; width: 100%; height: 100%; text-align: left; padding: 18px; cursor: pointer; }
 .fav-card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; font-size: 11px; color: var(--ink-3); }
 .fav-kind { display: flex; align-items: center; gap: 6px; }
 .fav-card-head time { white-space: nowrap; font-variant-numeric: tabular-nums; }
@@ -207,6 +235,9 @@ onBeforeUnmount(() => { locationRequest?.abort(); dialog.value?.close() })
 .fav-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
 .fav-text { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; font-size: 15px; line-height: 1.75; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink); }
 .fav-text.filename { font-weight: 550; -webkit-line-clamp: 2; }
+/* 链接收藏：整条内容显示成与聊天一致的链接卡片 */
+.fav-link { flex: 1; min-width: 0; display: flex; align-items: center; }
+.fav-link :deep(.link-card) { width: 100%; max-width: 100%; }
 .fav-file-meta { color: var(--ink-3); font-size: 11px; }
 .fav-document { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; width: 58px; height: 72px; flex-shrink: 0; background: var(--accent-soft); color: var(--accent); border-radius: 8px; }
 .fav-document > span { font-size: 9px; font-weight: 700; letter-spacing: .04em; }
@@ -250,23 +281,21 @@ onBeforeUnmount(() => { locationRequest?.abort(); dialog.value?.close() })
 .favorite-remove { color: var(--ink-3); }
 .favorite-remove:hover { color: var(--danger); background: var(--danger-soft); }
 .favorite-download { color: var(--ink-2); border: 1px solid var(--line); }
-.favorite-locate { color: #fff; background: var(--accent); }
+.favorite-locate { color: var(--primary-foreground); background: var(--primary); }
 .action-spacer { flex: 1; }
 .favorite-player :deep(.video-player) { width: 100%; max-width: 100%; }
 .favorite-player :deep(.bubble) { max-width: 100%; }
 .spin { animation: tick-spin 900ms linear infinite; }
-@media (max-width: 1050px) { .fav-grid { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 768px) {
   .fav-head { padding: 8px 16px 12px; gap: 6px; }
-  .fav-heading h1 { font-size: 20px; }
   .fav-heading p { font-size: 11px; margin-top: 2px; }
   .fav-back { width: 44px; height: 44px; margin-left: -8px; }
   .fav-refresh { width: 44px; height: 44px; }
-  .fav-controls { padding: 0 16px; }
+  .fav-controls { padding: 0 16px 9px; gap: 7px; }
   .fav-search { min-height: 46px; max-width: none; }
   .fav-search input { font-size: 16px; }
-  .fav-categories { gap: 22px; padding-top: 8px; }
-  .fav-categories button { min-height: 48px; font-size: 14px; }
+  .fav-categories { flex-wrap: wrap; gap: 4px; padding-inline: 0; overflow: visible; }
+  .fav-categories button { justify-content: center; min-width: 44px; min-height: 44px; padding-inline: 8px; font-size: 13px; }
   .fav-categories button > svg { display: none; }
   .fav-container { padding: 18px 16px 30px; }
   .fav-section-label { font-size: 12px; }
@@ -283,5 +312,8 @@ onBeforeUnmount(() => { locationRequest?.abort(); dialog.value?.close() })
   .favorite-detail-actions > button { min-height: 44px; font-size: 13px; padding: 0 10px; }
   .favorite-origin { gap: 10px; }
   .favorite-origin p { font-size: 13px; }
+}
+@media (max-width: 360px) {
+  .fav-categories { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 </style>

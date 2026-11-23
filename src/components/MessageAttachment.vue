@@ -516,34 +516,34 @@ watch(
   background: color-mix(in srgb, var(--ink) 8%, transparent);
 }
 
-/* 自己发的消息底色是强调色渐变，文字/轨道要反色 */
+/* 音频控件跟随发出消息的前景色。 */
 .msg.out .audio-title {
-  color: rgba(255, 255, 255, 0.92);
+  color: var(--message-out-ink);
 }
 
 .msg.out .audio-meta {
-  color: rgba(255, 255, 255, 0.74);
+  color: var(--message-out-ink);
 }
 
 .msg.out .audio-track {
-  background: rgba(255, 255, 255, 0.3);
+  background: color-mix(in srgb, var(--message-out-ink) 24%, transparent);
 }
 
 .msg.out .audio-fill {
-  background: #fff;
+  background: var(--message-out-ink);
 }
 
 .msg.out .audio-play {
-  background: rgba(255, 255, 255, 0.18);
+  background: color-mix(in srgb, var(--message-out-ink) 12%, transparent);
   color: #fff;
 }
 
 .msg.out .audio-play:hover {
-  background: rgba(255, 255, 255, 0.26);
+  background: color-mix(in srgb, var(--message-out-ink) 19%, transparent);
 }
 
 .msg.out .audio-download {
-  color: rgba(255, 255, 255, 0.82);
+  color: var(--message-out-ink);
 }
 
 .attach {

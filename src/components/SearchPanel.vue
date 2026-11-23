@@ -10,6 +10,7 @@ import { api, type Id, type SearchResults } from '../api/client'
 import { useFilePreview } from '../composables/useFilePreview'
 import { useAuthStore } from '../stores/auth'
 import { humanBytes, initialsOf, listTime, toneOfPerson } from '../utils/present'
+import { userAvatarSrc } from '../utils/avatar'
 
 withDefaults(defineProps<{ mobile?: boolean }>(), { mobile: false })
 
@@ -154,9 +155,8 @@ onBeforeUnmount(() => {
       <p v-if="error" class="search-error" role="alert">{{ error }} <button @click="run">重试</button></p>
 
       <div v-else-if="!trimmed" class="search-idle">
-        <MessageSquare :size="22" :stroke-width="1.6" />
+        <div class="empty-mark"><Search :size="22" :stroke-width="1.65" aria-hidden="true" /></div>
         <p>输入关键词开始搜索</p>
-        <p class="search-idle-sub">可以搜昵称、群名、聊天内容或文件名</p>
       </div>
 
       <p v-else-if="loading && !result" class="search-idle-sub center">
@@ -182,6 +182,7 @@ onBeforeUnmount(() => {
               <AppAvatar
                 :initials="initialsOf(hit.name)"
                 :tone="toneOfPerson(hit.userId, auth.user?.userId)"
+                :src="hit.avatar || userAvatarSrc(hit.userId)"
                 size="sm"
                 :presence="hit.online ? 'online' : 'offline'"
               />
@@ -265,7 +266,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .search-categories { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 12px; }
-.search-categories button { padding: 5px 7px; border-radius: 4px; background: none; color: var(--ink-3); font-size: 11px; }
+.search-categories button { padding: 5px 7px; border-radius: var(--r-sm); background: none; color: var(--ink-3); font-size: 11px; }
 .search-categories button.on { color: var(--accent-ink); background: var(--accent-soft); }
 .search-error button { color: var(--accent); background: none; text-decoration: underline; }
 .search-top {
@@ -286,6 +287,7 @@ onBeforeUnmount(() => {
 
 .search-body {
   padding: 10px 12px 18px;
+  background: var(--canvas);
 }
 
 .search-idle {
@@ -433,9 +435,9 @@ onBeforeUnmount(() => {
   animation: tick-spin 900ms linear infinite;
 }
 
-.mobile-search-pane { display: flex; position: fixed; inset: 0; z-index: 20; height: var(--mobile-viewport-height, 100dvh); border: 0; animation: none; }
+.mobile-search-pane { display: flex; position: fixed; inset: 0; z-index: 20; height: var(--mobile-viewport-height, 100dvh); border: 0; animation: fade-in var(--dur-2) var(--ease-out); }
 .mobile-search-pane .detail-head { height: auto; min-height: 56px; padding: calc(env(safe-area-inset-top, 0px) + 4px) 12px 4px; justify-content: flex-start; gap: 10px; }
-.mobile-search-pane .detail-title { font-size: 16px; color: var(--ink); letter-spacing: 0; }
+.mobile-search-pane .detail-title { font-size: 19px; color: var(--ink); letter-spacing: -0.2px; }
 .mobile-search-pane .detail-head > button { order: -1; width: 44px; height: 44px; }
 .mobile-search-pane .search-top { padding: 12px 16px 8px; }
 .mobile-search-pane .search { min-height: 46px; }

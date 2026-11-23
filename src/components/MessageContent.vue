@@ -5,6 +5,8 @@ import AppAvatar from './AppAvatar.vue'
 import MessageAttachment from './MessageAttachment.vue'
 import type { ChatMessage } from '../types/chat'
 import { userAvatarSrc } from '../utils/avatar'
+import { linkSegments, singleLink } from '../utils/link'
+import LinkCard from './LinkCard.vue'
 
 /**
  * 一条消息的内部渲染：作者名、头像、引用块、附件/气泡、译文、时间和已读状态。
@@ -34,6 +36,15 @@ const emit = defineEmits<{
 }>()
 
 const mobile = computed(() => props.variant === 'mobile')
+
+/** 整条消息就是链接时用卡片展示，避免一长串 URL 撑满气泡。 */
+const linkCard = computed(() =>
+  props.message.recalled || props.message.attachment ? null : singleLink(props.message.text),
+)
+/** 文字里夹着链接：把链接拆出来做成可点击的锚点。 */
+const segments = computed(() =>
+  linkCard.value ? [] : linkSegments(props.message.text),
+)
 
 /** 头像在选中模式下变成勾选热区，和点击整行一致。 */
 function onAvatarClick(event: MouseEvent) {
@@ -87,8 +98,31 @@ function onAvatarClick(event: MouseEvent) {
         v-if="message.attachment && !message.recalled"
         :attachment="message.attachment"
       />
-      <div v-else class="bubble" :class="{ recalled: message.recalled, compact: mobile }">
-        {{ message.recalled ? '消息已撤回' : message.text }}
+      <LinkCard v-if="linkCard" :link="linkCard" :compact="mobile" />
+      <!--
+        附件消息的 content 是文件元数据 JSON，只由 MessageAttachment 渲染；
+        不能再把原文当气泡显示，否则图片下面会多出一整段 {"fileId":...}。
+      -->
+      <div
+        v-else-if="!message.attachment"
+        class="bubble"
+        :class="{ recalled: message.recalled, compact: mobile }"
+      >
+        <template v-if="message.recalled">消息已撤回</template>
+        <template v-else>
+          <template v-for="(segment, index) in segments" :key="index">
+            <a
+              v-if="segment.type === 'link'"
+              class="msg-link"
+              :href="segment.link.href"
+              target="_blank"
+              rel="noopener noreferrer"
+              :title="segment.link.href"
+              @click.stop
+            >{{ segment.text }}</a>
+            <template v-else>{{ segment.text }}</template>
+          </template>
+        </template>
       </div>
 
       <div v-if="translation" class="bubble translation" :class="{ compact: mobile }">
@@ -171,6 +205,19 @@ function onAvatarClick(event: MouseEvent) {
   white-space: nowrap;
   font-size: 11.5px;
   color: var(--ink-3);
+}
+
+/* ---------- 气泡内的可点击链接 ---------- */
+.msg-link {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
+  text-underline-offset: 2px;
+  transition: text-decoration-color var(--dur-1) var(--ease-out);
+}
+
+.msg-link:hover {
+  text-decoration-color: currentColor;
 }
 
 /* ---------- 撤回 ---------- */

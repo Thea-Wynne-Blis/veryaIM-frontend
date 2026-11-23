@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Favorite } from '../../api/client'
-import { favoriteExcerpt, favoriteKind, favoriteTitle } from '../favorites'
+import { favoriteExcerpt, favoriteKind, favoriteLink, favoriteTitle, visibleFavorites } from '../favorites'
 
 const row = (extra: Partial<Favorite> = {}): Favorite => ({ id: '390000000000000001', messageId: '380000000000000012', conversationId: 'group', type: 'TEXT', senderId: '102', senderName: '陈一', conversationTitle: '设计组', createdAt: '2026-11-18T08:00:00Z', ...extra })
 
@@ -10,10 +10,23 @@ describe('收藏内容展示', () => {
     expect(favoriteKind(row({ text: '设计说明' }))).toBe('TEXT')
     expect(favoriteKind(row({ type: 'FILE', fileName: 'https说明.pdf' }))).toBe('FILE')
   })
-  it('图片视频归为媒体，语音独立筛选', () => {
+  it('裸域名也识别为链接，并能取出整条收藏的链接', () => {
+    expect(favoriteKind(row({ text: 'www.baidu.com' }))).toBe('LINK')
+    expect(favoriteKind(row({ text: 'baidu.com' }))).toBe('LINK')
+    expect(favoriteLink(row({ text: 'www.baidu.com' }))).toMatchObject({
+      href: 'https://www.baidu.com/',
+      domain: 'baidu.com',
+    })
+    expect(favoriteLink(row({ text: '看这个 www.baidu.com' }))).toBeNull()
+  })
+  it('图片视频归为媒体，语音收藏不再展示', () => {
     expect(favoriteKind(row({ type: 'IMAGE' }))).toBe('MEDIA')
     expect(favoriteKind(row({ type: 'VIDEO' }))).toBe('MEDIA')
-    expect(favoriteKind(row({ type: 'AUDIO' }))).toBe('AUDIO')
+    expect(visibleFavorites([
+      row({ type: 'AUDIO' }),
+      row({ type: 'TEXT' }),
+      row({ type: 'FILE', fileName: '设计.pdf' }),
+    ]).map((item) => item.type)).toEqual(['TEXT', 'FILE'])
   })
   it('没有文件名时按类型显示，完整保留多行文字', () => {
     expect(favoriteTitle(row({ type: 'IMAGE' }))).toBe('图片')

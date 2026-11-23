@@ -2,7 +2,7 @@
 import { ref } from 'vue'
 import { X } from 'lucide-vue-next'
 import StickerPicker from './StickerPicker.vue'
-import { EMOJIS } from '../utils/emoji'
+import { EMOJIS, loadRecentEmojis, rememberEmoji } from '../utils/emoji'
 
 /**
  * 表情面板：内置表情 + 网络斗图。
@@ -24,6 +24,13 @@ const emit = defineEmits<{
 }>()
 
 const tab = ref<'emoji' | 'sticker'>('emoji')
+/** 最近使用：本地记录，打开面板时读一次。 */
+const recent = ref<string[]>(loadRecentEmojis())
+
+function pick(emoji: string) {
+  recent.value = rememberEmoji(emoji)
+  emit('pick', emoji)
+}
 </script>
 
 <template>
@@ -62,17 +69,38 @@ const tab = ref<'emoji' | 'sticker'>('emoji')
       </button>
     </div>
 
-    <div v-if="tab === 'emoji'" class="emoji-grid">
-      <button
-        v-for="emoji in EMOJIS"
-        :key="emoji"
-        class="emoji"
-        type="button"
-        :aria-label="`插入 ${emoji}`"
-        @click="emit('pick', emoji)"
-      >
-        {{ emoji }}
-      </button>
+    <div v-if="tab === 'emoji'" class="emoji-scroll">
+      <section v-if="recent.length" class="emoji-section">
+        <p class="emoji-caption">最近使用</p>
+        <div class="emoji-grid">
+          <button
+            v-for="emoji in recent"
+            :key="`recent-${emoji}`"
+            class="emoji"
+            type="button"
+            :aria-label="`插入 ${emoji}`"
+            @click="pick(emoji)"
+          >
+            {{ emoji }}
+          </button>
+        </div>
+      </section>
+
+      <section class="emoji-section">
+        <p class="emoji-caption">所有表情</p>
+        <div class="emoji-grid">
+          <button
+            v-for="emoji in EMOJIS"
+            :key="emoji"
+            class="emoji"
+            type="button"
+            :aria-label="`插入 ${emoji}`"
+            @click="pick(emoji)"
+          >
+            {{ emoji }}
+          </button>
+        </div>
+      </section>
     </div>
 
     <StickerPicker
@@ -138,6 +166,31 @@ const tab = ref<'emoji' | 'sticker'>('emoji')
   color: var(--ink);
 }
 
+/* 表情很多，面板自身滚动，不把输入框顶出屏幕 */
+.emoji-scroll {
+  max-height: 226px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-right: 2px;
+}
+
+.emoji-section {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.emoji-caption {
+  padding: 0 2px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--ink-4);
+}
+
 .emoji-grid {
   display: flex;
   flex-wrap: wrap;
@@ -179,6 +232,21 @@ const tab = ref<'emoji' | 'sticker'>('emoji')
   font-size: 12.5px;
 }
 
+.emoji-panel--mobile .emoji-scroll {
+  max-height: 46vh;
+  gap: 10px;
+  padding-right: 0;
+}
+
+.emoji-panel--mobile .emoji-section {
+  gap: 4px;
+}
+
+.emoji-panel--mobile .emoji-caption {
+  padding: 0 2px;
+  font-size: 11.5px;
+}
+
 .emoji-panel--mobile .emoji-close {
   width: 30px;
   height: 30px;
@@ -194,7 +262,7 @@ const tab = ref<'emoji' | 'sticker'>('emoji')
   display: grid;
   grid-template-columns: repeat(8, minmax(0, 1fr));
   gap: 3px;
-  padding-top: 8px;
+  padding-top: 6px;
 }
 
 .emoji-panel--mobile .emoji {

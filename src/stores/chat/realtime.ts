@@ -92,6 +92,13 @@ export function handleFrame(host: RealtimeHost, frame: RealtimeFrame) {
     window.dispatchEvent(new CustomEvent('veryal:moment', { detail: frame.data }))
     return
   }
+  // 好友申请/通过/拉黑：立即拉一次会话卡片，让新好友的单聊无需刷新就出现；
+  // 同时广播窗口事件，通讯录页面据此刷新好友与待处理申请。
+  if (frame.cmd === 'friend' && frame.data) {
+    window.dispatchEvent(new CustomEvent('veryal:friend', { detail: frame.data }))
+    void host.loadCards()
+    return
+  }
   if (frame.cmd !== 'message' || !frame.data) return
   const payload = frame.data as RealtimePayload
   const conversationId = payload.conversationId

@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { messageOf } from '../utils/error'
 import { useToast } from '../composables/useToast'
 import {
   Users, Search, MessageSquarePlus, Loader2, UserPlus,
   Check, X, Pencil, Inbox, Hash, Send, Trash2,
-  MapPin, PenLine, CalendarClock, UserRound,
+  MapPin, CalendarClock, UserRound,
 } from 'lucide-vue-next'
 import AppAvatar from './AppAvatar.vue'
 import UserProfileDialog from './UserProfileDialog.vue'
@@ -58,7 +58,7 @@ const remarkDraft = ref('')
 /* 添加好友弹窗 */
 const addOpen = ref(false)
 const addKeyword = ref('')
-const addHits = ref<{ userId: Id; nickname: string; username: string }[]>([])
+const addHits = ref<{ userId: Id; nickname: string; username: string; avatar?: string | null }[]>([])
 const addMessage = ref('')
 const addBusy = ref<Id | null>(null)
 
@@ -267,6 +267,7 @@ async function searchUsers() {
         userId: String(i.userId ?? ''),
         nickname: String(i.nickname ?? i.username ?? '用户'),
         username: String(i.username ?? ''),
+        avatar: typeof i.avatar === 'string' && i.avatar ? i.avatar : null,
       }))
       .filter((i) => i.userId && i.userId !== '0')
   } catch {
@@ -295,36 +296,53 @@ async function sendRequest(hit: { userId: Id; nickname: string }) {
   }
 }
 
-onMounted(load)
+/**
+ * 好友事件只刷新数据；正在编辑备注或输入搜索词时也不打断，
+ * load() 会保留当前搜索关键字并同步清理已失效的选中项。
+ */
+function onFriendEvent() {
+  void load()
+}
+
+onMounted(() => {
+  void load()
+  // 对方通过好友申请时（实时 friend 帧），通讯录和待处理申请立即刷新。
+  window.addEventListener('veryal:friend', onFriendEvent)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('veryal:friend', onFriendEvent)
+})
 </script>
 
 <template>
   <div class="view">
-    <aside class="view-list">
-      <header class="view-head">
-        <h1 class="view-title">通讯录</h1>
-        <button class="icon-btn sm" title="添加好友" @click="addOpen = true">
-          <UserPlus :size="15" :stroke-width="2" />
-        </button>
-      </header>
+    <header class="view-head">
+      <h1 class="view-title">通讯录</h1>
+      <button class="new-conversation" @click="addOpen = true">
+        <UserPlus :size="16" :stroke-width="2" aria-hidden="true" />
+        添加好友
+      </button>
+    </header>
 
-      <div class="seg seg-tabs" :style="{ '--idx': tabIndex }" role="tablist">
+    <aside class="view-list" aria-label="联系人筛选">
+      <div class="seg seg-tabs" :style="{ '--idx': tabIndex }" role="group" aria-label="通讯录分类">
         <span class="seg-thumb" aria-hidden="true" />
-        <button :class="{ on: tab === 'friends' }" role="tab" :aria-selected="tab === 'friends'" @click="tab = 'friends'">
+        <button :class="{ on: tab === 'friends' }" :aria-pressed="tab === 'friends'" @click="tab = 'friends'">
           好友<span class="seg-count num">{{ data.friends.length }}</span>
         </button>
-        <button :class="{ on: tab === 'groups' }" role="tab" :aria-selected="tab === 'groups'" @click="tab = 'groups'">
+        <button :class="{ on: tab === 'groups' }" :aria-pressed="tab === 'groups'" @click="tab = 'groups'">
           群聊<span class="seg-count num">{{ data.groups.length }}</span>
         </button>
-        <button :class="{ on: tab === 'requests' }" role="tab" :aria-selected="tab === 'requests'" @click="tab = 'requests'">
+        <button :class="{ on: tab === 'requests' }" :aria-pressed="tab === 'requests'" @click="tab = 'requests'">
           申请
           <span v-if="pendingRequests.length" class="dot-badge num">{{ pendingRequests.length }}</span>
         </button>
       </div>
 
-      <label v-if="tab === 'friends'" class="search" style="margin: 0 12px 8px">
+      <label v-if="tab === 'friends'" class="search contact-search">
         <Search class="search-icon" :size="15" :stroke-width="2" />
-        <input v-model="keyword" type="search" placeholder="搜索好友" />
+        <input v-model="keyword" type="search" placeholder="搜索好友" aria-label="搜索好友" />
         <Loader2 v-if="loading" :size="13" class="spin" style="color: var(--ink-3)" />
       </label>
 
@@ -337,19 +355,21 @@ onMounted(load)
           <div
             v-for="f in friends"
             :key="f.friendId"
-            class="row spot"
+            class="row"
             :class="{ on: sameId(selected?.friendId, f.friendId) }"
-            @pointermove="spot"
-            @click="pickFriend(f)"
           >
-            <span class="avatar-wrap">
-              <AppAvatar :initials="initialsOf(f.remark || f.nickname)" :tone="toneOf(f.friendId)" :src="f.avatar || userAvatarSrc(f.friendId)" size="md" />
-              <span v-if="f.online" class="online-dot" title="在线" />
-            </span>
-            <span class="row-main">
-              <span class="row-name">{{ f.remark || f.nickname }}</span>
-              <span class="row-sub">{{ f.nickname }} · {{ f.online ? '在线' : '离线' }}</span>
-            </span>
+            <button type="button" class="contact-open" @click="pickFriend(f)">
+              <span class="avatar-wrap">
+                <AppAvatar :initials="initialsOf(f.remark || f.nickname)" :tone="toneOf(f.friendId)" :src="f.avatar || userAvatarSrc(f.friendId)" size="md" />
+                <span v-if="f.online" class="online-dot" title="在线" />
+              </span>
+              <span class="row-main">
+                <span class="row-name">{{ f.remark || f.nickname }}</span>
+                <span class="row-sub">
+                  <template v-if="f.remark && f.remark !== f.nickname">{{ f.nickname }} · </template>{{ f.online ? '在线' : '离线' }}
+                </span>
+              </span>
+            </button>
             <input
               v-if="sameId(editingRemark, f.friendId)"
               v-model="remarkDraft"
@@ -373,7 +393,7 @@ onMounted(load)
             </button>
           </div>
           <p v-if="!friends.length && !loading" class="view-empty-sm">
-            还没有好友。点右上角图标搜索用户发起申请。
+            还没有好友。点「添加好友」搜索用户并发起申请。
           </p>
         </template>
 
@@ -426,7 +446,7 @@ onMounted(load)
     </aside>
 
     <section class="view-main">
-      <div v-if="selected" class="profile-card glare">
+      <div v-if="selected" class="profile-card">
         <div class="profile-head">
           <span class="profile-avatar">
             <AppAvatar
@@ -439,22 +459,16 @@ onMounted(load)
           </span>
           <h2 class="profile-name">{{ selected.remark || selected.nickname }}</h2>
           <p class="profile-sub">
-            {{ selected.nickname }} · {{ selected.online ? '在线' : '离线' }}
+            <template v-if="selected.remark && selected.remark !== selected.nickname">{{ selected.nickname }} · </template>{{ selected.online ? '在线' : '离线' }}
           </p>
         </div>
 
-        <p class="profile-signature" :class="{ empty: !selected.signature }">
-          {{ selected.signature || '这个人很神秘，还没有写个性签名。' }}
-        </p>
+        <p v-if="selected.signature" class="profile-signature">{{ selected.signature }}</p>
 
         <dl class="profile-meta">
           <div class="meta-row">
             <dt><MapPin :size="13" :stroke-width="1.9" /> 地区</dt>
             <dd>{{ selected.region || '未填写' }}</dd>
-          </div>
-          <div class="meta-row">
-            <dt><PenLine :size="13" :stroke-width="1.9" /> 个性签名</dt>
-            <dd :class="{ muted: !selected.signature }">{{ selected.signature || '未填写' }}</dd>
           </div>
           <div class="meta-row">
             <dt><CalendarClock :size="13" :stroke-width="1.9" /> 添加时间</dt>
@@ -495,9 +509,9 @@ onMounted(load)
 
       <div v-else class="empty">
         <div class="empty-mark"><Users :size="22" :stroke-width="1.6" /></div>
-        <h3 class="empty-title">通讯录</h3>
+        <h3 class="empty-title">选择联系人</h3>
         <p class="empty-text">
-          左侧选择好友查看资料，行尾图标可直接发消息或改备注。群聊页点击群可直接进入会话，右上角可以搜索用户添加好友。
+          从左侧列表选择一位好友查看资料。
         </p>
       </div>
     </section>
@@ -538,7 +552,7 @@ onMounted(load)
               title="查看资料"
               @click="openUserProfile(hit, $event)"
             >
-              <AppAvatar :initials="initialsOf(hit.nickname)" :tone="toneOf(hit.userId)" size="md" />
+              <AppAvatar :initials="initialsOf(hit.nickname)" :tone="toneOf(hit.userId)" :src="hit.avatar || userAvatarSrc(hit.userId)" size="md" />
               <span class="row-main">
                 <span class="row-name">{{ hit.nickname }}</span>
                 <span class="row-sub">
@@ -583,20 +597,22 @@ onMounted(load)
 </template>
 
 <style scoped>
-.view { display: grid; grid-template-columns: 320px minmax(0, 1fr); min-width: 0; height: 100%; background: var(--surface); }
-.view-list { display: flex; flex-direction: column; min-width: 0; border-right: 1px solid var(--line); }
-.view-head { display: flex; align-items: center; justify-content: space-between; padding: 16px 14px 10px; }
-.view-title { font-size: 19px; font-weight: 680; letter-spacing: -0.5px; }
-.seg-tabs { --n: 3; margin: 0 12px 10px; height: 32px; }
+.view { display: grid; grid-template-columns: clamp(260px, 34%, 350px) minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); min-width: 0; height: 100%; background: var(--surface); }
+.view-list { display: flex; flex-direction: column; min-width: 0; min-height: 0; padding-top: 14px; border-right: 1px solid var(--line); }
+.view-head { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 15px var(--view-gutter); border-bottom: 1px solid var(--line); }
+.view-title { font-size: var(--view-title-size); font-weight: 700; letter-spacing: -0.5px; }
+.seg-tabs { --n: 3; margin: 0 14px 10px; }
+.contact-search { margin: 0 14px 8px; }
 
 
 .dot-badge { min-width: 15px; height: 15px; padding: 0 4px; border-radius: var(--r-full); background: var(--danger); color: #fff; font-size: 9.5px; font-weight: 700; line-height: 15px; }
-.view-scroll { flex: 1; overflow-y: auto; padding: 0 8px 18px; }
+.view-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 0 10px 18px; }
 .view-error { margin: 6px 6px; padding: 7px 10px; border-radius: var(--r-sm); background: var(--danger-soft); color: var(--danger); font-size: 11.5px; }
 .view-notice { margin: 6px 6px; padding: 7px 10px; border-radius: var(--r-sm); background: var(--accent-soft); color: var(--accent-ink); font-size: 11.5px; }
-.row { display: flex; align-items: center; gap: 9px; width: 100%; padding: 8px 8px; border-radius: var(--r-md); text-align: left; cursor: pointer; transition: background var(--dur-1) var(--ease-out); }
+.row { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 56px; padding: 8px 10px; border-radius: var(--r-md); text-align: left; cursor: pointer; transition: background var(--dur-1) var(--ease-out); }
 .row:hover { background: var(--surface-hover); }
 .row.on { background: var(--accent-soft); }
+.contact-open { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; min-height: 44px; text-align: left; }
 .row.static { cursor: default; }
 .row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .row-name { font-size: 13.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -612,18 +628,17 @@ onMounted(load)
 .req-status { font-size: 10.5px; color: var(--ink-4); }
 .mini { width: 26px; height: 26px; border-radius: var(--r-xs); display: grid; place-items: center; flex-shrink: 0; transition: all var(--dur-1); }
 .mini.ok { background: var(--accent-soft); color: var(--accent-ink); }
-.mini.ok:hover { background: var(--accent); color: #fff; }
+.mini.ok:hover { background: var(--primary); color: var(--primary-foreground); }
 .mini.no { background: var(--surface-3); color: var(--ink-3); }
 .mini.no:hover { background: var(--danger-soft); color: var(--danger); }
 .view-empty-sm { padding: 14px 9px; font-size: 11.5px; color: var(--ink-4); }
-.view-main { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; background: var(--canvas); }
-.profile-card { display: flex; flex-direction: column; align-items: stretch; gap: 8px; padding: 22px 24px 20px; border-radius: var(--r-lg); background: var(--surface); border: 1px solid var(--line); box-shadow: var(--frame-ring), var(--shadow-sm); width: min(360px, 100%); }
+.view-main { display: flex; align-items: safe center; justify-content: center; min-height: 0; overflow-y: auto; padding: 24px; background: var(--canvas); }
+.profile-card { display: flex; flex-direction: column; align-items: stretch; gap: 11px; padding: 24px; border-radius: var(--r-lg); background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow-sm); width: min(410px, 100%); animation: fade-in var(--dur-2) var(--ease-out); }
 .profile-head { display: flex; flex-direction: column; align-items: center; text-align: center; }
 .profile-avatar { position: relative; margin-bottom: 8px; }
 .profile-name { font-size: 17px; font-weight: 680; letter-spacing: -0.3px; }
 .profile-sub { font-size: 11.5px; color: var(--ink-3); }
 .profile-signature { margin: 4px 0 0; text-align: center; font-size: 12.5px; line-height: 1.65; color: var(--ink-2); }
-.profile-signature.empty { color: var(--ink-4); }
 .profile-meta { margin: 6px 0 2px; padding-top: 10px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 7px; }
 .meta-row { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; }
 .meta-row dt { display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0; font-size: 11px; color: var(--ink-3); }
@@ -637,7 +652,8 @@ onMounted(load)
 .primary, .ghost { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 34px; padding: 0 16px; border-radius: var(--r-sm); font-size: 12.5px; font-weight: 620; width: 100%; }
 .primary { background: var(--accent-grad); color: #fff; box-shadow: 0 3px 12px -5px var(--accent); margin-top: 4px; }
 .ghost { border: 1px solid var(--line); color: var(--ink-2); background: var(--surface-2); }
-.ghost.danger-text { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 26%, transparent); }
+.ghost.danger-text { align-self: center; width: auto; color: var(--danger); border-color: transparent; background: transparent; }
+.ghost.danger-text:hover { background: var(--danger-soft); }
 .mask { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 24px; background: color-mix(in srgb, var(--ink) 26%, transparent); backdrop-filter: blur(6px); }
 .dialog { width: 100%; max-width: 420px; max-height: min(560px, 82vh); display: flex; flex-direction: column; gap: 10px; padding: 16px 0 8px; border-radius: var(--r-lg); background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow-lg); animation: pop-in 200ms var(--ease-spring); }
 .dialog-head { display: flex; align-items: flex-start; justify-content: space-between; padding: 0 14px; }
@@ -651,6 +667,10 @@ onMounted(load)
 @media (max-width: 768px) {
   .view { grid-template-columns: minmax(0, 1fr); }
   .view-list { border-right: 0; }
+  .view-head { padding: 11px 16px; }
+  .view-head .new-conversation { min-width: 44px; min-height: 44px; }
+  .seg-tabs { height: 46px; margin-inline: 16px; }
+  .row { min-height: 56px; }
   .view-main { display: none; }
 }
 </style>

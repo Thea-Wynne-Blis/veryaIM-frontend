@@ -9,6 +9,7 @@ import { useAuthStore } from '../stores/auth'
 import type { ChatMember } from '../stores/chat'
 import type { Conversation } from '../types/chat'
 import { humanBytes, initialsOf, toneOfPerson } from '../utils/present'
+import { userAvatarSrc } from '../utils/avatar'
 
 const props = defineProps<{ conversation: Conversation; members: ChatMember[] }>()
 const emit = defineEmits<{
@@ -167,7 +168,7 @@ onBeforeUnmount(() => {
         <div class="history-count" role="status" aria-live="polite">{{ loading && !rows.length ? '正在查找…' : `${filtered ? '找到' : '最近'} ${rows.length}${hasMore ? '+' : ''} 条记录` }}<span v-if="rows.length">按时间从新到旧排列 · 点击查看上下文</span></div>
         <article v-for="row in rows" :key="String(row.messageId)" class="history-hit">
           <button class="history-hit-main" :aria-label="row.fileId != null ? `预览 ${row.fileName}` : `定位 ${row.senderName} 的消息：${row.text}`" @click="openResult(row)">
-            <AppAvatar :initials="initialsOf(row.senderName)" :tone="toneOfPerson(row.senderId, auth.user?.userId)" size="md" />
+            <AppAvatar :initials="initialsOf(row.senderName)" :tone="toneOfPerson(row.senderId, auth.user?.userId)" :src="userAvatarSrc(row.senderId)" size="md" />
             <span class="history-hit-content">
               <span class="history-hit-meta"><span>{{ row.senderName }}</span><time :datetime="row.createdAt">{{ timestamp(row.createdAt) }}</time></span>
               <span v-if="row.fileId != null" class="history-file">
