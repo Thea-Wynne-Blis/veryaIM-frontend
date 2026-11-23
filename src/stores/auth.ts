@@ -1,5 +1,6 @@
 import { messageOf } from '../utils/error'
 import { defineStore } from 'pinia'
+import { useChatBackgroundStore } from './chatBackground'
 import {
   api,
   clearFileCache,
@@ -98,6 +99,7 @@ export const useAuthStore = defineStore('auth', {
       this.token = null
       this.user = null
       clearFileCache()
+      useChatBackgroundStore().reset()
       clearSession()
     },
   },

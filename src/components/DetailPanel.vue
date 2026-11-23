@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import {
-  X, Users, Loader2, Megaphone, Search, ChevronRight, ChevronDown,
+  X, Users, Loader2, Megaphone, Search, ChevronRight, ChevronDown, Image as ImageIcon,
 } from 'lucide-vue-next'
 import AppAvatar from './AppAvatar.vue'
+import ChatBackgroundDialog from './ChatBackgroundDialog.vue'
 import { trackSpotlight } from '../composables/usePointerFx'
 import { api, type GroupModeration } from '../api/client'
 import type { ChatMember } from '../stores/chat'
@@ -45,6 +46,8 @@ const onlineCount = computed(
 
 const moderation = ref<GroupModeration | null>(null)
 const loadingModeration = ref(false)
+/** 聊天背景选择器：每个会话单独设置，优先于「我的 → 外观」里的全局背景。 */
+const backgroundOpen = ref(false)
 
 const myMuteLabel = computed(() => {
   const state = moderation.value
@@ -132,8 +135,6 @@ watch(() => props.conversation.id, () => {
         </div>
       </div>
 
-      <p v-if="!isGroup" class="conversation-summary">单聊</p>
-
       <div
         v-if="isGroup"
         class="card spot members-card"
@@ -205,6 +206,9 @@ watch(() => props.conversation.id, () => {
         <button class="settings-row find-content" @click="emit('open-search')">
           <span><Search :size="16" />查找聊天内容</span><ChevronRight :size="16" />
         </button>
+        <button class="settings-row" @click="backgroundOpen = true">
+          <span><ImageIcon :size="16" />聊天背景</span><ChevronRight :size="16" />
+        </button>
       </div>
       <div class="settings-section">
         <button class="settings-row" role="switch" :aria-checked="!!muted" aria-label="消息免打扰" @click="emit('toggle-mute')">
@@ -216,6 +220,12 @@ watch(() => props.conversation.id, () => {
       </div>
     </div>
   </aside>
+
+  <ChatBackgroundDialog
+    v-if="backgroundOpen"
+    :conversation-id="conversation.id"
+    @close="backgroundOpen = false"
+  />
 </template>
 
 <style scoped>
@@ -264,7 +274,6 @@ watch(() => props.conversation.id, () => {
 
 .settings-scroll { gap: 0; padding: 20px 18px; }
 .settings-hero { padding: 4px 0 0; }
-.conversation-summary { margin: 6px 0 22px; text-align: center; color: var(--ink-3); font-size: 11px; }
 .settings-scroll > .card { border: 0; border-radius: 0; padding: 16px 0; background: none; border-top: 1px solid var(--line); }
 .settings-scroll > .members-card { padding-top: 0; border-top: 0; }
 .online-count { margin-left: auto; font-size: 10px; font-weight: 400; }

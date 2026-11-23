@@ -10,6 +10,7 @@ import {
   Plus,
   ArrowLeft,
   Paperclip,
+  ArrowUp,
   Smile,
   AtSign,
   Loader2,
@@ -18,6 +19,7 @@ import {
   MoreHorizontal,
   Camera,
 } from 'lucide-vue-next'
+import AppAvatar from './AppAvatar.vue'
 import ContactsView from './ContactsView.vue'
 import MessageActionMenu from './MessageActionMenu.vue'
 import MeView from './MeView.vue'
@@ -26,11 +28,13 @@ import EmojiPanel from './EmojiPanel.vue'
 import MobileConversationList from './MobileConversationList.vue'
 import DetailPanel from './DetailPanel.vue'
 import FavoritesView from './FavoritesView.vue'
+import NotesView from './NotesView.vue'
 import MomentsView from './moments/MomentsView.vue'
 import { useMessageLocator } from '../composables/useMessageLocator'
 import { useTranslatePrefs } from '../composables/useTranslatePrefs'
 import { useEnterAnimation } from '../composables/useEnterAnimation'
 import { useStickyScroll } from '../composables/useStickyScroll'
+import { useChatBackground } from '../composables/useChatBackground'
 import { useChatStore } from '../stores/chat'
 import { useAuthStore } from '../stores/auth'
 import { useMomentsStore } from '../stores/moments'
@@ -38,6 +42,7 @@ import type { ChatMessage, Conversation } from '../types/chat'
 import { groupMessages } from '../utils/message'
 import { appendMention, insertAtCursor } from '../utils/composer'
 import { mentionCandidates } from '../utils/mention'
+import { groupAvatarSrc, userAvatarSrc } from '../utils/avatar'
 
 type ReplyRef = { messageId: string; senderId: string; preview: string }
 
@@ -50,12 +55,13 @@ const props = defineProps<{
   me?: string
   error?: string | null
   loading?: boolean
-  initialView?: string
+  initialView?: Tab
   locateFavoriteMessage: (conversationId: string, messageId: string, signal?: AbortSignal) => Promise<void>
 }>()
 
 const emit = defineEmits<{
   (e: 'select', id: string): void
+  (e: 'navigate', view: Tab): void
   (e: 'send', payload: { conversationId: string; text: string; reply?: ReplyRef }): void
   (e: 'attach', payload: { conversationId: string; file: File }): void
   (e: 'forward', message: ChatMessage): void
@@ -75,17 +81,27 @@ const chat = useChatStore()
 const auth = useAuthStore()
 const moments = useMomentsStore()
 
-type Tab = 'chat' | 'contacts' | 'moments' | 'favorites' | 'me'
+type Tab = 'chat' | 'contacts' | 'moments' | 'favorites' | 'notes' | 'me'
 
 /** 支持 ?tab=favorites 直接落地到指定页，便于演示与截图。 */
 const initialTab = (() => {
   const value = new URLSearchParams(window.location.search).get('tab') ?? props.initialView
-  return value === 'contacts' || value === 'me' || value === 'favorites' || value === 'moments'
+  return value === 'contacts' || value === 'me' || value === 'favorites' || value === 'notes' || value === 'moments'
     ? (value as Tab)
     : 'chat'
 })()
 
 const tab = ref<Tab>(initialTab)
+
+watch(() => props.initialView, (view) => {
+  if (view) tab.value = view
+})
+
+function navigateTab(view: Tab) {
+  if (tab.value === view) return
+  tab.value = view
+  emit('navigate', view)
+}
 const drafts = ref<Record<string, string>>({})
 const draft = computed({
   get: () => props.activeId ? drafts.value[props.activeId] ?? '' : '',
@@ -99,7 +115,10 @@ const infoButton = ref<HTMLButtonElement | null>(null)
 const emojiOpen = ref(false)
 const viewportHeight = ref(window.visualViewport?.height ?? window.innerHeight)
 const scroller = ref<HTMLElement | null>(null)
-const bodyScrolled = ref(false)
+const unreadOnly = ref(false)
+const visibleConversations = computed(() =>
+  unreadOnly.value ? props.conversations.filter((item) => item.unread > 0) : props.conversations,
+)
 /** 贴底滚动与桌面端共用一份实现；这里沿用 scrollBottom 这个名字，调用点不用改。 */
 const {
   stick: stickToBottom,
@@ -117,16 +136,18 @@ const focusMessage = useMessageLocator(() => scroller.value, () => {
 defineExpose({ focusMessage })
 const fileInput = ref<HTMLInputElement | null>(null)
 
-const tabs = [
-  { key: 'chat', label: '消息', icon: MessageCircle },
-  { key: 'contacts', label: '通讯录', icon: Users },
-  { key: 'moments', label: '朋友圈', icon: Camera },
-  { key: 'me', label: '我的', icon: User },
-] as const
-
 const totalUnread = computed(() =>
   props.conversations.reduce((sum, item) => sum + item.unread, 0),
 )
+const tabs = computed(() => [
+  { key: 'chat', label: '消息', icon: MessageCircle, unread: totalUnread.value },
+  { key: 'contacts', label: '通讯录', icon: Users, unread: 0 },
+  { key: 'moments', label: '朋友圈', icon: Camera, unread: moments.unread },
+  { key: 'me', label: '我的', icon: User, unread: 0 },
+] as const)
+
+const dockTab = computed(() => (tab.value === 'favorites' || tab.value === 'notes') ? 'me' : tab.value)
+const dockIndex = computed(() => tabs.value.findIndex(({ key }) => key === dockTab.value))
 
 const current = computed(() => {
   if (!props.activeId) return null
@@ -139,6 +160,13 @@ const current = computed(() => {
 const currentMessages = computed(() =>
   props.activeId ? props.messagesOf(props.activeId) : [],
 )
+
+/** 手机端聊天背景：与桌面端共用同一份 store 与回退规则。 */
+const backgroundTarget = computed(() => current.value?.id ?? null)
+const {
+  hasBackground,
+  style: backgroundStyle,
+} = useChatBackground(backgroundTarget)
 
 /** @ 提及面板：单聊只有对端一个候选，群聊按成员列表。 */
 const mentionOpen = ref(false)
@@ -230,17 +258,6 @@ function sendShortcut(event: KeyboardEvent) {
   send()
 }
 
-const tabTitle = computed(
-  () =>
-    ({
-      chat: '消息',
-      contacts: '通讯录',
-      moments: '朋友圈',
-      favorites: '收藏',
-      me: '我的',
-    })[tab.value],
-)
-
 function triggerAttach() {
   fileInput.value?.click()
 }
@@ -308,17 +325,15 @@ watch(
       return
     }
     armEnter()
+    // 打开会话后把焦点落在输入框；触屏设备不主动弹软键盘，避免一进来就挡住消息
+    const coarsePointer = window.matchMedia?.('(pointer: coarse)').matches ?? false
     // 缓存的会话同步渲染；异步加载由 useEnterAnimation 的长度监听收门控
     nextTick(() => {
+      if (!coarsePointer) focusComposerAtEnd()
       if (currentMessages.value.length) disarmEnter()
     })
   },
 )
-
-function onBodyScroll(event: Event) {
-  const el = event.target as HTMLElement
-  bodyScrolled.value = el.scrollTop > 6
-}
 
 /** 消息不播「新消息」入场动画（同 ChatPane），只给每条一个稳定 key：乐观占位确认后复用同一节点 */
 function grouping(messages: ChatMessage[]) {
@@ -453,25 +468,36 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="m-shell" :style="{ height: `${viewportHeight}px` }">
-    <header v-if="tab === 'chat'" class="m-head" :class="{ scrolled: bodyScrolled }" :inert="!!current">
+  <main class="m-shell" :style="{ height: `${viewportHeight}px` }">
+    <header v-if="tab === 'chat'" class="m-head" :inert="!!current">
       <div class="m-title-row">
-        <h1 class="m-title">{{ tabTitle }}</h1>
-        <button v-if="tab === 'chat'" class="icon-btn" aria-label="新建会话" @click="emit('new-chat')">
-          <Plus :size="19" :stroke-width="2" />
+        <h1 class="m-title">消息</h1>
+        <button class="new-conversation" aria-label="新建会话" @click="emit('new-chat')">
+          <Plus :size="17" :stroke-width="2" aria-hidden="true" />
+          新建
         </button>
       </div>
       <button class="m-search-entry" @click="emit('global-search')">
         <Search class="search-icon" :size="15" :stroke-width="2" />
         搜索联系人、群聊和聊天记录
       </button>
+      <div class="seg m-seg" :style="{ '--idx': unreadOnly ? 1 : 0 }" role="group" aria-label="会话筛选">
+        <span class="seg-thumb" aria-hidden="true" />
+        <button :class="{ on: !unreadOnly }" :aria-pressed="!unreadOnly" @click="unreadOnly = false">
+          全部 <span class="seg-count num">{{ conversations.length }}</span>
+        </button>
+        <button :class="{ on: unreadOnly }" :aria-pressed="unreadOnly" @click="unreadOnly = true">
+          未读 <span class="seg-count num">{{ totalUnread }}</span>
+        </button>
+      </div>
     </header>
 
-    <div class="m-body" :class="{ embedded: tab !== 'chat' }" :inert="!!current" @scroll.passive="onBodyScroll">
+    <div class="m-body" :class="{ embedded: tab !== 'chat' }" :inert="!!current">
       <template v-if="tab === 'chat'">
         <p v-if="error" class="m-error" role="alert">{{ error }}</p>
         <MobileConversationList
-          :conversations="conversations"
+          :conversations="visibleConversations"
+          :unread-only="unreadOnly"
           @select="open"
           @new-chat="emit('new-chat')"
           @mark-unread="(id) => emit('mark-unread', id)"
@@ -487,26 +513,26 @@ onBeforeUnmount(() => {
         mobile
         @profile="(userId, anchor) => emit('profile', String(userId), anchor)"
       />
-      <FavoritesView v-else-if="tab === 'favorites'" class="m-embed" mobile :locate-message="locateFavoriteMessage" @back="tab = 'me'" />
-      <MeView v-else class="m-embed" show-favorites @favorites="tab = 'favorites'" />
+      <FavoritesView v-else-if="tab === 'favorites'" class="m-embed" mobile :locate-message="locateFavoriteMessage" @back="navigateTab('me')" />
+      <NotesView v-else-if="tab === 'notes'" class="m-embed" mobile @back="navigateTab('me')" />
+      <MeView v-else class="m-embed" show-favorites show-notes @favorites="navigateTab('favorites')" @notes="navigateTab('notes')" />
     </div>
 
-    <nav class="m-tabs" aria-label="主导航" :inert="!!current">
+    <nav class="m-tabs" :style="{ '--dock-index': dockIndex }" aria-label="主导航" :inert="!!current">
       <button
         v-for="item in tabs"
         :key="item.key"
         class="m-tab"
-        :class="{ active: tab === item.key || (item.key === 'me' && tab === 'favorites') }"
-        :aria-current="tab === item.key || (item.key === 'me' && tab === 'favorites') ? 'page' : undefined"
-        @click="tab = item.key; bodyScrolled = false"
+        :class="{ active: dockTab === item.key }"
+        :aria-current="dockTab === item.key ? 'page' : undefined"
+        :aria-label="item.label"
+        :aria-description="item.unread ? item.unread + ' 条未读' : undefined"
+        @click="navigateTab(item.key)"
       >
         <span class="m-tab-icon">
           <component :is="item.icon" :size="20" :stroke-width="1.85" />
-          <span v-if="item.key === 'chat' && totalUnread" class="m-tab-dot">
-            {{ totalUnread > 99 ? '99+' : totalUnread }}
-          </span>
-          <span v-else-if="item.key === 'moments' && moments.unread" class="m-tab-dot">
-            {{ moments.unread > 99 ? '99+' : moments.unread }}
+          <span v-if="item.unread" class="m-tab-dot" aria-hidden="true">
+            {{ item.unread > 99 ? '99+' : item.unread }}
           </span>
         </span>
         {{ item.label }}
@@ -520,7 +546,16 @@ onBeforeUnmount(() => {
           <button class="icon-btn" aria-label="返回" @click="close">
             <ArrowLeft :size="20" :stroke-width="2" />
           </button>
-          <div :key="current.id" class="m-chat-title enter">
+          <AppAvatar
+            :key="current.id"
+            :initials="current.initials"
+            :tone="current.tone"
+            :presence="current.presence"
+            :rounded="current.kind === 'group'"
+            :src="current.kind === 'group' ? groupAvatarSrc(current.id) : userAvatarSrc(current.peerId)"
+            size="sm"
+          />
+          <div :key="'title-' + current.id" class="m-chat-title enter">
             <span class="m-chat-name">{{ current.name }}</span>
             <span class="m-chat-sub">{{ current.context }}</span>
           </div>
@@ -532,6 +567,8 @@ onBeforeUnmount(() => {
         <div
           ref="scroller"
           class="m-messages"
+          :class="{ 'has-bg': hasBackground }"
+          :style="backgroundStyle"
           :inert="infoOpen"
           @scroll.passive="onMessageScroll"
           @load.capture="scrollBottom(false)"
@@ -602,11 +639,8 @@ onBeforeUnmount(() => {
             </div>
           </div>
           <div class="m-composer">
-            <button class="icon-btn" aria-label="提及成员" :aria-expanded="mentionOpen" @click="toggleMention">
-              <AtSign :size="20" :stroke-width="1.9" />
-            </button>
-            <button class="icon-btn" aria-label="表情" :aria-expanded="emojiOpen" aria-controls="mobile-emoji-picker" @click="emojiOpen = !emojiOpen; mentionOpen = false; composerInput?.blur()">
-              <Smile :size="20" :stroke-width="1.9" />
+            <button class="icon-btn" aria-label="附件" @click="triggerAttach">
+              <Paperclip :size="20" :stroke-width="1.9" />
             </button>
             <textarea
               ref="composerInput"
@@ -616,17 +650,20 @@ onBeforeUnmount(() => {
               placeholder="发消息…"
               aria-label="输入消息"
               @focus="emojiOpen = false; mentionOpen = false"
-              @input="mentionOpen = draft.endsWith('@')"
+              @input="mentionOpen = current?.kind === 'group' && draft.endsWith('@')"
               @compositionstart="composing = true"
               @compositionend="composing = false"
               @keydown.ctrl.enter.exact="sendShortcut"
               @keydown.meta.enter.exact="sendShortcut"
             />
-            <button v-if="!canSend" class="icon-btn" aria-label="附件" @click="triggerAttach">
-              <Paperclip :size="20" :stroke-width="1.9" />
+            <button v-if="current?.kind === 'group'" class="icon-btn" aria-label="提及成员" :aria-expanded="mentionOpen" @click="toggleMention">
+              <AtSign :size="20" :stroke-width="1.9" />
             </button>
-            <button v-else class="m-send" aria-label="发送" @click="send">
-              发送
+            <button class="icon-btn" aria-label="表情" :aria-expanded="emojiOpen" aria-controls="mobile-emoji-picker" @click="emojiOpen = !emojiOpen; mentionOpen = false; composerInput?.blur()">
+              <Smile :size="20" :stroke-width="1.9" />
+            </button>
+            <button class="m-send" aria-label="发送" :disabled="!canSend" @click="send">
+              <ArrowUp :size="21" :stroke-width="2.3" aria-hidden="true" />
             </button>
             <input ref="fileInput" type="file" hidden @change="onFilePicked" />
           </div>
@@ -691,21 +728,55 @@ onBeforeUnmount(() => {
         @delete="deleteMessage(menu.message)"
       />
     </Teleport>
-  </div>
+  </main>
 </template>
 
 <style scoped>
 .m-shell { max-height: 100dvh; }
 .m-shell .icon-btn { width: 44px; height: 44px; flex-shrink: 0; }
-.m-head { padding: calc(env(safe-area-inset-top, 0px) + 8px) 16px 12px; gap: 8px; background: var(--canvas); }
-.m-title { font-size: 25px; letter-spacing: -0.5px; }
-.m-search-entry { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; min-height: 42px; border-radius: 8px; background: var(--surface-3); color: var(--ink-3); font-size: 14px; }
+.m-head { padding: calc(env(safe-area-inset-top, 0px) + 12px) 16px 12px; gap: 10px; }
+.m-title { font-size: var(--view-title-size); letter-spacing: -0.5px; }
+.new-conversation { min-height: 44px; padding-inline: 14px; }
+.m-search-entry { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 44px; padding-inline: 12px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface-3); color: var(--ink-3); font-size: 14px; text-align: left; }
+.m-seg { height: 46px; }
+.m-seg button { font-size: 13px; }
 .m-body { min-height: 0; padding-bottom: 0; overscroll-behavior: contain; }
 .m-body.embedded { display: flex; flex-direction: column; overflow: hidden; padding-top: env(safe-area-inset-top, 0px); }
 
-.m-tabs { position: relative; flex-shrink: 0; background: var(--surface); padding: 7px 8px calc(env(safe-area-inset-bottom, 0px) + 7px); }
-.m-tab { min-height: 48px; font-size: 11px; }
-.m-chat-head { min-height: 60px; gap: 6px; padding: calc(env(safe-area-inset-top, 0px) + 3px) 8px 3px; background: var(--canvas); }
+.m-tabs {
+  position: relative;
+  flex-shrink: 0;
+  margin: 4px 10px max(7px, env(safe-area-inset-bottom, 0px));
+  padding: 5px 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-xl);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.m-tabs::before {
+  content: "";
+  position: absolute;
+  inset: 5px auto 5px 6px;
+  width: calc((100% - 12px) / 4);
+  border-radius: var(--r-md);
+  background: var(--accent-soft);
+  transform: translateX(calc(100% * var(--dock-index, 0)));
+  transition: transform 240ms var(--ease-out);
+  pointer-events: none;
+}
+
+.m-tab {
+  position: relative;
+  min-height: 48px;
+  border-radius: var(--r-md);
+  font-size: 11px;
+}
+
+.m-tab.active .m-tab-dot {
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+.m-chat-head { min-height: 62px; gap: 8px; padding: calc(env(safe-area-inset-top, 0px) + 4px) 8px 4px; background: var(--surface); }
 .m-chat-name { font-size: 16px; font-weight: 600; }
 .m-chat-sub { font-size: 11px; }
 .m-chat :deep(.bubble) { font-size: 16px; line-height: 1.6; padding: 10px 13px; overflow-wrap: anywhere; white-space: pre-wrap; }
@@ -717,12 +788,60 @@ onBeforeUnmount(() => {
 .m-chat :deep(.attach) { min-width: 0; }
 .m-chat :deep(.image-download) { width: 44px; height: 44px; opacity: 1; }
 .m-chat :deep(.audio-play), .m-chat :deep(.audio-download) { min-width: 40px; min-height: 40px; }
-.m-composer-wrap { padding: 8px 8px calc(env(safe-area-inset-bottom, 0px) + 8px); background: var(--canvas); }
-.m-composer { gap: 6px; align-items: flex-end; }
-.m-input { min-width: 0; min-height: 44px; max-height: 136px; padding: 10px 12px; border-radius: 8px; background: var(--surface); border: 1px solid var(--line); font-size: 16px; line-height: 1.45; }
-.m-input:focus { box-shadow: none; }
-.m-input:focus-visible { outline: none; }
-.m-send { min-width: 54px; width: auto; height: 44px; padding: 0 12px; border-radius: 7px; background: var(--accent); box-shadow: none; font-size: 14px; font-weight: 600; }
+.m-composer-wrap {
+  padding: 6px 8px max(8px, env(safe-area-inset-bottom, 0px));
+  border: 0;
+  background: var(--surface);
+}
+
+.m-composer {
+  align-items: flex-end;
+  gap: 0;
+  padding: 2px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-xl);
+  background: var(--surface-3);
+}
+
+.m-composer:focus-within {
+  border-color: var(--accent);
+}
+
+.m-composer .icon-btn {
+  border-radius: var(--r-full);
+}
+
+.m-input {
+  min-width: 0;
+  min-height: 44px;
+  max-height: 136px;
+  padding: 10px 2px;
+  border: 0;
+  background: transparent;
+  font-size: 16px;
+  line-height: 1.45;
+}
+
+.m-input:focus,
+.m-input:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.m-send:disabled {
+  color: var(--ink-3);
+  background: var(--surface-active);
+  opacity: 1;
+}
+
+.m-send {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--r-full);
+  background: var(--primary);
+  color: var(--primary-foreground);
+  box-shadow: none;
+}
 .m-mention { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 2px 2px; }
 .m-mention-item { min-height: 36px; padding: 0 12px; border-radius: 999px; background: var(--surface); border: 1px solid var(--line); font-size: 13px; }
 .m-mention-item:active { background: var(--surface-active); }
@@ -836,7 +955,7 @@ onBeforeUnmount(() => {
 
 .m-chat-enter-active,
 .m-chat-leave-active {
-  transition: transform 280ms var(--ease-out), opacity 200ms var(--ease-out);
+  transition: transform 240ms var(--ease-out), opacity 180ms var(--ease-out);
 }
 .m-chat-enter-from,
 .m-chat-leave-to {
