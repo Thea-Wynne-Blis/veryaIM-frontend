@@ -17,6 +17,7 @@ const router = createRouter({
     { path: '/app/contacts', name: 'contacts', component: WorkspacePage },
     { path: '/app/moments', name: 'moments', component: WorkspacePage },
     { path: '/app/favorites', name: 'favorites', component: WorkspacePage },
+    { path: '/app/notes', name: 'notes', component: WorkspacePage },
     { path: '/app/me', name: 'me', component: WorkspacePage },
     { path: '/:pathMatch(.*)*', redirect: '/app/chat' },
   ],
