@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type ObjectDirective } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useToast } from '../composables/useToast'
 import { useMessageActions } from '../composables/useMessageActions'
 import { useMessageLocator } from '../composables/useMessageLocator'
+import { useEnterAnimation } from '../composables/useEnterAnimation'
 import {
   Search,
   Phone,
@@ -37,6 +38,7 @@ import { useTranslatePrefs } from '../composables/useTranslatePrefs'
 import { useChatStore } from '../stores/chat'
 import type { ChatMessage, Conversation } from '../types/chat'
 import { humanBytes } from '../utils/present'
+import { stableMessageKey } from '../utils/message'
 
 const props = defineProps<{
   conversation: Conversation | null
@@ -44,7 +46,7 @@ const props = defineProps<{
   detailOpen: boolean
   error?: string | null
   loading?: boolean
-  members?: { userId: string | number; nickname: string; remark?: string | null }[]
+  members?: { userId: string | number; nickname: string; remark?: string | null; online?: boolean }[]
 }>()
 
 const emit = defineEmits<{
@@ -129,46 +131,17 @@ const {
 const emojiOpen = ref(false)
 const emojis = ['😀', '😄', '😊', '🥰', '😎', '🤔', '👍', '👏', '🙏', '🎉', '❤️', '🔥']
 
-/** 已读人数：群聊按成员数估算在线展示。 */
+/** 群聊在线人数：直接数成员在线状态（由成员接口与实时刷新维护），不再按人数估算。 */
 const onlineCount = computed(() =>
   props.conversation?.kind === 'group'
-    ? Math.max(2, Math.round((props.conversation.members ?? 6) * 0.5))
+    ? (props.members ?? []).filter((member) => member.online).length
     : 0,
 )
 
-/* ---------- 切换会话的入场动效 ---------- */
-/**
- * 消息节点「首次挂载」时才决定要不要播入场动画：
- * - 切换会话后的一小段时间内、且不是发送中的占位消息 → 播；
- * - 自己发消息、以及之后到达的实时消息 → 直接出现，不做动画。
- * 用指令而不是 class 绑定，动画跑起来之后门控关掉也不会把 class 摘掉。
- */
-let enterArmed = false
-let enterTimer: number | null = null
-
-function armEnter() {
-  enterArmed = true
-  if (enterTimer !== null) window.clearTimeout(enterTimer)
-  // 空会话或加载很慢时兜底：超过 1.2s 到达的消息按普通实时消息处理
-  enterTimer = window.setTimeout(disarmEnter, 1200)
-}
-
-function disarmEnter() {
-  enterArmed = false
-  if (enterTimer !== null) {
-    window.clearTimeout(enterTimer)
-    enterTimer = null
-  }
-}
-
-/** 只在节点挂载时打上 enter 类，并按序号触发一次「逐条流动」。 */
-const vEnter: ObjectDirective<HTMLElement, { order?: number; skip?: boolean }> = {
-  mounted(el, binding) {
-    if (!enterArmed || binding.value?.skip) return
-    el.style.setProperty('--enter-order', String(binding.value?.order ?? 0))
-    el.classList.add('enter')
-  },
-}
+/* ---------- 切换会话的入场动效（桌面端与移动端共用门控） ---------- */
+const { arm: armEnter, disarm: disarmEnter, vEnter } = useEnterAnimation(
+  () => props.messages.length,
+)
 
 /**
  * 消息气泡本身不做「新消息」入场动画：自己发的消息应该在按下回车的下一帧就出现。
@@ -185,9 +158,7 @@ const grouping = computed(() => {
       prev.author === message.author &&
       !prev.attachment &&
       !message.attachment
-    let key = message.clientMsgId ? `c:${message.clientMsgId}` : `s:${message.id}`
-    if (usedKeys.has(key)) key = `s:${message.id}:${index}`
-    usedKeys.add(key)
+    const key = stableMessageKey(message, index, usedKeys)
     return { message, grouped, key, enterOrder: index, pending: message.pending }
   })
 })
@@ -262,10 +233,6 @@ async function copySelected() {
   exitSelect()
   showNotice(ok ? `已复制 ${count} 条` : '复制失败，请手动选择文本')
 }
-
-/**
- * 能否走服务端撤回：自己的消息、未撤回、未在发送中、且 2 分钟窗口内。
- */
 
 async function deleteSelected() {
   const list = selectedMessages.value.filter((message) => !message.pending)
@@ -435,16 +402,7 @@ watch(
   { immediate: true },
 )
 
-// 需要异步加载的会话：等首批消息真正渲染完再收门控
-watch(
-  () => props.messages.length,
-  (len) => {
-    if (!enterArmed || !len) return
-    // 指令的 mounted 在 post 队列里，必须等整个 flush 结束（nextTick）再关门控
-    nextTick(disarmEnter)
-  },
-)
-
+// 需要异步加载的会话：首批消息真正渲染完后收门控（逻辑在 useEnterAnimation 内）
 watch(() => props.messages.length, () => scrollToBottom())
 </script>
 
@@ -479,8 +437,8 @@ watch(() => props.messages.length, () => scrollToBottom())
               <Users :size="9" :stroke-width="2.4" />
               {{ conversation.members }}
             </span>
-            <span v-if="conversation.presence === 'online'" class="stat-chip live">
-              {{ onlineCount || 1 }} 在线
+            <span v-if="onlineCount > 0" class="stat-chip live">
+              {{ onlineCount }} 在线
             </span>
           </h2>
           <p class="chat-sub truncate">{{ conversation.context }}</p>
@@ -1044,76 +1002,6 @@ watch(() => props.messages.length, () => scrollToBottom())
   color: var(--ink-3);
   font-style: italic;
   background: var(--surface-3);
-}
-
-.chat-search {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 14px;
-  border-bottom: 1px solid var(--line);
-  background: var(--surface);
-}
-
-.chat-search .search {
-  flex: 1;
-}
-
-.search-results {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 14px;
-  right: 14px;
-  z-index: 20;
-  max-height: 320px;
-  overflow-y: auto;
-  padding: 6px;
-  border-radius: var(--r-md);
-  border: 1px solid var(--line);
-  background: var(--surface);
-  box-shadow: var(--shadow-lg);
-}
-
-.search-hit {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  padding: 8px 9px;
-  border-radius: var(--r-sm);
-  text-align: left;
-}
-
-.search-hit:hover {
-  background: var(--surface-hover);
-}
-
-.search-hit-main {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 12.5px;
-}
-
-.search-hit-meta {
-  font-size: 10.5px;
-  color: var(--ink-3);
-  flex-shrink: 0;
-}
-
-.search-empty,
-.search-error {
-  padding: 12px;
-  text-align: center;
-  font-size: 11.5px;
-  color: var(--ink-3);
-}
-
-.search-error {
-  color: var(--danger);
 }
 
 .emoji-panel {

@@ -20,6 +20,7 @@ import {
   PAGE_SIZE,
   PREFS_KEY,
   dedupe,
+  fetchMessagePages,
   loadPrefs,
   normalize,
   type ChatMember,
@@ -46,6 +47,26 @@ import {
 
 // 组件一直从 store 入口导入这两个类型，保持原路径不变。
 export type { ChatMember, UploadTask }
+
+/** 发送成功后同步会话卡片：预览、序号与本人已读水位一起前进。 */
+function markCardSent(
+  card: ConversationCard | undefined,
+  type: string,
+  preview: string,
+  sent: MessageView,
+  senderId: Id,
+): void {
+  if (!card) return
+  card.lastMessagePreview = preview
+  card.lastMessageType = type
+  card.lastMessageAt = sent.createdAt
+  card.lastSeq = sent.seq
+  card.lastReadSeq = sent.seq
+  card.lastMessageSenderId = senderId
+  card.lastMessageSenderName = null
+  // 从通讯录打开「不显示」的会话并发出消息后，会话回到聊天列表
+  card.hidden = false
+}
 
 export const useChatStore = defineStore('chat', {
   state: (): State => {
@@ -314,16 +335,7 @@ export const useChatStore = defineStore('chat', {
       this.loadingMessages = true
       this.error = null
       try {
-        let cursor: string | number = afterSeq
-        const collected: MessageView[] = []
-        for (let i = 0; i < 5; i++) {
-          const page: MessagePage = await api.get<MessagePage>(
-            `/conversations/${conversationId}/messages?cursor=${cursor}&limit=100`,
-          )
-          collected.push(...page.messages.map(normalize))
-          if (!page.hasMore || page.messages.length === 0 || page.nextCursor == null) break
-          cursor = Number(page.nextCursor)
-        }
+        const collected = await fetchMessagePages(conversationId, afterSeq, 5)
         const pending = (this.messages[conversationId] ?? []).filter((item) => item.pending)
         this.messages[conversationId] = [...dedupe(collected), ...pending]
       } catch (e) {
@@ -337,17 +349,11 @@ export const useChatStore = defineStore('chat', {
       const all = this.messages[conversationId] ?? []
       const pending = all.filter((item) => item.pending)
       const list = all.filter((item) => !item.pending)
-      let cursor = list.length ? list[list.length - 1]!.seq : 0
+      const cursor = list.length ? list[list.length - 1]!.seq : 0
       try {
-        for (let i = 0; i < 3; i++) {
-          const page: MessagePage = await api.get<MessagePage>(
-            `/conversations/${conversationId}/messages?cursor=${cursor}&limit=100`,
-          )
-          if (!page.messages.length) break
-          const merged = dedupe([...list, ...page.messages.map(normalize)])
-          this.messages[conversationId] = [...merged, ...pending]
-          if (!page.hasMore || page.nextCursor == null) break
-          cursor = Number(page.nextCursor)
+        const fresh = await fetchMessagePages(conversationId, cursor, 3)
+        if (fresh.length) {
+          this.messages[conversationId] = [...dedupe([...list, ...fresh]), ...pending]
         }
       } catch {
         /* 轮询失败静默，等下一轮 */
@@ -489,17 +495,7 @@ export const useChatStore = defineStore('chat', {
           list.sort((a, b) => a.seq - b.seq)
         }
         const card = this.cards.find((item) => item.conversationId === conversationId)
-        if (card) {
-          card.lastMessagePreview = preview
-          card.lastMessageType = type
-          card.lastMessageAt = sent.createdAt
-          card.lastSeq = sent.seq
-          card.lastReadSeq = sent.seq
-          card.lastMessageSenderId = this.myId
-          card.lastMessageSenderName = null
-          // 从通讯录打开「不显示」的会话并发出消息后，会话回到聊天列表
-          card.hidden = false
-        }
+        markCardSent(card, type, preview, sent, this.myId)
         return sent
       } catch (e) {
         this.messages[conversationId] = (this.messages[conversationId] ?? [])
@@ -544,16 +540,7 @@ export const useChatStore = defineStore('chat', {
         list.sort((a, b) => a.seq - b.seq)
       }
       const card = this.cards.find((item) => item.conversationId === conversationId)
-      if (card) {
-        card.lastMessagePreview = preview
-        card.lastMessageType = type
-        card.lastMessageAt = sent.createdAt
-        card.lastSeq = sent.seq
-        card.lastReadSeq = sent.seq
-        card.lastMessageSenderId = this.myId
-        card.lastMessageSenderName = null
-        card.hidden = false
-      }
+      markCardSent(card, type, preview, sent, this.myId)
       return sent
     },
 

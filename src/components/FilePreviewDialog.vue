@@ -24,7 +24,15 @@ onBeforeUnmount(() => dialog.value?.close())
 
 <template>
   <dialog ref="dialog" class="file-preview-dialog" aria-label="文件预览" @cancel.prevent="emit('close')" @click.self="emit('close')">
-    <div class="preview-window"><header><FileText :size="22" class="preview-header-icon" /><div><h2>{{ file.name }}</h2><p>文件预览<template v-if="file.sizeBytes != null"> · {{ humanBytes(file.sizeBytes) }}</template></p></div><button class="icon-btn" aria-label="关闭文件预览" @click="emit('close')"><X :size="20" /></button></header>
+    <div class="preview-window">
+      <header>
+        <FileText :size="22" class="preview-header-icon" />
+        <div>
+          <h2>{{ file.name }}</h2>
+          <p>文件预览<template v-if="file.sizeBytes != null"> · {{ humanBytes(file.sizeBytes) }}</template></p>
+        </div>
+        <button class="icon-btn" aria-label="关闭文件预览" @click="emit('close')"><X :size="20" /></button>
+      </header>
       <div class="preview-body"><FilePreviewContent :file="file" /></div>
       <footer><p v-if="error" role="alert">{{ error }}</p><span v-else>在线查看内容</span><button :disabled="downloading" @click="download"><Loader2 v-if="downloading" :size="16" class="spin" /><Download v-else :size="16" />{{ downloading ? '正在下载…' : '下载文件' }}</button></footer>
     </div>

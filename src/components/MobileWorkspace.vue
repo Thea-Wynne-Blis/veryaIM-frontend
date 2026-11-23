@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type ObjectDirective } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useToast } from '../composables/useToast'
 import { useMessageActions } from '../composables/useMessageActions'
 import {
@@ -37,9 +37,11 @@ import FavoritesView from './FavoritesView.vue'
 import MomentsView from './moments/MomentsView.vue'
 import { useMessageLocator } from '../composables/useMessageLocator'
 import { useTranslatePrefs } from '../composables/useTranslatePrefs'
+import { useEnterAnimation } from '../composables/useEnterAnimation'
 import { useChatStore } from '../stores/chat'
 import { useMomentsStore } from '../stores/moments'
 import type { ChatMessage, Conversation } from '../types/chat'
+import { stableMessageKey } from '../utils/message'
 
 type ReplyRef = { messageId: string; senderId: string; preview: string }
 
@@ -262,32 +264,10 @@ function onMessageScroll() {
 
 watch(() => currentMessages.value.length, () => scrollBottom())
 
-/* ---------- 切换会话的入场动效（与桌面端同一套语义） ---------- */
-let enterArmed = false
-let enterTimer: number | null = null
-
-function armEnter() {
-  enterArmed = true
-  if (enterTimer !== null) window.clearTimeout(enterTimer)
-  enterTimer = window.setTimeout(disarmEnter, 1200)
-}
-
-function disarmEnter() {
-  enterArmed = false
-  if (enterTimer !== null) {
-    window.clearTimeout(enterTimer)
-    enterTimer = null
-  }
-}
-
-/** 只在节点挂载时打上 enter 类，并按序号触发一次「逐条流动」。 */
-const vEnter: ObjectDirective<HTMLElement, { order?: number; skip?: boolean }> = {
-  mounted(el, binding) {
-    if (!enterArmed || binding.value?.skip) return
-    el.style.setProperty('--enter-order', String(binding.value?.order ?? 0))
-    el.classList.add('enter')
-  },
-}
+/* ---------- 切换会话的入场动效（与桌面端同一套门控） ---------- */
+const { arm: armEnter, disarm: disarmEnter, vEnter } = useEnterAnimation(
+  () => currentMessages.value.length,
+)
 
 watch(
   () => props.activeId,
@@ -304,19 +284,10 @@ watch(
       return
     }
     armEnter()
-    // 缓存的会话同步渲染；异步加载由下面的长度监听收门控
+    // 缓存的会话同步渲染；异步加载由 useEnterAnimation 的长度监听收门控
     nextTick(() => {
       if (currentMessages.value.length) disarmEnter()
     })
-  },
-)
-
-watch(
-  () => currentMessages.value.length,
-  (len) => {
-    if (!enterArmed || !len) return
-    // 指令的 mounted 在 post 队列里，等整个 flush 结束再关门控
-    nextTick(disarmEnter)
   },
 )
 
@@ -357,9 +328,7 @@ function grouping(messages: ChatMessage[]) {
       new Date(message.createdAt).getTime() - new Date(prev.createdAt).getTime() < 5 * 60_000 &&
       !prev.attachment &&
       !message.attachment
-    let key = message.clientMsgId ? `c:${message.clientMsgId}` : `s:${message.id}`
-    if (usedKeys.has(key)) key = `s:${message.id}:${index}`
-    usedKeys.add(key)
+    const key = stableMessageKey(message, index, usedKeys)
     return { message, grouped, key, day, enterOrder: index, pending: message.pending }
   })
 }
@@ -594,7 +563,14 @@ function onDocSwipeReset(event: PointerEvent) {
   resetSwipe()
 }
 
-document.addEventListener('pointerdown', onDocSwipeReset, true)
+onMounted(() => {
+  document.addEventListener('pointerdown', onDocPointerDown, true)
+  document.addEventListener('pointerdown', onDocSwipeReset, true)
+  window.visualViewport?.addEventListener('resize', updateViewport, { passive: true })
+  window.addEventListener('resize', updateViewport, { passive: true })
+  updateViewport()
+  scrollBottom(true)
+})
 
 onBeforeUnmount(() => {
   cancelPress()
@@ -603,15 +579,6 @@ onBeforeUnmount(() => {
   document.documentElement.style.removeProperty('--mobile-viewport-height')
   document.removeEventListener('pointerdown', onDocPointerDown, true)
   document.removeEventListener('pointerdown', onDocSwipeReset, true)
-})
-
-document.addEventListener('pointerdown', onDocPointerDown, true)
-
-onMounted(() => {
-  window.visualViewport?.addEventListener('resize', updateViewport, { passive: true })
-  window.addEventListener('resize', updateViewport, { passive: true })
-  updateViewport()
-  scrollBottom(true)
 })
 </script>
 
@@ -909,7 +876,10 @@ onMounted(() => {
             <span class="m-head-spacer" aria-hidden="true" />
           </header>
           <p v-if="notice" class="m-notice" role="status">{{ notice }}</p>
-          <DetailPanel class="m-info-content" :conversation="current" :members="chat.members[current.id] ?? []"
+          <DetailPanel
+            class="m-info-content"
+            :conversation="current"
+            :members="chat.members[current.id] ?? []"
             :pinned="chat.isPinned(current.id)" :muted="chat.isMuted(current.id)"
             @close="closeInfo" @toggle-pin="toggleSetting('pin')" @toggle-mute="toggleSetting('mute')"
             @open-search="infoOpen = false; emit('open-search')" @manage="emit('manage')"

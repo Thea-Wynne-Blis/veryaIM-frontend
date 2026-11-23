@@ -8,8 +8,8 @@ declare module 'json-bigint' {
   }
 
   export interface JSONBig {
-    parse(text: string): any
-    stringify(value: any): string
+    parse(text: string): unknown
+    stringify(value: unknown): string
   }
 
   export default function JSONBigFactory(options?: JSONBigOptions): JSONBig

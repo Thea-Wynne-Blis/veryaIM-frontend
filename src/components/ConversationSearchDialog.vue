@@ -140,7 +140,13 @@ onBeforeUnmount(() => {
       <div class="history-controls">
         <label class="history-search">
           <Search :size="19" />
-          <input ref="input" v-model="keyword" maxlength="64" type="search" placeholder="搜索聊天内容或文件名" aria-label="搜索聊天内容或文件名"
+          <input
+            ref="input"
+            v-model="keyword"
+            maxlength="64"
+            type="search"
+            placeholder="搜索聊天内容或文件名"
+            aria-label="搜索聊天内容或文件名"
             @compositionstart="composing = true" @compositionend="composing = false; schedule()"
             @keydown.enter.prevent="!composing && run()" />
           <Loader2 v-if="loading" :size="17" class="spin" />

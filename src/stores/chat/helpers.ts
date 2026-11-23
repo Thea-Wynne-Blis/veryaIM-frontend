@@ -1,4 +1,5 @@
-import type { ConversationCard, Id, MessageView } from '../../api/client'
+import { api, type ConversationCard, type Id, type MessagePage, type MessageView } from '../../api/client'
+import { decodeBase64Text } from '../../utils/message'
 
 /** 每次拉消息的页大小。 */
 export const PAGE_SIZE = 60
@@ -98,13 +99,7 @@ export type State = {
 }
 
 function decodeText(value: string): string {
-  try {
-    const binary = atob(value)
-    const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0))
-    return new TextDecoder().decode(bytes)
-  } catch {
-    return value
-  }
+  return decodeBase64Text(value) || value
 }
 
 export function previewOf(payload: RealtimePayload): string {
@@ -134,6 +129,31 @@ export function dedupe(list: MessageView[]): MessageView[] {
       return seen.has(key) ? false : (seen.add(key), true)
     })
     .sort((a, b) => a.seq - b.seq)
+}
+
+/**
+ * 从 `afterSeq` 往后连续翻页，最多取 `maxPages` 页。
+ *
+ * <p>首次打开会话（替换列表）与补拉增量（合并列表）只需要各自的合并策略，
+ * 分页循环本身是同一套，放在这里避免两份几乎相同的实现继续漂移。</p>
+ */
+export async function fetchMessagePages(
+  conversationId: string,
+  afterSeq: number,
+  maxPages: number,
+  pageSize = 100,
+): Promise<MessageView[]> {
+  const collected: MessageView[] = []
+  let cursor = afterSeq
+  for (let pageIndex = 0; pageIndex < maxPages; pageIndex++) {
+    const page = await api.get<MessagePage>(
+      `/conversations/${conversationId}/messages?cursor=${cursor}&limit=${pageSize}`,
+    )
+    collected.push(...page.messages.map(normalize))
+    if (!page.hasMore || page.messages.length === 0 || page.nextCursor == null) break
+    cursor = Number(page.nextCursor)
+  }
+  return collected
 }
 
 export function emptyPrefs(): Prefs {

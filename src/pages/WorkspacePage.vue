@@ -27,6 +27,7 @@ import { useMomentsStore } from '../stores/moments'
 import type { Attachment, ChatMessage, Conversation } from '../types/chat'
 import { parseJson, sameId, api, ApiError, type ConversationCard, type Id, type MessageView, type MessagePage } from '../api/client'
 import { clockTime, conversationPreview, humanBytes, initialsOf, listTime, toneOf, toneOfConversation } from '../utils/present'
+import { decodeMessageContent } from '../utils/message'
 
 const route = useRoute()
 const router = useRouter()
@@ -98,6 +99,14 @@ const sortedCards = computed(() =>
   }),
 )
 
+function presenceOf(card: ConversationCard): Conversation['presence'] {
+  if (card.type !== 'PRIVATE') return 'offline'
+  const peer = chat.members[card.conversationId]?.find(
+    (member) => !sameId(member.userId, chat.myId),
+  )
+  return peer?.online ? 'online' : 'offline'
+}
+
 function toConversation(card: ConversationCard): Conversation {
   const group = card.type === 'GROUP'
   return {
@@ -106,7 +115,7 @@ function toConversation(card: ConversationCard): Conversation {
     initials: initialsOf(card.title),
     kind: group ? 'group' : 'direct',
     tone: toneOfConversation(card),
-    presence: 'offline',
+    presence: presenceOf(card),
     unread: card.unreadCount,
     time: listTime(card.lastMessageAt ?? card.updatedAt),
     preview: conversationPreview(
@@ -146,27 +155,20 @@ const activeMembers = computed(() =>
   chat.activeId ? chat.members[chat.activeId] ?? [] : [],
 )
 
-function decodeContent(item: MessageView): string {
-  if (item.contentEncoding !== 'base64') return item.content ?? ''
-  try {
-    const binary = atob(item.content ?? '')
-    const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0))
-    return new TextDecoder().decode(bytes)
-  } catch {
-    return ''
-  }
+/** 消息类型 → 附件种类；非附件消息返回 undefined。 */
+function attachmentKindOf(type: string): Attachment['kind'] | undefined {
+  if (type === 'IMAGE') return 'image'
+  if (type === 'VIDEO') return 'video'
+  if (type === 'AUDIO') return 'audio'
+  if (type === 'FILE') return 'file'
+  return undefined
 }
 
 function attachmentOf(item: MessageView): Attachment | undefined {
   if (item.recalled) return undefined
-  if (item.type === 'TEXT' || item.type === 'EMOJI' || item.type === 'SYSTEM') return undefined
-  const content = decodeContent(item)
-  const kindOfType = (): Attachment['kind'] => {
-    if (item.type === 'IMAGE') return 'image'
-    if (item.type === 'VIDEO') return 'video'
-    if (item.type === 'AUDIO') return 'audio'
-    return 'file'
-  }
+  const kind = attachmentKindOf(item.type)
+  if (!kind) return undefined
+  const content = decodeMessageContent(item.content, item.contentEncoding)
   try {
     const data = parseJson<{
       fileId?: Id
@@ -182,7 +184,6 @@ function attachmentOf(item: MessageView): Attachment | undefined {
     }>(content)
     const fileId = data.fileId ? String(data.fileId) : undefined
     const name = data.fileName || data.name || `文件 ${fileId || ''}`.trim()
-    const kind = kindOfType()
     const poster = data.coverFileId ?? data.thumbnailFileId
     return {
       name,
@@ -197,7 +198,6 @@ function attachmentOf(item: MessageView): Attachment | undefined {
       animated: kind === 'image' && (data.contentType ?? '').toLowerCase() === 'image/gif',
     }
   } catch {
-    const kind = kindOfType()
     return {
       name: kind === 'image' ? '图片' : kind === 'video' ? '视频' : kind === 'audio' ? '语音' : '文件',
       size: '',
@@ -247,7 +247,9 @@ const messages = computed<ChatMessage[]>(() =>
       tone: mine ? 'jade' : toneOf(item.senderId),
       side: mine ? 'out' : 'in',
       time: clockTime(item.createdAt),
-      text: item.recalled ? '消息已撤回' : decodeContent(item),
+      text: item.recalled
+        ? '消息已撤回'
+        : decodeMessageContent(item.content, item.contentEncoding),
       attachment,
       image: attachment?.kind === 'image',
       read: mine && !!peerReadSeq && item.seq <= peerReadSeq,
@@ -256,7 +258,7 @@ const messages = computed<ChatMessage[]>(() =>
       clientMsgId: item.clientMsgId ?? null,
       senderId: String(item.senderId),
       type: item.type,
-      raw: decodeContent(item),
+      raw: decodeMessageContent(item.content, item.contentEncoding),
       seq: item.seq,
       mine,
       createdAt: item.createdAt,
@@ -331,17 +333,25 @@ function openProfile(userId: Id | string, anchor?: HTMLElement | null, nickname?
   profileOpen.value = true
 }
 
+/**
+ * 打开与某个人的私聊：已有会话直接复用，没有就现建一个。
+ *
+ * <p>通讯录、搜索结果、资料卡三处「发消息」都走这里，
+ * 之前是同一段 createPrivate → loadCards → select 抄了三份。</p>
+ */
+async function openPrivateConversation(userId: Id) {
+  try {
+    await select(await chat.createPrivate(userId))
+  } catch (e) {
+    showToast(messageOf(e, '发起会话失败'))
+  }
+}
+
 /** 资料卡里点「发消息」：建私聊并直接切过去。 */
 async function profileChat(userId: Id) {
   profileOpen.value = false
   searchOpen.value = false
-  try {
-    const conversationId = await chat.createPrivate(userId)
-    await chat.loadCards()
-    await select(conversationId)
-  } catch (e) {
-    chat.error = messageOf(e, '发起会话失败')
-  }
+  await openPrivateConversation(userId)
 }
 
 /** 资料卡里点「编辑我的资料」：切到设置页。 */
@@ -375,14 +385,8 @@ function onOpenChatRequest(event: Event) {
 }
 
 /** 左侧搜索里点「联系人」：有会话就直接进，没有就现建一个私聊 */
-async function onOpenContact(userId: Id) {
-  try {
-    const conversationId = await chat.createPrivate(userId)
-    await chat.loadCards()
-    await select(conversationId)
-  } catch (e) {
-    showToast(messageOf(e, '发起会话失败'))
-  }
+function onOpenContact(userId: Id) {
+  void openPrivateConversation(userId)
 }
 
 function onUnauthorized() {
@@ -462,16 +466,10 @@ async function openFromSearch(conversationId: string, messageId?: string) {
   }
 }
 
-/** 搜索里点联系人：有会话就直接进，没有就现建一个。 */
+/** 搜索里点联系人：先收起搜索面板，再进私聊。 */
 async function openUserChat(userId: Id) {
   closeSearch()
-  try {
-    const conversationId = await chat.createPrivate(userId)
-    await chat.loadCards()
-    await select(conversationId)
-  } catch (e) {
-    showToast(messageOf(e, '发起会话失败'))
-  }
+  await openPrivateConversation(userId)
 }
 
 function onToggleDetail() {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ChatMessage } from '../../types/chat'
-import { canRecallAt, copyTextOf, midOf, quotePreviewOf, RECALL_WINDOW_MS } from '../message'
+import { canRecallAt, copyTextOf, decodeMessageContent, midOf, quotePreviewOf, RECALL_WINDOW_MS, stableMessageKey } from '../message'
 
 function message(overrides: Partial<ChatMessage> = {}): ChatMessage {
   return {
@@ -82,6 +82,34 @@ describe('quotePreviewOf', () => {
 
   it('已撤回的消息给固定文案', () => {
     expect(quotePreviewOf(message({ recalled: true }))).toBe('消息已撤回')
+  })
+})
+
+describe('stableMessageKey', () => {
+  it('优先用 clientMsgId，保证占位消息确认后复用同一节点', () => {
+    const used = new Set<string>()
+    expect(stableMessageKey(message({ clientMsgId: 'w-1' }), 0, used)).toBe('c:w-1')
+    expect(stableMessageKey(message({ id: '9' }), 1, used)).toBe('s:9')
+  })
+
+  it('重复 key 追加下标，避免 v-for 冲突', () => {
+    const used = new Set<string>()
+    const first = message({ id: '1', clientMsgId: 'c-1' })
+    expect(stableMessageKey(first, 0, used)).toBe('c:c-1')
+    expect(stableMessageKey({ ...first }, 1, used)).toBe('s:1:1')
+  })
+})
+
+describe('decodeMessageContent', () => {
+  it('base64 编码按 UTF-8 解码', () => {
+    const encoded = btoa(String.fromCharCode(...new TextEncoder().encode('你好')))
+    expect(decodeMessageContent(encoded, 'base64')).toBe('你好')
+  })
+
+  it('非法 base64 返回空串，其它编码原样返回', () => {
+    expect(decodeMessageContent('%%%', 'base64')).toBe('')
+    expect(decodeMessageContent('plain', 'utf8')).toBe('plain')
+    expect(decodeMessageContent(null)).toBe('')
   })
 })
 
