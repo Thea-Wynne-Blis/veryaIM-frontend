@@ -40,6 +40,7 @@ import MomentsView from './moments/MomentsView.vue'
 import { useMessageLocator } from '../composables/useMessageLocator'
 import { useTranslatePrefs } from '../composables/useTranslatePrefs'
 import { useEnterAnimation } from '../composables/useEnterAnimation'
+import { useStickyScroll } from '../composables/useStickyScroll'
 import { useChatStore } from '../stores/chat'
 import { useAuthStore } from '../stores/auth'
 import { useMomentsStore } from '../stores/moments'
@@ -110,10 +111,15 @@ const emojiOpen = ref(false)
 const viewportHeight = ref(window.visualViewport?.height ?? window.innerHeight)
 const scroller = ref<HTMLElement | null>(null)
 const bodyScrolled = ref(false)
-const stickToBottom = ref(true)
-let scrollEpoch = 0
+/** 贴底滚动与桌面端共用一份实现；这里沿用 scrollBottom 这个名字，调用点不用改。 */
+const {
+  stick: stickToBottom,
+  invalidate: invalidateScroll,
+  scrollToBottom: scrollBottom,
+  syncStick,
+} = useStickyScroll(() => scroller.value)
 const focusMessage = useMessageLocator(() => scroller.value, () => {
-  ++scrollEpoch
+  invalidateScroll()
   stickToBottom.value = false
   infoOpen.value = false
   emojiOpen.value = false
@@ -286,22 +292,8 @@ function send() {
   scrollBottom(true)
 }
 
-function scrollBottom(force = false) {
-  if (!force && !stickToBottom.value) return
-  const epoch = scrollEpoch
-  nextTick(() => {
-    if (epoch !== scrollEpoch || (!force && !stickToBottom.value)) return
-    const el = scroller.value
-    if (!el) return
-    el.scrollTop = el.scrollHeight
-    stickToBottom.value = true
-  })
-}
-
 function onMessageScroll() {
-  const el = scroller.value
-  if (!el) return
-  stickToBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight <= 48
+  syncStick()
 }
 
 watch(() => currentMessages.value.length, () => scrollBottom())
@@ -314,7 +306,7 @@ const { arm: armEnter, disarm: disarmEnter, vEnter } = useEnterAnimation(
 watch(
   () => props.activeId,
   (id) => {
-    ++scrollEpoch
+    invalidateScroll()
     infoOpen.value = false
     emojiOpen.value = false
     mentionOpen.value = false

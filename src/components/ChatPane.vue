@@ -38,6 +38,7 @@ import { resetMagnet, trackMagnet, trackSpotlight } from '../composables/usePoin
 import { useTranslatePrefs } from '../composables/useTranslatePrefs'
 import { useChatStore } from '../stores/chat'
 import { useAuthStore } from '../stores/auth'
+import { useStickyScroll } from '../composables/useStickyScroll'
 import type { ChatMessage, Conversation } from '../types/chat'
 import { groupAvatarSrc, userAvatarSrc } from '../utils/avatar'
 import { appendMention, insertAtCursor } from '../utils/composer'
@@ -94,11 +95,15 @@ function insertMention(label: string) {
   nextTick(() => focusComposer())
 }
 const scroller = ref<HTMLElement | null>(null)
-/** 是否贴住底部。用户主动往上翻历史时不打断；切会话/自己发消息时强制回到底部。 */
-const stickToBottom = ref(true)
-let scrollEpoch = 0
+const {
+  stick: stickToBottom,
+  invalidate: invalidateScroll,
+  scrollToBottom,
+  scrollTo: scrollToPosition,
+  syncStick,
+} = useStickyScroll(() => scroller.value)
 const focusMessage = useMessageLocator(() => scroller.value, () => {
-  ++scrollEpoch
+  invalidateScroll()
   stickToBottom.value = false
 })
 defineExpose({ focusMessage })
@@ -341,39 +346,14 @@ function rememberScroll(conversationId?: string | null) {
 }
 
 function restoreScroll(conversationId: string) {
-  const epoch = ++scrollEpoch
   const saved = scrollMemory.get(conversationId)
   stickToBottom.value = saved ? saved.stick : true
-  const target = saved && !saved.stick ? saved.top : null
-  nextTick(() => {
-    if (epoch !== scrollEpoch) return
-    const el = scroller.value
-    if (!el) return
-    if (target == null) {
-      el.scrollTop = el.scrollHeight
-      return
-    }
-    el.scrollTop = Math.min(target, Math.max(0, el.scrollHeight - el.clientHeight))
-  })
-}
-
-function scrollToBottom(force = false) {
-  if (!force && !stickToBottom.value) return
-  const epoch = scrollEpoch
-  nextTick(() => {
-    if (epoch !== scrollEpoch || (!force && !stickToBottom.value)) return
-    const el = scroller.value
-    if (!el) return
-    el.scrollTop = el.scrollHeight
-    stickToBottom.value = true
-  })
+  scrollToPosition(saved && !saved.stick ? saved.top : null)
 }
 
 function onScroll() {
-  const el = scroller.value
-  if (!el) return
   closeMenu()
-  stickToBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight <= 48
+  syncStick()
 }
 
 /** 图片/附件加载后高度会变化，贴底时重新对齐。 */
