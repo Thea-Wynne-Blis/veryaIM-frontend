@@ -33,13 +33,15 @@ import {
 } from 'lucide-vue-next'
 import AppAvatar from './AppAvatar.vue'
 import MessageAttachment from './MessageAttachment.vue'
-import StickerPicker from './StickerPicker.vue'
+import EmojiPanel from './EmojiPanel.vue'
 import { resetMagnet, trackMagnet, trackSpotlight } from '../composables/usePointerFx'
 import { useTranslatePrefs } from '../composables/useTranslatePrefs'
 import { useChatStore } from '../stores/chat'
 import { useAuthStore } from '../stores/auth'
 import type { ChatMessage, Conversation } from '../types/chat'
 import { groupAvatarSrc, userAvatarSrc } from '../utils/avatar'
+import { appendMention, insertAtCursor } from '../utils/composer'
+import { mentionCandidates } from '../utils/mention'
 import { humanBytes } from '../utils/present'
 import { stableMessageKey } from '../utils/message'
 
@@ -65,28 +67,10 @@ const chat = useChatStore()
 const auth = useAuthStore()
 const draft = ref('')
 const mentionOpen = ref(false)
-/**
- * 可提及的人：群聊取成员列表（去掉自己）；单聊不需要额外请求，
- * 直接把对端当成唯一的候选——之前单聊没加载成员，@ 面板永远是空的。
- */
-const mentionMembers = computed(() => {
-  const selfId = String(auth.user?.userId ?? '')
-  const loaded = (props.members ?? []).filter(
-    (member) => String(member.userId) !== selfId,
-  )
-  if (loaded.length) return loaded
-  const conversation = props.conversation
-  if (conversation?.kind === 'direct' && conversation.name) {
-    return [
-      {
-        userId: conversation.peerId ?? 'peer',
-        nickname: conversation.name,
-        remark: null as string | null,
-      },
-    ]
-  }
-  return []
-})
+/** @ 面板的候选：群聊取成员（排除自己），单聊直接用会话对端。 */
+const mentionPeople = computed(() =>
+  mentionCandidates(props.conversation, props.members ?? [], String(auth.user?.userId ?? '')),
+)
 
 /**
  * 聊天里点头像 / 昵称看资料：单聊是对方，群聊是发言人，自己就是自己。
@@ -102,15 +86,12 @@ function onInput() {
   mentionOpen.value = draft.value.endsWith('@')
 }
 
-function insertMention(nickname: string) {
-  const value = draft.value
-  draft.value = value.endsWith('@')
-    ? `${value.slice(0, -1)}@${nickname} `
-    : `${value}@${nickname} `
+function insertMention(label: string) {
+  draft.value = appendMention(draft.value, label)
   mentionOpen.value = false
   autoGrow()
   // 鼠标点候选会把焦点留在按钮上；把光标放回输入框末尾，接着打字即可。
-  nextTick(focusComposer)
+  nextTick(() => focusComposer())
 }
 const scroller = ref<HTMLElement | null>(null)
 /** 是否贴住底部。用户主动往上翻历史时不打断；切会话/自己发消息时强制回到底部。 */
@@ -156,9 +137,6 @@ const {
 
 /* ---------- 表情 ---------- */
 const emojiOpen = ref(false)
-/** 表情面板两个页签：内置表情 / 搜网络表情包。 */
-const emojiTab = ref<'emoji' | 'sticker'>('emoji')
-const emojis = ['😀', '😄', '😊', '🥰', '😎', '🤔', '👍', '👏', '🙏', '🎉', '❤️', '🔥']
 
 /** 群聊在线人数：直接数成员在线状态（由成员接口与实时刷新维护），不再按人数估算。 */
 const onlineCount = computed(() =>
@@ -316,11 +294,12 @@ function autoGrow() {
 }
 
 /** 插入表情 / @ 之后把焦点和光标还给输入框，避免用户还要再点一下。 */
-function focusComposer() {
+function focusComposer(caret?: number) {
   const el = document.getElementById('composer-input') as HTMLTextAreaElement | null
   if (!el) return
   el.focus()
-  el.setSelectionRange(el.value.length, el.value.length)
+  const pos = caret ?? el.value.length
+  el.setSelectionRange(pos, pos)
 }
 
 function pickAttachment(kind: 'file' | 'image') {
@@ -336,10 +315,13 @@ function onFilePicked(event: Event) {
 }
 
 function insertEmoji(emoji: string) {
-  draft.value += emoji
+  const el = document.getElementById('composer-input') as HTMLTextAreaElement | null
+  const at = el?.selectionStart ?? draft.value.length
+  const next = insertAtCursor(draft.value, emoji, at, el?.selectionEnd ?? at)
+  draft.value = next.value
   emojiOpen.value = false
   autoGrow()
-  nextTick(focusComposer)
+  nextTick(() => focusComposer(next.caret))
 }
 
 /**
@@ -679,53 +661,14 @@ watch(() => props.messages.length, () => scrollToBottom())
           </div>
         </div>
 
-        <div v-if="emojiOpen" id="chat-emoji-panel" class="emoji-panel">
-          <div class="emoji-tabs">
-            <button
-              class="emoji-tab"
-              type="button"
-              :class="{ active: emojiTab === 'emoji' }"
-              @click="emojiTab = 'emoji'"
-            >
-              表情
-            </button>
-            <button
-              class="emoji-tab"
-              type="button"
-              :class="{ active: emojiTab === 'sticker' }"
-              @click="emojiTab = 'sticker'"
-            >
-              斗图
-            </button>
-            <button
-              class="emoji-close"
-              type="button"
-              aria-label="关闭表情面板"
-              title="关闭表情面板"
-              @click="emojiOpen = false"
-            >
-              <X :size="13" :stroke-width="2" />
-            </button>
-          </div>
-
-          <div v-if="emojiTab === 'emoji'" class="emoji-grid">
-            <button
-              v-for="emoji in emojis"
-              :key="emoji"
-              class="emoji"
-              type="button"
-              @click="insertEmoji(emoji)"
-            >
-              {{ emoji }}
-            </button>
-          </div>
-
-          <StickerPicker
-            v-else
-            :conversation-id="conversation.id"
-            @sent="emojiOpen = false"
-          />
-        </div>
+        <EmojiPanel
+          v-if="emojiOpen"
+          panel-id="chat-emoji-panel"
+          :conversation-id="conversation.id"
+          @pick="insertEmoji"
+          @close="emojiOpen = false"
+          @sent="emojiOpen = false"
+        />
 
         <div v-if="replyTo" class="quote-bar">
           <Quote :size="13" :stroke-width="2" />
@@ -745,10 +688,15 @@ watch(() => props.messages.length, () => scrollToBottom())
         >
           <div v-if="mentionOpen" class="mention-pop">
             <p class="mention-title">选择要提及的成员</p>
-            <button v-for="m in mentionMembers" :key="m.userId" class="mention-item" @click="insertMention(m.remark?.trim() || m.nickname)">
-              {{ m.remark?.trim() || m.nickname }}
+            <button
+              v-for="person in mentionPeople"
+              :key="person.id"
+              class="mention-item"
+              @click="insertMention(person.label)"
+            >
+              {{ person.label }}
             </button>
-            <p v-if="!mentionMembers.length" class="mention-empty">成员资料还没加载好，稍后再试</p>
+            <p v-if="!mentionPeople.length" class="mention-empty">成员资料还没加载好，稍后再试</p>
           </div>
 
           <div class="composer-tools">
@@ -1104,79 +1052,6 @@ watch(() => props.messages.length, () => scrollToBottom())
   color: var(--ink-3);
   font-style: italic;
   background: var(--surface-3);
-}
-
-.emoji-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-bottom: 6px;
-  padding: 8px;
-  border-radius: var(--r-md);
-  border: 1px solid var(--line);
-  background: var(--surface);
-  box-shadow: var(--shadow-sm);
-}
-
-.emoji-tabs {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  padding-bottom: 4px;
-  border-bottom: 1px solid var(--line);
-}
-
-.emoji-close {
-  display: grid;
-  place-items: center;
-  width: 22px;
-  height: 22px;
-  margin-left: auto;
-  border-radius: var(--r-xs);
-  color: var(--ink-3);
-}
-
-.emoji-close:hover {
-  background: var(--surface-hover);
-  color: var(--ink);
-}
-
-.emoji-tab {
-  height: 24px;
-  padding: 0 10px;
-  border-radius: var(--r-xs);
-  font-size: 11.5px;
-  font-weight: 560;
-  color: var(--ink-3);
-}
-
-.emoji-tab:hover {
-  background: var(--surface-hover);
-  color: var(--ink);
-}
-
-.emoji-tab.active {
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-
-.emoji-grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
-
-.emoji {
-  width: 30px;
-  height: 30px;
-  display: grid;
-  place-items: center;
-  border-radius: var(--r-xs);
-  font-size: 17px;
-}
-
-.emoji:hover {
-  background: var(--surface-hover);
 }
 
 .spin {

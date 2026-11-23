@@ -33,7 +33,7 @@ import AppAvatar from './AppAvatar.vue'
 import ContactsView from './ContactsView.vue'
 import MeView from './MeView.vue'
 import MessageAttachment from './MessageAttachment.vue'
-import StickerPicker from './StickerPicker.vue'
+import EmojiPanel from './EmojiPanel.vue'
 import DetailPanel from './DetailPanel.vue'
 import FavoritesView from './FavoritesView.vue'
 import MomentsView from './moments/MomentsView.vue'
@@ -45,6 +45,8 @@ import { useAuthStore } from '../stores/auth'
 import { useMomentsStore } from '../stores/moments'
 import type { ChatMessage, Conversation } from '../types/chat'
 import { stableMessageKey } from '../utils/message'
+import { appendMention, insertAtCursor } from '../utils/composer'
+import { mentionCandidates } from '../utils/mention'
 import { groupAvatarSrc, userAvatarSrc } from '../utils/avatar'
 
 type ReplyRef = { messageId: string; senderId: string; preview: string }
@@ -105,9 +107,6 @@ const infoOpen = ref(false)
 const infoBack = ref<HTMLButtonElement | null>(null)
 const infoButton = ref<HTMLButtonElement | null>(null)
 const emojiOpen = ref(false)
-/** 表情面板两个页签：内置表情 / 搜网络表情包。 */
-const emojiTab = ref<'emoji' | 'sticker'>('emoji')
-const emojis = ['😀', '😊', '🥰', '😎', '🤔', '👍', '👏', '🙏', '🎉', '❤️', '🔥', '✅', '😂', '😭', '🙌', '💪']
 const viewportHeight = ref(window.visualViewport?.height ?? window.innerHeight)
 const scroller = ref<HTMLElement | null>(null)
 const bodyScrolled = ref(false)
@@ -148,22 +147,9 @@ const currentMessages = computed(() =>
 
 /** @ 提及面板：单聊只有对端一个候选，群聊按成员列表。 */
 const mentionOpen = ref(false)
-const mentionCandidates = computed(() => {
-  const conversation = current.value
-  if (!conversation) return []
-  const selfId = String(auth.user?.userId ?? '')
-  const members = (chat.members[conversation.id] ?? [])
-    .filter((member) => String(member.userId) !== selfId)
-    .map((member) => ({
-      userId: String(member.userId),
-      label: member.remark?.trim() || member.nickname,
-    }))
-  if (members.length) return members
-  if (conversation.kind === 'direct' && conversation.name) {
-    return [{ userId: conversation.peerId ?? 'peer', label: conversation.name }]
-  }
-  return []
-})
+const mentionPeople = computed(() =>
+  mentionCandidates(current.value, chat.members[current.value?.id ?? ''] ?? [], String(auth.user?.userId ?? '')),
+)
 
 function toggleMention() {
   mentionOpen.value = !mentionOpen.value
@@ -179,17 +165,9 @@ function toggleMention() {
 }
 
 function insertMention(label: string) {
-  const value = draft.value
-  draft.value = value.endsWith('@')
-    ? `${value.slice(0, -1)}@${label} `
-    : `${value}@${label} `
+  draft.value = appendMention(draft.value, label)
   mentionOpen.value = false
-  nextTick(() => {
-    const input = composerInput.value
-    if (!input) return
-    input.focus()
-    input.setSelectionRange(input.value.length, input.value.length)
-  })
+  nextTick(focusComposerAtEnd)
 }
 
 const canSend = computed(() => draft.value.trim().length > 0)
@@ -202,6 +180,14 @@ function resizeInput() {
   input.style.height = `${Math.min(input.scrollHeight, 136)}px`
 }
 watch(draft, () => nextTick(resizeInput))
+
+/** 插入表情 / @ 之后把焦点和光标还给输入框。 */
+function focusComposerAtEnd() {
+  const input = composerInput.value
+  if (!input) return
+  input.focus()
+  input.setSelectionRange(input.value.length, input.value.length)
+}
 
 function updateViewport() {
   if (window.visualViewport && window.visualViewport.scale !== 1) return
@@ -238,9 +224,9 @@ async function toggleSetting(setting: 'pin' | 'mute') {
 function insertEmoji(emoji: string) {
   const input = composerInput.value
   const start = input?.selectionStart ?? draft.value.length
-  const end = input?.selectionEnd ?? start
-  draft.value = draft.value.slice(0, start) + emoji + draft.value.slice(end)
-  nextTick(() => input?.setSelectionRange(start + emoji.length, start + emoji.length))
+  const next = insertAtCursor(draft.value, emoji, start, input?.selectionEnd ?? start)
+  draft.value = next.value
+  nextTick(() => input?.setSelectionRange(next.caret, next.caret))
 }
 
 function sendShortcut(event: KeyboardEvent) {
@@ -929,52 +915,25 @@ onBeforeUnmount(() => {
           </div>
           <div v-if="mentionOpen" class="m-mention" role="group" aria-label="选择要提及的人">
             <button
-              v-for="member in mentionCandidates"
-              :key="member.userId"
+              v-for="person in mentionPeople"
+              :key="person.id"
               type="button"
               class="m-mention-item"
-              @click="insertMention(member.label)"
+              @click="insertMention(person.label)"
             >
-              @{{ member.label }}
+              @{{ person.label }}
             </button>
-            <p v-if="!mentionCandidates.length" class="m-mention-empty">成员资料还没加载好，稍后再试</p>
+            <p v-if="!mentionPeople.length" class="m-mention-empty">成员资料还没加载好，稍后再试</p>
           </div>
-          <div v-if="emojiOpen" id="mobile-emoji-picker" class="m-emoji-picker" role="group" aria-label="选择表情">
-            <div class="m-emoji-tabs">
-              <button
-                type="button"
-                class="m-emoji-tab"
-                :class="{ active: emojiTab === 'emoji' }"
-                @click="emojiTab = 'emoji'"
-              >
-                表情
-              </button>
-              <button
-                type="button"
-                class="m-emoji-tab"
-                :class="{ active: emojiTab === 'sticker' }"
-                @click="emojiTab = 'sticker'"
-              >
-                斗图
-              </button>
-              <button
-                type="button"
-                class="m-emoji-close"
-                aria-label="关闭表情面板"
-                @click="emojiOpen = false"
-              >
-                <X :size="16" :stroke-width="2" />
-              </button>
-            </div>
-            <div v-if="emojiTab === 'emoji'" class="m-emoji-grid">
-              <button v-for="emoji in emojis" :key="emoji" :aria-label="`插入 ${emoji}`" @click="insertEmoji(emoji)">{{ emoji }}</button>
-            </div>
-            <StickerPicker
-              v-else-if="current"
-              :conversation-id="current.id"
-              @sent="emojiOpen = false"
-            />
-          </div>
+          <EmojiPanel
+            v-if="emojiOpen && current"
+            panel-id="mobile-emoji-picker"
+            variant="mobile"
+            :conversation-id="current.id"
+            @pick="insertEmoji"
+            @close="emojiOpen = false"
+            @sent="emojiOpen = false"
+          />
         </div>
 
         <section v-if="infoOpen" class="m-info-page" aria-label="聊天信息" @keydown.esc.stop.prevent="closeInfo">
@@ -1087,17 +1046,6 @@ onBeforeUnmount(() => {
 .m-mention-item { min-height: 36px; padding: 0 12px; border-radius: 999px; background: var(--surface); border: 1px solid var(--line); font-size: 13px; }
 .m-mention-item:active { background: var(--surface-active); }
 .m-mention-empty { padding: 6px 4px; font-size: 12.5px; color: var(--ink-3); }
-.m-emoji-picker { padding: 8px 6px 4px; }
-.m-emoji-tabs { display: flex; align-items: center; gap: 2px; padding: 0 2px 6px; border-bottom: 1px solid var(--line); }
-.m-emoji-close { display: grid; place-items: center; width: 30px; height: 30px; margin-left: auto; border-radius: 8px; color: var(--ink-3); }
-.m-emoji-close:active { background: var(--surface-active); color: var(--ink); }
-.m-emoji-tab { min-height: 30px; padding: 0 12px; border-radius: 8px; font-size: 12.5px; color: var(--ink-3); }
-.m-emoji-tab.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
-.m-emoji-grid { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 3px; padding-top: 8px; }
-.m-emoji-grid button { min-height: 44px; font-size: 25px; border-radius: 8px; }
-.m-emoji-grid button:active { background: var(--surface-active); }
-.m-emoji-picker :deep(.sticker-picker) { width: 100%; padding-top: 8px; }
-.m-emoji-picker :deep(.sticker-body) { max-height: 42vh; }
 .m-upload { display: flex; align-items: center; gap: 8px; padding-left: 6px; font-size: 12px; color: var(--ink-3); }
 .m-upload > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
 .m-upload progress { width: 56px; height: 5px; accent-color: var(--accent); }
