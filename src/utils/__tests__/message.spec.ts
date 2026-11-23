@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import type { ChatMessage } from '../../types/chat'
-import { canRecallAt, copyTextOf, decodeMessageContent, midOf, quotePreviewOf, RECALL_WINDOW_MS, stableMessageKey } from '../message'
+import {
+  canRecallAt,
+  copyTextOf,
+  dayLabelOf,
+  decodeMessageContent,
+  groupMessages,
+  midOf,
+  quotePreviewOf,
+  RECALL_WINDOW_MS,
+  stableMessageKey,
+} from '../message'
 
 function message(overrides: Partial<ChatMessage> = {}): ChatMessage {
   return {
@@ -145,5 +155,87 @@ describe('canRecallAt', () => {
 
   it('缺少创建时间时不可撤回', () => {
     expect(canRecallAt(message({ mine: true }), base)).toBe(false)
+  })
+})
+
+describe('dayLabelOf', () => {
+  const now = new Date('2026-05-20T12:00:00')
+
+  it('今天 / 昨天 / 更早的日期分开显示', () => {
+    expect(dayLabelOf('2026-05-20T09:00:00', now)).toBe('今天')
+    expect(dayLabelOf('2026-05-19T23:00:00', now)).toBe('昨天')
+    expect(dayLabelOf('2026-05-02T09:00:00', now)).toBe('5月2日')
+  })
+
+  it('跨年带上年份，非法时间返回空串', () => {
+    expect(dayLabelOf('2025-12-31T09:00:00', now)).toContain('2025')
+    expect(dayLabelOf(null, now)).toBe('')
+    expect(dayLabelOf('not-a-date', now)).toBe('')
+  })
+})
+
+describe('groupMessages', () => {
+  /** 相对今天构造时间，避免测试依赖运行日期。 */
+  const at = (daysAgo: number, hour: number, minute = 0) => {
+    const date = new Date()
+    date.setDate(date.getDate() - daysAgo)
+    date.setHours(hour, minute, 0, 0)
+    return date.toISOString()
+  }
+
+  it('桌面端：连续同一作者合并，附件消息不合并', () => {
+    const groups = groupMessages([
+      message({ id: 'a', author: '爱丽丝', createdAt: at(0, 10) }),
+      message({ id: 'b', author: '爱丽丝', createdAt: at(0, 10, 1) }),
+      message({ id: 'c', author: '鲍勃', createdAt: at(0, 10, 2) }),
+    ])
+    expect(groups.map((item) => item.grouped)).toEqual([false, true, false])
+    // 桌面端不输出日期分隔条
+    expect(groups.every((item) => item.day === '')).toBe(true)
+  })
+
+  it('附件消息打断合并', () => {
+    const groups = groupMessages([
+      message({ id: 'a', author: '爱丽丝', createdAt: at(0, 10) }),
+      message({ id: 'b', author: '爱丽丝', attachment: { name: 'a.png', size: '1 KB', kind: 'image' } }),
+      message({ id: 'c', author: '爱丽丝', createdAt: at(0, 10, 2) }),
+    ])
+    expect(groups.map((item) => item.grouped)).toEqual([false, false, false])
+  })
+
+  it('移动端：按 senderId 合并且超过 5 分钟断开', () => {
+    const options = { withDay: true, mergeWindowMs: 5 * 60_000, matchBySenderId: true }
+    const groups = groupMessages(
+      [
+        message({ id: 'a', author: '爱丽丝', senderId: '1', createdAt: at(0, 10) }),
+        message({ id: 'b', author: '爱丽丝', senderId: '1', createdAt: at(0, 10, 3) }),
+        message({ id: 'c', author: '爱丽丝', senderId: '1', createdAt: at(0, 10, 9) }),
+      ],
+      options,
+    )
+    expect(groups.map((item) => item.grouped)).toEqual([false, true, false])
+    expect(groups.map((item) => item.day)).toEqual(['今天', '', ''])
+  })
+
+  it('跨天时插入日期分隔条并断开合并', () => {
+    const groups = groupMessages(
+      [
+        message({ id: 'a', author: '爱丽丝', createdAt: at(1, 10) }),
+        message({ id: 'b', author: '爱丽丝', createdAt: at(0, 10) }),
+      ],
+      { withDay: true },
+    )
+    expect(groups.map((item) => item.grouped)).toEqual([false, false])
+    expect(groups[0].day).toBe('昨天')
+    expect(groups[1].day).toBe('今天')
+  })
+
+  it('时间缺失时给「聊天记录」标题，key 仍稳定', () => {
+    const first = message({ id: 'a', author: '爱丽丝' })
+    const groups = groupMessages([first, message({ id: 'b', author: '爱丽丝' })], { withDay: true })
+    expect(groups[0].day).toBe('聊天记录')
+    expect(groups[0].key).toBe('s:a')
+    expect(groups[1].day).toBe('')
+    expect(groups[1].key).toBe('s:b')
   })
 })

@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { messageOf } from '../utils/error'
 import { useToast } from '../composables/useToast'
 import {
-  X, Loader2, Users, Megaphone, Shield, UserMinus, Crown,
-  BellOff, Bell, LogOut, Trash2, Save, UserPlus, UserCheck, Clock, Check, Camera,
+  X, Loader2, Megaphone, BellOff, Bell, LogOut, Trash2, Save, Camera, Crown, Check,
 } from 'lucide-vue-next'
 import AppAvatar from './AppAvatar.vue'
+import GroupMemberList from './GroupMemberList.vue'
 import UserProfileDialog from './UserProfileDialog.vue'
 import {
   groupsApi,
@@ -18,8 +18,8 @@ import {
 import { ApiError, api, uploadForm, type Id } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import { useChatStore } from '../stores/chat'
-import { initialsOf, toneOfPerson } from '../utils/present'
-import { groupAvatarSrc, squareAvatarFile, userAvatarSrc } from '../utils/avatar'
+import { initialsOf } from '../utils/present'
+import { groupAvatarSrc, squareAvatarFile } from '../utils/avatar'
 
 const props = defineProps<{ open: boolean; groupId: string | null }>()
 const emit = defineEmits<{
@@ -43,7 +43,6 @@ const error = ref('')
 const { message: notice, show: flash } = useToast()
 const confirmDisband = ref(false)
 const confirmLeave = ref(false)
-const pending = ref('')
 /** 已是好友 / 好友申请已发出的成员，用于把「添加好友」图标换成状态。 */
 const friendIds = ref<Set<string>>(new Set())
 const requestedIds = ref<Set<string>>(new Set())
@@ -54,8 +53,6 @@ const profileId = ref<Id | null>(null)
 const profileName = ref('')
 /** 被点的那一行，资料卡贴着它弹出 */
 const profileAnchor = ref<HTMLElement | null>(null)
-
-let pendingTimer: number | undefined
 
 const myId = computed(() => String(auth.user?.userId ?? ''))
 const role = computed(() => detail.value?.roleInGroup ?? null)
@@ -121,12 +118,6 @@ async function removeGroupAvatar() {
     busy.value = ''
   }
 }
-
-const MUTE_OPTIONS: { value: GroupMuteDuration; label: string }[] = [
-  { value: 'MUTE_7M', label: '禁言 7 分钟' },
-  { value: 'MUTE_30M', label: '禁言 30 分钟' },
-  { value: 'MUTE_FOREVER', label: '永久禁言' },
-]
 
 /** 首屏加载才显示整页 loading；操作后的刷新走静默模式，避免整个弹窗闪一下。 */
 async function load(silent = false) {
@@ -211,61 +202,6 @@ const kick = (userId: string | number) =>
 const transfer = (userId: string | number) =>
   run(`transfer-${userId}`, () => groupsApi.transfer(props.groupId!, userId), '群主已转让')
 
-/** 踢人、转让需要二次点击确认，避免误触。 */
-function confirmThen(key: string, action: () => void) {
-  if (pending.value !== key) {
-    pending.value = key
-    window.clearTimeout(pendingTimer)
-    pendingTimer = window.setTimeout(() => (pending.value = ''), 3000)
-    return
-  }
-  pending.value = ''
-  window.clearTimeout(pendingTimer)
-  action()
-}
-
-function onMuteSelect(userId: string | number, event: Event) {
-  const select = event.target as HTMLSelectElement
-  const value = select.value as GroupMuteDuration | ''
-  select.value = ''
-  if (value) muteMember(userId, value)
-}
-
-function isMuted(member: GroupMemberProfile): boolean {
-  if (member.mutedPermanently) return true
-  if (!member.mutedUntil) return false
-  return new Date(member.mutedUntil).getTime() > Date.now()
-}
-
-function mutedLabel(member: GroupMemberProfile): string {
-  if (member.mutedPermanently) return '永久禁言'
-  if (!isMuted(member)) return ''
-  const until = new Date(member.mutedUntil!)
-  const pad = (value: number) => String(value).padStart(2, '0')
-  const time = `${pad(until.getHours())}:${pad(until.getMinutes())}`
-  const today = new Date().toDateString() === until.toDateString()
-  return `禁言至 ${today ? time : `${until.getMonth() + 1}-${until.getDate()} ${time}`}`
-}
-
-// 权限矩阵与后端一致：禁言、设撤管理员、转让、解散仅群主；
-// 踢人方面群主可踢管理员与成员，管理员只能踢普通成员。
-const canKick = (member: GroupMemberProfile) => {
-  if (member.userId === myId.value || member.role === 'OWNER') return false
-  if (isOwner.value) return true
-  return isAdmin.value && member.role === 'MEMBER'
-}
-const canMute = (member: GroupMemberProfile) =>
-  isOwner.value && member.userId !== myId.value && member.role !== 'OWNER'
-const canGrantAdmin = (member: GroupMemberProfile) =>
-  isOwner.value && member.userId !== myId.value && member.role !== 'OWNER'
-const canTransfer = (member: GroupMemberProfile) =>
-  isOwner.value && member.userId !== myId.value && member.role !== 'OWNER'
-
-const isSelf = (member: GroupMemberProfile) => String(member.userId) === myId.value
-const isFriend = (member: GroupMemberProfile) => friendIds.value.has(String(member.userId))
-const friendRequested = (member: GroupMemberProfile) =>
-  requestedIds.value.has(String(member.userId))
-
 /** 好友列表只用于渲染图标状态，取不到也不影响群管理。 */
 async function loadFriends() {
   try {
@@ -282,8 +218,9 @@ function nameOf(member: GroupMemberProfile): string {
 }
 
 /** 群成员里的加好友入口，复用通讯录的申请逻辑，不改变群内关系。 */
-async function addFriend(member: GroupMemberProfile) {  const id = String(member.userId)
-  if (isSelf(member) || isFriend(member) || friendRequested(member) || busy.value) return
+async function addFriend(member: GroupMemberProfile) {
+  const id = String(member.userId)
+  if (id === myId.value || friendIds.value.has(id) || requestedIds.value.has(id) || busy.value) return
   busy.value = `friend-${id}`
   error.value = ''
   try {
@@ -384,8 +321,6 @@ async function disband() {
 watch(
   [() => props.open, () => props.groupId],
   ([open]) => {
-    window.clearTimeout(pendingTimer)
-    pending.value = ''
     confirmDisband.value = false
     confirmLeave.value = false
     error.value = ''
@@ -408,10 +343,6 @@ watch(
     }
   },
 )
-
-onBeforeUnmount(() => {
-  window.clearTimeout(pendingTimer)
-})
 </script>
 
 <template>
@@ -541,123 +472,22 @@ onBeforeUnmount(() => {
             </button>
           </section>
 
-          <!-- 成员 -->
-          <section class="block">
-            <p class="block-label">
-              <Users :size="10" :stroke-width="2.6" /> 成员 · {{ members.length }}
-            </p>
-            <div class="member-list">
-              <div v-for="m in members" :key="m.userId" class="member-row">
-                <button
-                  class="member-open"
-                  type="button"
-                  :title="`查看 ${nameOf(m)} 的资料`"
-                  @click="openProfile(m, $event)"
-                >
-                  <AppAvatar :initials="initialsOf(nameOf(m))" :tone="toneOfPerson(m.userId, auth.user?.userId)" :src="m.avatar || userAvatarSrc(m.userId)" size="sm" />
-                  <span class="member-main">
-                    <span class="member-name">
-                      {{ nameOf(m) }}
-                      <span v-if="m.role === 'OWNER'" class="tag owner">群主</span>
-                      <span v-else-if="m.role === 'ADMIN'" class="tag admin">管理员</span>
-                      <span v-if="isSelf(m)" class="tag me">我</span>
-                    </span>
-                    <span class="member-sub">
-                      <template v-if="pending === `kick-${m.userId}`">再点一次确认移出</template>
-                      <template v-else-if="pending === `transfer-${m.userId}`">
-                        再点一次确认转让群主
-                      </template>
-                      <template v-else>ID {{ m.userId }}</template>
-                    </span>
-                  </span>
-                </button>
-
-                <span v-if="mutedLabel(m)" class="tag muted" :title="mutedLabel(m)">
-                  {{ mutedLabel(m) }}
-                </span>
-
-                <div class="member-actions">
-                  <button
-                    v-if="isFriend(m)"
-                    class="icon-mini friend"
-                    title="已是好友"
-                    disabled
-                  >
-                    <UserCheck :size="13" :stroke-width="2" />
-                  </button>
-                  <button
-                    v-else-if="friendRequested(m)"
-                    class="icon-mini pending"
-                    title="好友申请等待对方通过"
-                    disabled
-                  >
-                    <Clock :size="13" :stroke-width="2" />
-                  </button>
-                  <button
-                    v-else-if="!isSelf(m)"
-                    class="icon-mini"
-                    title="添加好友"
-                    :disabled="Boolean(busy)"
-                    @click="addFriend(m)"
-                  >
-                    <Loader2
-                      v-if="busy === `friend-${m.userId}`"
-                      :size="13"
-                      class="spin"
-                    />
-                    <UserPlus v-else :size="13" :stroke-width="2" />
-                  </button>
-
-                  <select
-                    v-if="canMute(m)"
-                    class="mini-select"
-                    title="禁言"
-                    :disabled="Boolean(busy)"
-                    @change="onMuteSelect(m.userId, $event)"
-                  >
-                    <option value="" selected>禁言</option>
-                    <option v-for="o in MUTE_OPTIONS" :key="o.value" :value="o.value">
-                      {{ o.label }}
-                    </option>
-                    <option v-if="isMuted(m)" value="UNMUTE">解除禁言</option>
-                  </select>
-
-                  <button
-                    v-if="canGrantAdmin(m)"
-                    class="icon-mini"
-                    :class="{ active: m.role === 'ADMIN' }"
-                    :title="m.role === 'ADMIN' ? '取消管理员' : '设为管理员'"
-                    :disabled="Boolean(busy)"
-                    @click="toggleAdmin(m.userId, m.role === 'ADMIN')"
-                  >
-                    <Shield :size="13" :stroke-width="2" />
-                  </button>
-
-                  <button
-                    v-if="canTransfer(m)"
-                    class="icon-mini"
-                    :class="{ armed: pending === `transfer-${m.userId}` }"
-                    title="转让群主"
-                    :disabled="Boolean(busy)"
-                    @click="confirmThen(`transfer-${m.userId}`, () => transfer(m.userId))"
-                  >
-                    <Crown :size="13" :stroke-width="2" />
-                  </button>
-
-                  <button
-                    v-if="canKick(m)"
-                    class="icon-mini danger"
-                    :class="{ armed: pending === `kick-${m.userId}` }"
-                    title="移出群聊"
-                    :disabled="Boolean(busy)"
-                    @click="confirmThen(`kick-${m.userId}`, () => kick(m.userId))"
-                  >
-                    <UserMinus :size="13" :stroke-width="2" />
-                  </button>
-                </div>
-              </div>
-            </div>
-          </section>
+          <!-- 成员：权限矩阵与二次确认都在 GroupMemberList 里 -->
+          <GroupMemberList
+            :members="members"
+            :my-id="myId"
+            :is-owner="isOwner"
+            :is-admin="isAdmin"
+            :busy="busy"
+            :friend-ids="friendIds"
+            :requested-ids="requestedIds"
+            @profile="openProfile"
+            @friend="addFriend"
+            @mute="muteMember"
+            @admin="toggleAdmin"
+            @kick="kick"
+            @transfer="transfer"
+          />
 
           <!-- 危险区 -->
           <section class="block danger-zone">
@@ -788,29 +618,6 @@ onBeforeUnmount(() => {
 .mini-btn:hover { background: var(--surface-hover); color: var(--ink); }
 .switch-btn { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 11px; border-radius: var(--r-full); border: 1px solid var(--line); background: var(--surface-2); font-size: 11.5px; font-weight: 560; color: var(--ink-2); }
 .switch-btn.on { background: var(--danger-soft); border-color: color-mix(in srgb, var(--danger) 34%, transparent); color: var(--danger); }
-.member-list { display: flex; flex-direction: column; gap: 2px; max-height: 280px; overflow-y: auto; }
-.member-row { display: flex; align-items: center; gap: 9px; padding: 6px 4px; border-radius: var(--r-sm); }
-.member-row:hover { background: var(--surface-hover); }
-.member-open { display: flex; align-items: center; gap: 9px; flex: 1; min-width: 0; text-align: left; background: none; border: 0; padding: 0; cursor: pointer; }
-.member-open:focus-visible { outline: 2px solid var(--accent-ring); outline-offset: 2px; border-radius: var(--r-xs); }
-.member-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.member-name { font-size: 12.5px; font-weight: 560; display: flex; align-items: center; gap: 5px; }
-.member-sub { font-size: 10px; color: var(--ink-4); }
-.tag { font-size: 9px; font-weight: 700; padding: 1px 4px; border-radius: 3px; background: var(--surface-3); color: var(--ink-3); border: 1px solid var(--line); white-space: nowrap; }
-.tag.owner { background: var(--accent-soft); color: var(--accent-ink); border-color: transparent; }
-.tag.admin { background: var(--accent-soft); color: var(--accent-ink); border-color: transparent; opacity: 0.82; }
-.tag.me { background: var(--surface-3); color: var(--ink-4); }
-.tag.muted { background: var(--danger-soft); color: var(--danger); border-color: transparent; font-weight: 600; }
-.member-actions { display: flex; align-items: center; gap: 2px; }
-.mini-select { height: 24px; border-radius: var(--r-xs); border: 1px solid var(--line); background: var(--surface-2); font-size: 10.5px; color: var(--ink-2); }
-.icon-mini { width: 24px; height: 24px; border-radius: var(--r-xs); display: grid; place-items: center; color: var(--ink-3); }
-.icon-mini:hover:not(:disabled) { background: var(--surface-3); color: var(--ink); }
-.icon-mini.active { background: var(--accent-soft); color: var(--accent-ink); }
-.icon-mini.danger:hover:not(:disabled), .icon-mini.armed { background: var(--danger-soft); color: var(--danger); }
-.icon-mini.armed { animation: pulse-armed 1s ease-in-out infinite; }
-.icon-mini:disabled { opacity: 0.35; cursor: not-allowed; }
-.icon-mini.friend:disabled { opacity: 1; color: var(--accent-ink); background: var(--accent-soft); cursor: default; }
-.icon-mini.pending:disabled { opacity: 0.8; color: var(--ink-3); cursor: default; }
 .danger-zone { border-top: 1px solid var(--line); padding-top: 12px; }
 .danger-hint { display: flex; align-items: center; flex-wrap: wrap; gap: 3px; margin: 0; font-size: 11px; line-height: 1.6; color: var(--ink-3); }
 .danger-hint-icon { color: var(--accent-ink); }

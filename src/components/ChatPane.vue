@@ -20,16 +20,11 @@ import {
   Loader2,
   X,
   FileText,
-  Copy,
-  Languages,
-  Share2,
-  ListChecks,
   Quote,
-  Star,
-  Trash2,
   CircleAlert,
 } from 'lucide-vue-next'
 import AppAvatar from './AppAvatar.vue'
+import MessageActionMenu from './MessageActionMenu.vue'
 import EmojiPanel from './EmojiPanel.vue'
 import MessageContent from './MessageContent.vue'
 import { resetMagnet, trackMagnet, trackSpotlight } from '../composables/usePointerFx'
@@ -42,7 +37,7 @@ import { groupAvatarSrc, userAvatarSrc } from '../utils/avatar'
 import { appendMention, insertAtCursor } from '../utils/composer'
 import { mentionCandidates } from '../utils/mention'
 import { humanBytes } from '../utils/present'
-import { stableMessageKey } from '../utils/message'
+import { groupMessages } from '../utils/message'
 
 const props = defineProps<{
   conversation: Conversation | null
@@ -158,20 +153,7 @@ const { arm: armEnter, disarm: disarmEnter, vEnter } = useEnterAnimation(
  * 这里负责分组，以及给每条消息一个稳定 key —— 乐观占位与服务端消息共用
  * clientMsgId，确认到达时 Vue 复用同一个节点，不会重建重排。
  */
-const grouping = computed(() => {
-  const usedKeys = new Set<string>()
-  return props.messages.map((message, index) => {
-    const prev = props.messages[index - 1]
-    const grouped =
-      !!prev &&
-      prev.side === message.side &&
-      prev.author === message.author &&
-      !prev.attachment &&
-      !message.attachment
-    const key = stableMessageKey(message, index, usedKeys)
-    return { message, grouped, key, enterOrder: index, pending: message.pending }
-  })
-})
+const grouping = computed(() => groupMessages(props.messages))
 
 /* ---------- 消息右键菜单 / 多选 ---------- */
 type MenuState = { x: number; y: number; message: ChatMessage }
@@ -703,64 +685,24 @@ watch(() => props.messages.length, () => scrollToBottom())
     </div>
 
     <Teleport to="body">
-      <div
+      <MessageActionMenu
         v-if="menu"
-        class="msg-menu"
-        role="menu"
-        :style="{ left: `${menu.x}px`, top: `${menu.y}px` }"
-        @contextmenu.prevent
-      >
-        <button class="msg-menu-item" role="menuitem" @click="copyMessage(menu.message)">
-          <Copy :size="14" :stroke-width="1.9" />
-          复制
-        </button>
-        <button
-          class="msg-menu-item"
-          role="menuitem"
-          :disabled="menu.message.recalled || !!menu.message.attachment"
-          @click="translateMessage(menu.message)"
-        >
-          <Languages :size="14" :stroke-width="1.9" />
-          {{ translationOf(menu.message) ? '收起译文' : '翻译' }}
-          <span class="msg-menu-tag">{{ translateLabel }}</span>
-        </button>
-        <button class="msg-menu-item" role="menuitem" @click="forwardMessage(menu.message)">
-          <Share2 :size="14" :stroke-width="1.9" />
-          转发
-        </button>
-        <button class="msg-menu-item" role="menuitem" @click="startSelect(menu.message)">
-          <ListChecks :size="14" :stroke-width="1.9" />
-          多选
-        </button>
-        <button
-          class="msg-menu-item"
-          role="menuitem"
-          :disabled="menu.message.recalled"
-          @click="favoriteMessage(menu.message)"
-        >
-          <Star :size="14" :stroke-width="1.9" />
-          收藏
-        </button>
-        <button
-          class="msg-menu-item"
-          role="menuitem"
-          :disabled="!canQuote(menu.message)"
-          @click="quoteMessage(menu.message)"
-        >
-          <Quote :size="14" :stroke-width="1.9" />
-          引用
-        </button>
-        <div class="msg-menu-sep" />
-        <button
-          class="msg-menu-item danger"
-          role="menuitem"
-          @click="deleteMessage(menu.message)"
-        >
-          <Trash2 :size="14" :stroke-width="1.9" />
-          删除
-          <span v-if="!canRecall(menu.message)" class="msg-menu-tag">仅本机</span>
-        </button>
-      </div>
+        :message="menu.message"
+        :x="menu.x"
+        :y="menu.y"
+        :translate-label="translateLabel"
+        :translated="!!translationOf(menu.message)"
+        :quotable="canQuote(menu.message)"
+        :recallable="canRecall(menu.message)"
+        selectable
+        @copy="copyMessage(menu.message)"
+        @translate="translateMessage(menu.message)"
+        @forward="forwardMessage(menu.message)"
+        @select="startSelect(menu.message)"
+        @favorite="favoriteMessage(menu.message)"
+        @quote="quoteMessage(menu.message)"
+        @delete="deleteMessage(menu.message)"
+      />
     </Teleport>
   </section>
 </template>
@@ -862,15 +804,7 @@ watch(() => props.messages.length, () => scrollToBottom())
   font-size: 11.5px;
 }
 
-.msg-menu-item:disabled {
-  color: var(--ink-4);
-  cursor: not-allowed;
-}
 
-.msg-menu-item:disabled:hover {
-  background: transparent;
-  color: var(--ink-4);
-}
 
 .msg-loading,
 .messages-empty {

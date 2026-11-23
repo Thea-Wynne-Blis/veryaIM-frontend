@@ -2,10 +2,11 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Search, Plus, Pin, Bell, BellOff, UserPlus, Users, MailOpen, EyeOff, Trash2, PinOff } from 'lucide-vue-next'
 import AppAvatar from './AppAvatar.vue'
+import ConversationRow from './ConversationRow.vue'
 import { trackSpotlight } from '../composables/usePointerFx'
 import { api, type Id } from '../api/client'
 import { initialsOf, toneOfPerson } from '../utils/present'
-import { groupAvatarSrc, userAvatarSrc } from '../utils/avatar'
+import { userAvatarSrc } from '../utils/avatar'
 import type { Conversation } from '../types/chat'
 
 const props = defineProps<{
@@ -246,97 +247,29 @@ onBeforeUnmount(() => {
     <div class="list-scroll">
       <template v-if="pinned.length">
         <p class="list-group-label">置顶</p>
-        <button
+        <ConversationRow
           v-for="(item, index) in pinned"
           :key="item.id"
-          class="conv spot"
-          :class="{ active: item.id === activeId }"
-          :style="{ animationDelay: `${index * 26}ms` }"
-          @pointermove="trackSpotlight"
-          @click="emit('select', item.id)"
-          @contextmenu.prevent="openConvMenu($event, item)"
-        >
-          <AppAvatar
-            :initials="item.initials"
-            :tone="item.tone"
-            :presence="item.presence"
-            :rounded="item.kind === 'group'"
-            :src="item.kind === 'group' ? groupAvatarSrc(item.id) : userAvatarSrc(item.peerId)"
-            size="md"
-          />
-          <span class="conv-main">
-            <span class="conv-top">
-              <span class="conv-name">{{ item.name }}</span>
-              <Pin
-                :size="10"
-                :stroke-width="2.4"
-                style="color: var(--ink-4); flex-shrink: 0"
-              />
-              <BellOff
-                v-if="item.muted"
-                :size="10"
-                :stroke-width="2.4"
-                style="color: var(--ink-4); flex-shrink: 0"
-              />
-            </span>
-            <span class="conv-preview">{{ item.preview }}</span>
-          </span>
-          <span class="conv-meta">
-            <span class="conv-time num">{{ item.time }}</span>
-            <span
-              v-if="item.unread"
-              class="unread"
-              :class="{ muted: item.muted }"
-            >
-              <span :key="item.unread">{{ item.unread > 99 ? '99+' : item.unread }}</span>
-            </span>
-          </span>
-        </button>
+          :item="item"
+          :active="item.id === activeId"
+          :index="index"
+          @select="emit('select', $event)"
+          @menu="openConvMenu"
+        />
       </template>
 
       <p v-if="rest.length" class="list-group-label">
         {{ pinned.length ? '其他会话' : '全部会话' }}
       </p>
-      <button
+      <ConversationRow
         v-for="(item, index) in rest"
         :key="item.id"
-        class="conv spot"
-        :class="{ active: item.id === activeId }"
-        :style="{ animationDelay: `${index * 26}ms` }"
-        @pointermove="trackSpotlight"
-        @click="emit('select', item.id)"
-        @contextmenu.prevent="openConvMenu($event, item)"
-      >
-        <AppAvatar
-          :initials="item.initials"
-          :tone="item.tone"
-          :presence="item.presence"
-          :rounded="item.kind === 'group'"
-          :src="item.kind === 'group' ? groupAvatarSrc(item.id) : userAvatarSrc(item.peerId)"
-          size="md"
-        />
-        <span class="conv-main">
-          <span class="conv-top">
-            <span class="conv-name">{{ item.name }}</span>
-            <span v-if="item.kind === 'group'" class="conv-flag">
-              {{ item.members }}
-            </span>
-            <BellOff
-              v-if="item.muted"
-              :size="10"
-              :stroke-width="2.4"
-              style="color: var(--ink-4); flex-shrink: 0"
-            />
-          </span>
-          <span class="conv-preview">{{ item.preview }}</span>
-        </span>
-        <span class="conv-meta">
-          <span class="conv-time num">{{ item.time }}</span>
-          <span v-if="item.unread" class="unread" :class="{ muted: item.muted }">
-            <span :key="item.unread">{{ item.unread > 99 ? '99+' : item.unread }}</span>
-          </span>
-        </span>
-      </button>
+        :item="item"
+        :active="item.id === activeId"
+        :index="index"
+        @select="emit('select', $event)"
+        @menu="openConvMenu"
+      />
 
       <template v-if="contactHits.length">
         <p class="list-group-label">联系人</p>

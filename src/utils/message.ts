@@ -48,6 +48,87 @@ export function stableMessageKey(
   return key
 }
 
+/** 消息所属自然日（用于「今天 / 昨天」分组）；无法解析时返回空串。 */
+export function messageDayOf(message: ChatMessage | undefined): string {
+  const date = message?.createdAt ? new Date(message.createdAt) : null
+  return date && !Number.isNaN(date.getTime()) ? date.toDateString() : ''
+}
+
+/**
+ * 日期分隔条文案：今天 / 昨天 / 5月20日（跨年带上年份）。
+ *
+ * <p>桌面端不显示分隔条，移动端只在跨天时显示；两端共用这一份格式化。</p>
+ */
+export function dayLabelOf(iso: string | null | undefined, now = new Date()): string {
+  if (!iso) return ''
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return ''
+  const day = date.toDateString()
+  if (day === now.toDateString()) return '今天'
+  const yesterday = new Date(now)
+  yesterday.setDate(now.getDate() - 1)
+  if (day === yesterday.toDateString()) return '昨天'
+  return date.toLocaleDateString('zh-CN', {
+    month: 'long',
+    day: 'numeric',
+    ...(date.getFullYear() !== now.getFullYear() ? { year: 'numeric' as const } : {}),
+  })
+}
+
+export type MessageGroupOptions = {
+  /** 是否输出跨天分隔条（移动端需要，桌面端不需要） */
+  withDay?: boolean
+  /** 同一个人连续消息合并的最大间隔；0 表示不限（桌面端） */
+  mergeWindowMs?: number
+  /** 用 senderId 判断是否同一个人（移动端）；默认用显示名 */
+  matchBySenderId?: boolean
+}
+
+export type MessageGroup<T extends ChatMessage = ChatMessage> = {
+  message: T
+  grouped: boolean
+  key: string
+  /** 跨天分隔条文案；不需要或未跨天时为空串 */
+  day: string
+  enterOrder: number
+  pending?: boolean
+}
+
+/**
+ * 消息分组：连续同一人、都没有附件、间隔不超过窗口时，后一条不再重复头像与作者名。
+ *
+ * <p>桌面端用显示名判断，移动端用 senderId 并按 5 分钟窗口合并；
+ * 两个组件原来各写一份，改规则要同步改两处。</p>
+ */
+export function groupMessages<T extends ChatMessage>(
+  messages: T[],
+  options: MessageGroupOptions = {},
+): MessageGroup<T>[] {
+  const { withDay = false, mergeWindowMs = 0, matchBySenderId = false } = options
+  const usedKeys = new Set<string>()
+  return messages.map((message, index) => {
+    const prev = messages[index - 1]
+    const day = withDay && (index === 0 || messageDayOf(prev) !== messageDayOf(message))
+      // 时间缺失（极少见的本地脏数据）时仍给个分组标题，避免消息挤在一起
+      ? dayLabelOf(message.createdAt) || '聊天记录'
+      : ''
+    let grouped = false
+    if (prev && !day && prev.side === message.side && !prev.attachment && !message.attachment) {
+      if (matchBySenderId) {
+        const prevAt = prev.createdAt ? new Date(prev.createdAt).getTime() : 0
+        const nextAt = message.createdAt ? new Date(message.createdAt).getTime() : 0
+        grouped = (prev.senderId ?? prev.author) === (message.senderId ?? message.author)
+          && !!prevAt && !!nextAt
+          && nextAt - prevAt < mergeWindowMs
+      } else {
+        grouped = prev.author === message.author
+      }
+    }
+    const key = stableMessageKey(message, index, usedKeys)
+    return { message, grouped, key, day, enterOrder: index, pending: message.pending }
+  })
+}
+
 /** 复制时给的纯文本：附件用「文件名 (大小)」占位。 */
 export function copyTextOf(message: ChatMessage): string {
   if (message.recalled) return ''

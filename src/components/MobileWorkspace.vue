@@ -13,25 +13,17 @@ import {
   Smile,
   AtSign,
   Loader2,
-  Copy,
-  Languages,
   Quote,
-  Share2,
-  Trash2,
   X,
-  MailOpen,
-  EyeOff,
   MoreHorizontal,
-  Pin,
-  BellOff,
-  Star,
   Camera,
 } from 'lucide-vue-next'
-import AppAvatar from './AppAvatar.vue'
 import ContactsView from './ContactsView.vue'
+import MessageActionMenu from './MessageActionMenu.vue'
 import MeView from './MeView.vue'
 import MessageContent from './MessageContent.vue'
 import EmojiPanel from './EmojiPanel.vue'
+import MobileConversationList from './MobileConversationList.vue'
 import DetailPanel from './DetailPanel.vue'
 import FavoritesView from './FavoritesView.vue'
 import MomentsView from './moments/MomentsView.vue'
@@ -43,10 +35,9 @@ import { useChatStore } from '../stores/chat'
 import { useAuthStore } from '../stores/auth'
 import { useMomentsStore } from '../stores/moments'
 import type { ChatMessage, Conversation } from '../types/chat'
-import { stableMessageKey } from '../utils/message'
+import { groupMessages } from '../utils/message'
 import { appendMention, insertAtCursor } from '../utils/composer'
 import { mentionCandidates } from '../utils/mention'
-import { groupAvatarSrc, userAvatarSrc } from '../utils/avatar'
 
 type ReplyRef = { messageId: string; senderId: string; preview: string }
 
@@ -330,40 +321,8 @@ function onBodyScroll(event: Event) {
 }
 
 /** 消息不播「新消息」入场动画（同 ChatPane），只给每条一个稳定 key：乐观占位确认后复用同一节点 */
-function messageDay(message: ChatMessage | undefined) {
-  const date = message?.createdAt ? new Date(message.createdAt) : null
-  return date && !Number.isNaN(date.getTime()) ? date.toDateString() : ''
-}
-
-function dayLabel(message: ChatMessage) {
-  const day = messageDay(message)
-  if (!day) return '聊天记录'
-  const today = new Date()
-  if (day === today.toDateString()) return '今天'
-  const yesterday = new Date(today)
-  yesterday.setDate(yesterday.getDate() - 1)
-  if (day === yesterday.toDateString()) return '昨天'
-  return new Date(message.createdAt!).toLocaleDateString('zh-CN', { month: 'long', day: 'numeric',
-    ...(new Date(message.createdAt!).getFullYear() !== today.getFullYear() ? { year: 'numeric' as const } : {}) })
-}
-
 function grouping(messages: ChatMessage[]) {
-  const usedKeys = new Set<string>()
-  return messages.map((message, index) => {
-    const prev = messages[index - 1]
-    const day = index === 0 || messageDay(prev) !== messageDay(message) ? dayLabel(message) : ''
-    const grouped =
-      !!prev &&
-      !day &&
-      prev.side === message.side &&
-      (prev.senderId ?? prev.author) === (message.senderId ?? message.author) &&
-      !!prev.createdAt && !!message.createdAt &&
-      new Date(message.createdAt).getTime() - new Date(prev.createdAt).getTime() < 5 * 60_000 &&
-      !prev.attachment &&
-      !message.attachment
-    const key = stableMessageKey(message, index, usedKeys)
-    return { message, grouped, key, day, enterOrder: index, pending: message.pending }
-  })
+  return groupMessages(messages, { withDay: true, mergeWindowMs: 5 * 60_000, matchBySenderId: true })
 }
 
 /* ---------- 长按菜单（移动端没有右键） ---------- */
@@ -472,133 +431,11 @@ const {
 /* ---------- 翻译目标语言（菜单文案用） ---------- */
 const { label: translateLabel } = useTranslatePrefs()
 
-/* ---------- 会话列表右滑操作 ---------- */
-const SWIPE_WIDTH = 198
-const SWIPE_TRIGGER_PX = 48
-
-/** 当前展开操作栏的会话 */
-const swipeId = ref<string | null>(null)
-/** 正在跟手的会话（滑动过程中不播过渡） */
-const draggingId = ref<string | null>(null)
-const dragOffset = ref(0)
-/** 点了「删除」后展开的二级确认：「清空记录同时不显示聊天」 */
-const deleteArmedId = ref<string | null>(null)
-
-type SwipeTrack = {
-  id: string
-  startX: number
-  startY: number
-  from: number
-  active: boolean
-}
-
-let track: SwipeTrack | null = null
-let lastSwipeAt = 0
-
-function resetSwipe() {
-  swipeId.value = null
-  deleteArmedId.value = null
-}
-
-/** 行的横向位移：跟手 > 二级确认 > 展开 > 复位。 */
-function rowStyle(id: string): Record<string, string> | undefined {
-  if (draggingId.value === id) {
-    return { transform: `translateX(${dragOffset.value}px)` }
-  }
-  if (deleteArmedId.value === id) {
-    return { transform: `translateX(-${SWIPE_WIDTH}px)` }
-  }
-  if (swipeId.value === id) {
-    return { transform: `translateX(-${SWIPE_WIDTH}px)` }
-  }
-  return undefined
-}
-
-function onConvPointerDown(event: PointerEvent, id: string) {
-  if (event.pointerType === 'mouse' && event.button !== 0) return
-  // 按住另一行时先收起已展开的行
-  if (swipeId.value && swipeId.value !== id) resetSwipe()
-  track = {
-    id,
-    startX: event.clientX,
-    startY: event.clientY,
-    from: swipeId.value === id ? -SWIPE_WIDTH : 0,
-    active: false,
-  }
-}
-
-function onConvPointerMove(event: PointerEvent) {
-  if (!track) return
-  const dx = event.clientX - track.startX
-  const dy = event.clientY - track.startY
-  if (!track.active) {
-    if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return
-    // 竖向手势是滚动列表，交还给浏览器
-    if (Math.abs(dy) > Math.abs(dx)) {
-      track = null
-      return
-    }
-    track.active = true
-    draggingId.value = track.id
-    deleteArmedId.value = null
-  }
-  if (Math.abs(dx) > 10) lastSwipeAt = Date.now()
-  dragOffset.value = Math.min(0, Math.max(-SWIPE_WIDTH, track.from + dx))
-}
-
-function onConvPointerEnd() {
-  if (!track) return
-  const { id, active } = track
-  track = null
-  if (!active) return
-  draggingId.value = null
-  if (dragOffset.value <= -SWIPE_TRIGGER_PX) swipeId.value = id
-  else resetSwipe()
-  dragOffset.value = 0
-}
-
-function onRowClick(id: string) {
-  // 刚滑完浏览器还会补一个 click，别把它当成「打开会话」
-  if (Date.now() - lastSwipeAt < 320) return
-  // 已有展开的操作栏：这一下只负责收起
-  if (swipeId.value) {
-    resetSwipe()
-    return
-  }
-  open(id)
-}
-
-function swipeUnread(id: string) {
-  resetSwipe()
-  emit('mark-unread', id)
-}
-
-function swipeHide(id: string) {
-  resetSwipe()
-  emit('hide', id)
-}
-
-function armDelete(id: string) {
-  swipeId.value = id
-  deleteArmedId.value = id
-}
-
-function confirmSwipeDelete(id: string) {
-  resetSwipe()
-  emit('delete', id)
-}
-
-/** 点空白处收起展开的操作栏 */
-function onDocSwipeReset(event: PointerEvent) {
-  if (!swipeId.value) return
-  const target = event.target as HTMLElement | null
-  if (target?.closest('.m-swipe')) return
-  resetSwipe()
-}
+/* ---------- 会话列表 ---------- */
+// 左滑操作与列表行都在 MobileConversationList 里，这里只负责把事件转给页面。
 
 onMounted(() => {
   document.addEventListener('pointerdown', onDocPointerDown, true)
-  document.addEventListener('pointerdown', onDocSwipeReset, true)
   window.visualViewport?.addEventListener('resize', updateViewport, { passive: true })
   window.addEventListener('resize', updateViewport, { passive: true })
   updateViewport()
@@ -611,8 +448,8 @@ onBeforeUnmount(() => {
   window.removeEventListener('resize', updateViewport)
   document.documentElement.style.removeProperty('--mobile-viewport-height')
   document.removeEventListener('pointerdown', onDocPointerDown, true)
-  document.removeEventListener('pointerdown', onDocSwipeReset, true)
 })
+
 </script>
 
 <template>
@@ -633,80 +470,14 @@ onBeforeUnmount(() => {
     <div class="m-body" :class="{ embedded: tab !== 'chat' }" :inert="!!current" @scroll.passive="onBodyScroll">
       <template v-if="tab === 'chat'">
         <p v-if="error" class="m-error" role="alert">{{ error }}</p>
-        <div
-          v-for="(item, index) in conversations"
-          :key="item.id"
-          class="m-swipe"
-          :style="{
-            animation: `fade-up 320ms var(--ease-out) ${Math.min(index * 30, 180)}ms backwards`,
-          }"
-        >
-          <div class="m-swipe-actions" :class="{ armed: deleteArmedId === item.id }">
-            <template v-if="deleteArmedId === item.id">
-              <button
-                class="m-swipe-btn danger wide"
-                @click.stop="confirmSwipeDelete(item.id)"
-              >
-                <Trash2 :size="17" :stroke-width="1.9" />
-                清空记录同时不显示聊天
-              </button>
-            </template>
-            <template v-else>
-              <button class="m-swipe-btn mark" @click.stop="swipeUnread(item.id)">
-                <MailOpen :size="17" :stroke-width="1.9" />
-                标为未读
-              </button>
-              <button class="m-swipe-btn hide" @click.stop="swipeHide(item.id)">
-                <EyeOff :size="17" :stroke-width="1.9" />
-                不显示
-              </button>
-              <button class="m-swipe-btn danger" @click.stop="armDelete(item.id)">
-                <Trash2 :size="17" :stroke-width="1.9" />
-                删除
-              </button>
-            </template>
-          </div>
-          <button
-            class="m-conv"
-            :class="{ swiping: draggingId === item.id, pinned: item.pinned }"
-            :aria-label="`${item.name}${item.unread ? `，${item.unread} 条未读消息` : ''}`"
-            :style="rowStyle(item.id)"
-            @pointerdown="onConvPointerDown($event, item.id)"
-            @pointermove="onConvPointerMove"
-            @pointerup="onConvPointerEnd"
-            @pointercancel="onConvPointerEnd"
-            @click="onRowClick(item.id)"
-          >
-            <AppAvatar
-              :initials="item.initials"
-              :tone="item.tone"
-              :presence="item.presence"
-              :rounded="item.kind === 'group'"
-              :src="item.kind === 'group' ? groupAvatarSrc(item.id) : userAvatarSrc(item.peerId)"
-              size="lg"
-            />
-            <span class="m-conv-main">
-              <span class="m-conv-top">
-                <span class="m-conv-name">{{ item.name }}</span>
-                <Pin v-if="item.pinned" :size="12" class="m-conv-status" aria-label="已置顶" />
-              </span>
-              <span class="m-conv-preview">{{ item.preview }}</span>
-            </span>
-            <span class="m-conv-meta">
-              <span class="conv-time num">{{ item.time }}</span>
-              <BellOff v-if="item.muted && !item.unread" :size="13" class="m-conv-status" aria-label="消息免打扰" />
-              <span v-if="item.unread" class="unread" :class="{ muted: item.muted }">
-                <span :key="item.unread">{{ item.unread > 99 ? '99+' : item.unread }}</span>
-              </span>
-            </span>
-          </button>
-        </div>
-
-        <div v-if="!conversations.length && !error" class="m-list-empty">
-          <MessageCircle :size="38" :stroke-width="1.2" />
-          <p>还没有聊天</p><span>从通讯录选择好友，或发起新的会话</span>
-          <button @click="emit('new-chat')">发起聊天</button>
-        </div>
+        <MobileConversationList
+          :conversations="conversations"
+          @select="open"
+          @new-chat="emit('new-chat')"
+          @mark-unread="(id) => emit('mark-unread', id)"
+          @hide="(id) => emit('hide', id)"
+          @delete="(id) => emit('delete', id)"
+        />
       </template>
 
       <ContactsView v-else-if="tab === 'contacts'" class="m-embed" />
@@ -727,7 +498,7 @@ onBeforeUnmount(() => {
         class="m-tab"
         :class="{ active: tab === item.key || (item.key === 'me' && tab === 'favorites') }"
         :aria-current="tab === item.key || (item.key === 'me' && tab === 'favorites') ? 'page' : undefined"
-        @click="tab = item.key; bodyScrolled = false; resetSwipe()"
+        @click="tab = item.key; bodyScrolled = false"
       >
         <span class="m-tab-icon">
           <component :is="item.icon" :size="20" :stroke-width="1.85" />
@@ -902,49 +673,23 @@ onBeforeUnmount(() => {
     </Transition>
 
     <Teleport to="body">
-      <div
+      <MessageActionMenu
         v-if="menu"
-        class="msg-menu"
-        role="menu"
-        :style="{ left: `${menu.x}px`, top: `${menu.y}px` }"
-        @contextmenu.prevent
-        @pointerdown.stop
-      >
-        <button class="msg-menu-item" role="menuitem" @click="copyMessage(menu.message)">
-          <Copy :size="15" :stroke-width="1.9" />
-          复制
-        </button>
-        <button
-          class="msg-menu-item"
-          role="menuitem"
-          :disabled="menu.message.recalled || !!menu.message.attachment"
-          @click="translateMessage(menu.message)"
-        >
-          <Languages :size="15" :stroke-width="1.9" />
-          {{ translationOf(menu.message) ? '收起译文' : '翻译' }}
-          <span class="msg-menu-tag">{{ translateLabel }}</span>
-        </button>
-        <button class="msg-menu-item" role="menuitem" @click="forwardMessage(menu.message)">
-          <Share2 :size="15" :stroke-width="1.9" />
-          转发
-        </button>
-        <button class="msg-menu-item" role="menuitem" :disabled="menu.message.recalled || menu.message.pending || !menu.message.messageId" @click="favoriteMessage(menu.message)"><Star :size="15" :stroke-width="1.9" />收藏</button>
-        <button
-          class="msg-menu-item"
-          role="menuitem"
-          :disabled="!canQuote(menu.message)"
-          @click="quoteMessage(menu.message)"
-        >
-          <Quote :size="15" :stroke-width="1.9" />
-          引用
-        </button>
-        <div class="msg-menu-sep" />
-        <button class="msg-menu-item danger" role="menuitem" @click="deleteMessage(menu.message)">
-          <Trash2 :size="15" :stroke-width="1.9" />
-          删除
-          <span v-if="!canRecall(menu.message)" class="msg-menu-tag">仅本机</span>
-        </button>
-      </div>
+        :message="menu.message"
+        :x="menu.x"
+        :y="menu.y"
+        :translate-label="translateLabel"
+        :translated="!!translationOf(menu.message)"
+        :quotable="canQuote(menu.message)"
+        :recallable="canRecall(menu.message)"
+        :icon-size="15"
+        @copy="copyMessage(menu.message)"
+        @translate="translateMessage(menu.message)"
+        @forward="forwardMessage(menu.message)"
+        @favorite="favoriteMessage(menu.message)"
+        @quote="quoteMessage(menu.message)"
+        @delete="deleteMessage(menu.message)"
+      />
     </Teleport>
   </div>
 </template>
@@ -957,17 +702,7 @@ onBeforeUnmount(() => {
 .m-search-entry { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; min-height: 42px; border-radius: 8px; background: var(--surface-3); color: var(--ink-3); font-size: 14px; }
 .m-body { min-height: 0; padding-bottom: 0; overscroll-behavior: contain; }
 .m-body.embedded { display: flex; flex-direction: column; overflow: hidden; padding-top: env(safe-area-inset-top, 0px); }
-.m-conv { min-height: 84px; padding: 14px 16px; background: var(--surface); border-bottom: 1px solid var(--line); }
-.m-conv.pinned { background: color-mix(in srgb, var(--surface) 95%, var(--accent)); }
-.m-conv-top { min-width: 0; }
-.m-conv-name { font-size: 16px; font-weight: 600; }
-.m-conv-preview { font-size: 13px; margin-top: 3px; }
-.m-conv-status { flex-shrink: 0; color: var(--ink-3); }
-.m-conv-meta { align-self: stretch; justify-content: space-between; padding: 2px 0; }
-.m-list-empty { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 80px 24px; color: var(--ink-3); text-align: center; }
-.m-list-empty p { font-size: 16px; color: var(--ink-2); }
-.m-list-empty span { font-size: 13px; }
-.m-list-empty button { padding: 10px 18px; border-radius: 8px; color: var(--accent-ink); background: var(--accent-soft); margin-top: 6px; }
+
 .m-tabs { position: relative; flex-shrink: 0; background: var(--surface); padding: 7px 8px calc(env(safe-area-inset-bottom, 0px) + 7px); }
 .m-tab { min-height: 48px; font-size: 11px; }
 .m-chat-head { min-height: 60px; gap: 6px; padding: calc(env(safe-area-inset-top, 0px) + 3px) 8px 3px; background: var(--canvas); }
@@ -1093,15 +828,7 @@ onBeforeUnmount(() => {
   font-size: 11px;
 }
 
-.msg-menu-item:disabled {
-  color: var(--ink-4);
-  cursor: not-allowed;
-}
 
-.msg-menu-item:disabled:hover {
-  background: transparent;
-  color: var(--ink-4);
-}
 
 .spin {
   animation: tick-spin 900ms linear infinite;
