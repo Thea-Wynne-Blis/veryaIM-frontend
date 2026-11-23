@@ -27,13 +27,13 @@ export function groupAvatarSrc(
 }
 
 /** 头像统一裁成正方形再上传：服务端不必解码原图，列表也不会加载几 MB 的大图。 */
-export const AVATAR_SIDE = 512
+export const AVATAR_SIDE = 320
 
 /**
  * 居中裁成正方形并压成 JPEG。
  *
- * <p>动图头像会失去动画（社交产品里头像本来就是静态展示），
- * 换来的是 30~80KB 的上传体积和稳定的服务端校验。</p>
+ * <p>320 见方在 2 倍屏下也能覆盖 160px 的展示尺寸（个人页大图也够用），
+ * 单张通常只有 15~35KB；会话列表一次渲染几十个头像时差距很明显。</p>
  */
 export async function squareAvatarFile(file: File, side = AVATAR_SIDE): Promise<File> {
   const bitmap = await createImageBitmap(file)
@@ -49,7 +49,7 @@ export async function squareAvatarFile(file: File, side = AVATAR_SIDE): Promise<
     context.imageSmoothingQuality = 'high'
     context.drawImage(bitmap, (side - width) / 2, (side - height) / 2, width, height)
     const blob = await new Promise<Blob | null>((resolve) =>
-      canvas.toBlob(resolve, 'image/jpeg', 0.88),
+      canvas.toBlob(resolve, 'image/jpeg', 0.82),
     )
     if (!blob) throw new Error('头像生成失败，请换一张图片')
     return new File([blob], 'avatar.jpg', { type: 'image/jpeg' })

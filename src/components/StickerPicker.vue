@@ -19,11 +19,25 @@ const loading = ref(false)
 const sendingUrl = ref('')
 const error = ref('')
 const searched = ref(false)
+/** 图源站偶尔有单张图拿不到（挂起/过期），失败的格子直接不显示，别留破图。 */
+const failed = ref<string[]>([])
 
 /** 常见搜索词：让第一次点开的人不必猜搜什么。 */
 const hotWords = ['无语', '哈哈', '猫', '打脸', '加油', '狗头']
 
 let searchSeq = 0
+
+/**
+ * 预览图走本站中转：部分网络直连图源 CDN 会长时间挂住，
+ * 面板看起来像一直在转圈；服务端有连接复用和预取缓存。
+ */
+function previewSrc(url: string): string {
+  return `/api/v1/stickers/image?url=${encodeURIComponent(url)}`
+}
+
+function markFailed(url: string) {
+  if (!failed.value.includes(url)) failed.value.push(url)
+}
 
 async function runSearch(word?: string) {
   const query = (word ?? keyword.value).trim()
@@ -36,6 +50,7 @@ async function runSearch(word?: string) {
     const result = await searchStickers(query)
     if (seq !== searchSeq) return
     items.value = Array.isArray(result?.items) ? result.items : []
+    failed.value = []
     searched.value = true
   } catch (e) {
     if (seq !== searchSeq) return
@@ -109,7 +124,8 @@ async function send(url: string) {
       <div v-else-if="error" class="sticker-state error">{{ error }}</div>
       <div v-else-if="items.length" class="sticker-grid">
         <button
-          v-for="url in items"
+          v-for="(url, index) in items"
+          v-show="!failed.includes(url)"
           :key="url"
           class="sticker-item"
           type="button"
@@ -118,7 +134,14 @@ async function send(url: string) {
           title="点击发送这张表情"
           @click="send(url)"
         >
-          <img :src="url" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" />
+          <img
+            :src="previewSrc(url)"
+            alt=""
+            :loading="index < 12 ? 'eager' : 'lazy'"
+            decoding="async"
+            referrerpolicy="no-referrer"
+            @error="markFailed(url)"
+          />
           <span v-if="sendingUrl === url" class="sticker-sending">
             <Loader2 :size="14" class="spin" />
           </span>

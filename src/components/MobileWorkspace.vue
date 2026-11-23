@@ -11,6 +11,7 @@ import {
   ArrowLeft,
   Paperclip,
   Smile,
+  AtSign,
   CheckCheck,
   Check,
   Loader2,
@@ -40,6 +41,7 @@ import { useMessageLocator } from '../composables/useMessageLocator'
 import { useTranslatePrefs } from '../composables/useTranslatePrefs'
 import { useEnterAnimation } from '../composables/useEnterAnimation'
 import { useChatStore } from '../stores/chat'
+import { useAuthStore } from '../stores/auth'
 import { useMomentsStore } from '../stores/moments'
 import type { ChatMessage, Conversation } from '../types/chat'
 import { stableMessageKey } from '../utils/message'
@@ -78,6 +80,7 @@ const emit = defineEmits<{
 }>()
 
 const chat = useChatStore()
+const auth = useAuthStore()
 const moments = useMomentsStore()
 
 type Tab = 'chat' | 'contacts' | 'moments' | 'favorites' | 'me'
@@ -115,6 +118,7 @@ const focusMessage = useMessageLocator(() => scroller.value, () => {
   stickToBottom.value = false
   infoOpen.value = false
   emojiOpen.value = false
+  mentionOpen.value = false
 })
 defineExpose({ focusMessage })
 const fileInput = ref<HTMLInputElement | null>(null)
@@ -142,6 +146,52 @@ const currentMessages = computed(() =>
   props.activeId ? props.messagesOf(props.activeId) : [],
 )
 
+/** @ 提及面板：单聊只有对端一个候选，群聊按成员列表。 */
+const mentionOpen = ref(false)
+const mentionCandidates = computed(() => {
+  const conversation = current.value
+  if (!conversation) return []
+  const selfId = String(auth.user?.userId ?? '')
+  const members = (chat.members[conversation.id] ?? [])
+    .filter((member) => String(member.userId) !== selfId)
+    .map((member) => ({
+      userId: String(member.userId),
+      label: member.remark?.trim() || member.nickname,
+    }))
+  if (members.length) return members
+  if (conversation.kind === 'direct' && conversation.name) {
+    return [{ userId: conversation.peerId ?? 'peer', label: conversation.name }]
+  }
+  return []
+})
+
+function toggleMention() {
+  mentionOpen.value = !mentionOpen.value
+  if (mentionOpen.value) {
+    emojiOpen.value = false
+    // 群聊成员列表可能还没拉过；点开 @ 时补一次，别让面板空着。
+    // 单聊不需要额外请求：候选直接取会话对端。
+    if (current.value?.kind === 'group' && props.activeId) {
+      void chat.loadMembers(props.activeId)
+    }
+  }
+  composerInput.value?.blur()
+}
+
+function insertMention(label: string) {
+  const value = draft.value
+  draft.value = value.endsWith('@')
+    ? `${value.slice(0, -1)}@${label} `
+    : `${value}@${label} `
+  mentionOpen.value = false
+  nextTick(() => {
+    const input = composerInput.value
+    if (!input) return
+    input.focus()
+    input.setSelectionRange(input.value.length, input.value.length)
+  })
+}
+
 const canSend = computed(() => draft.value.trim().length > 0)
 const uploads = computed(() => chat.uploads.filter(task => task.conversationId === props.activeId))
 
@@ -163,6 +213,7 @@ function updateViewport() {
 async function openInfo() {
   closeMenu()
   emojiOpen.value = false
+  mentionOpen.value = false
   infoOpen.value = true
   if (props.activeId) void chat.loadMembers(props.activeId)
   await nextTick()
@@ -244,6 +295,7 @@ function send() {
   replyTo.value = null
   draft.value = ''
   emojiOpen.value = false
+  mentionOpen.value = false
   stickToBottom.value = true
   scrollBottom(true)
 }
@@ -279,6 +331,7 @@ watch(
     ++scrollEpoch
     infoOpen.value = false
     emojiOpen.value = false
+    mentionOpen.value = false
     replyTo.value = null
     composing.value = false
     stickToBottom.value = true
@@ -846,7 +899,10 @@ onBeforeUnmount(() => {
             </div>
           </div>
           <div class="m-composer">
-            <button class="icon-btn" aria-label="表情" :aria-expanded="emojiOpen" aria-controls="mobile-emoji-picker" @click="emojiOpen = !emojiOpen; composerInput?.blur()">
+            <button class="icon-btn" aria-label="提及成员" :aria-expanded="mentionOpen" @click="toggleMention">
+              <AtSign :size="20" :stroke-width="1.9" />
+            </button>
+            <button class="icon-btn" aria-label="表情" :aria-expanded="emojiOpen" aria-controls="mobile-emoji-picker" @click="emojiOpen = !emojiOpen; mentionOpen = false; composerInput?.blur()">
               <Smile :size="20" :stroke-width="1.9" />
             </button>
             <textarea
@@ -856,7 +912,8 @@ onBeforeUnmount(() => {
               rows="1"
               placeholder="发消息…"
               aria-label="输入消息"
-              @focus="emojiOpen = false"
+              @focus="emojiOpen = false; mentionOpen = false"
+              @input="mentionOpen = draft.endsWith('@')"
               @compositionstart="composing = true"
               @compositionend="composing = false"
               @keydown.ctrl.enter.exact="sendShortcut"
@@ -869,6 +926,18 @@ onBeforeUnmount(() => {
               发送
             </button>
             <input ref="fileInput" type="file" hidden @change="onFilePicked" />
+          </div>
+          <div v-if="mentionOpen" class="m-mention" role="group" aria-label="选择要提及的人">
+            <button
+              v-for="member in mentionCandidates"
+              :key="member.userId"
+              type="button"
+              class="m-mention-item"
+              @click="insertMention(member.label)"
+            >
+              @{{ member.label }}
+            </button>
+            <p v-if="!mentionCandidates.length" class="m-mention-empty">成员资料还没加载好，稍后再试</p>
           </div>
           <div v-if="emojiOpen" id="mobile-emoji-picker" class="m-emoji-picker" role="group" aria-label="选择表情">
             <div class="m-emoji-tabs">
@@ -1006,6 +1075,10 @@ onBeforeUnmount(() => {
 .m-input:focus { box-shadow: none; }
 .m-input:focus-visible { outline: none; }
 .m-send { min-width: 54px; width: auto; height: 44px; padding: 0 12px; border-radius: 7px; background: var(--accent); box-shadow: none; font-size: 14px; font-weight: 600; }
+.m-mention { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 2px 2px; }
+.m-mention-item { min-height: 36px; padding: 0 12px; border-radius: 999px; background: var(--surface); border: 1px solid var(--line); font-size: 13px; }
+.m-mention-item:active { background: var(--surface-active); }
+.m-mention-empty { padding: 6px 4px; font-size: 12.5px; color: var(--ink-3); }
 .m-emoji-picker { padding: 8px 6px 4px; }
 .m-emoji-tabs { display: flex; gap: 2px; padding: 0 2px 6px; border-bottom: 1px solid var(--line); }
 .m-emoji-tab { min-height: 30px; padding: 0 12px; border-radius: 8px; font-size: 12.5px; color: var(--ink-3); }

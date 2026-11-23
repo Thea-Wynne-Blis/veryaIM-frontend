@@ -37,6 +37,7 @@ import StickerPicker from './StickerPicker.vue'
 import { resetMagnet, trackMagnet, trackSpotlight } from '../composables/usePointerFx'
 import { useTranslatePrefs } from '../composables/useTranslatePrefs'
 import { useChatStore } from '../stores/chat'
+import { useAuthStore } from '../stores/auth'
 import type { ChatMessage, Conversation } from '../types/chat'
 import { groupAvatarSrc, userAvatarSrc } from '../utils/avatar'
 import { humanBytes } from '../utils/present'
@@ -61,9 +62,31 @@ const emit = defineEmits<{
 }>()
 
 const chat = useChatStore()
+const auth = useAuthStore()
 const draft = ref('')
 const mentionOpen = ref(false)
-const mentionMembers = computed(() => props.members ?? [])
+/**
+ * 可提及的人：群聊取成员列表（去掉自己）；单聊不需要额外请求，
+ * 直接把对端当成唯一的候选——之前单聊没加载成员，@ 面板永远是空的。
+ */
+const mentionMembers = computed(() => {
+  const selfId = String(auth.user?.userId ?? '')
+  const loaded = (props.members ?? []).filter(
+    (member) => String(member.userId) !== selfId,
+  )
+  if (loaded.length) return loaded
+  const conversation = props.conversation
+  if (conversation?.kind === 'direct' && conversation.name) {
+    return [
+      {
+        userId: conversation.peerId ?? 'peer',
+        nickname: conversation.name,
+        remark: null as string | null,
+      },
+    ]
+  }
+  return []
+})
 
 /**
  * 聊天里点头像 / 昵称看资料：单聊是对方，群聊是发言人，自己就是自己。
@@ -86,6 +109,8 @@ function insertMention(nickname: string) {
     : `${value}@${nickname} `
   mentionOpen.value = false
   autoGrow()
+  // 鼠标点候选会把焦点留在按钮上；把光标放回输入框末尾，接着打字即可。
+  nextTick(focusComposer)
 }
 const scroller = ref<HTMLElement | null>(null)
 /** 是否贴住底部。用户主动往上翻历史时不打断；切会话/自己发消息时强制回到底部。 */
@@ -282,6 +307,14 @@ function autoGrow() {
   el.style.height = `${Math.min(el.scrollHeight, 164)}px`
 }
 
+/** 插入表情 / @ 之后把焦点和光标还给输入框，避免用户还要再点一下。 */
+function focusComposer() {
+  const el = document.getElementById('composer-input') as HTMLTextAreaElement | null
+  if (!el) return
+  el.focus()
+  el.setSelectionRange(el.value.length, el.value.length)
+}
+
 function pickAttachment(kind: 'file' | 'image') {
   if (kind === 'image') imageInput.value?.click()
   else attachmentInput.value?.click()
@@ -298,6 +331,7 @@ function insertEmoji(emoji: string) {
   draft.value += emoji
   emojiOpen.value = false
   autoGrow()
+  nextTick(focusComposer)
 }
 
 /**
@@ -694,7 +728,7 @@ watch(() => props.messages.length, () => scrollToBottom())
             <button v-for="m in mentionMembers" :key="m.userId" class="mention-item" @click="insertMention(m.remark?.trim() || m.nickname)">
               {{ m.remark?.trim() || m.nickname }}
             </button>
-            <p v-if="!mentionMembers.length" class="mention-empty">暂无成员资料</p>
+            <p v-if="!mentionMembers.length" class="mention-empty">成员资料还没加载好，稍后再试</p>
           </div>
 
           <div class="composer-tools">

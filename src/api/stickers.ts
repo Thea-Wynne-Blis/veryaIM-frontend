@@ -1,6 +1,6 @@
 import { api } from './client'
 
-/** 网络表情包搜索：`items` 是第三方图片地址，前端直接作为缩略图展示。 */
+/** 网络表情包搜索：`items` 是第三方图片地址，通过 `/stickers/image` 同源中转展示。 */
 export type StickerSearchResult = {
   keyword: string
   page: number
