@@ -24,10 +24,9 @@ import { useToast } from '../composables/useToast'
 import { useChatStore } from '../stores/chat'
 import { useAuthStore } from '../stores/auth'
 import { useMomentsStore } from '../stores/moments'
-import type { Attachment, ChatMessage, Conversation } from '../types/chat'
-import { parseJson, sameId, api, ApiError, type ConversationCard, type Id, type MessageView, type MessagePage } from '../api/client'
-import { clockTime, conversationPreview, humanBytes, initialsOf, listTime, toneOf, toneOfConversation } from '../utils/present'
-import { decodeMessageContent } from '../utils/message'
+import type { ChatMessage, Conversation } from '../types/chat'
+import { api, ApiError, type Id, type MessagePage } from '../api/client'
+import { buildChatMessages, buildConversations, toConversation } from '../utils/chatView'
 
 const route = useRoute()
 const router = useRouter()
@@ -90,53 +89,19 @@ const view = computed(() => {
   return 'chat'
 })
 
-function timeOfCard(card: { lastMessageAt: string | null; updatedAt: string }): number {
-  return new Date(card.lastMessageAt ?? card.updatedAt).getTime() || 0
-}
-
-const sortedCards = computed(() =>
-  [...chat.visibleCards].sort((a, b) => {
-    const pinnedA = chat.pinnedIds.includes(a.conversationId) ? 1 : 0
-    const pinnedB = chat.pinnedIds.includes(b.conversationId) ? 1 : 0
-    if (pinnedA !== pinnedB) return pinnedB - pinnedA
-    return timeOfCard(b) - timeOfCard(a)
-  }),
-)
-
-function presenceOf(card: ConversationCard): Conversation['presence'] {
-  if (card.type !== 'PRIVATE') return 'offline'
-  const peer = chat.members[card.conversationId]?.find(
-    (member) => !sameId(member.userId, chat.myId),
-  )
-  return peer?.online ? 'online' : 'offline'
-}
-
-function toConversation(card: ConversationCard): Conversation {
-  const group = card.type === 'GROUP'
+/** 会话列表/详情的用户上下文：置顶、免打扰、在线状态都来自 store。 */
+function conversationOptions() {
   return {
-    id: card.conversationId,
-    name: card.title,
-    initials: initialsOf(card.title),
-    kind: group ? 'group' : 'direct',
-    tone: toneOfConversation(card),
-    presence: presenceOf(card),
-    unread: card.unreadCount,
-    time: listTime(card.lastMessageAt ?? card.updatedAt),
-    preview: conversationPreview(
-      group ? 'group' : 'direct',
-      card.lastMessageType === 'SYSTEM' ? '' : card.lastMessagePreview,
-      card.lastMessageSenderName,
-      sameId(card.lastMessageSenderId ?? '', auth.user?.userId ?? ''),
-    ),
-    members: card.memberCount,
-    context: group ? `群聊 · ${card.memberCount} 位成员` : '单聊',
-    pinned: chat.pinnedIds.includes(card.conversationId),
-    muted: chat.mutedIds.includes(card.conversationId),
-    peerId: card.type === 'PRIVATE' && card.peerUserId ? String(card.peerUserId) : undefined,
+    myId: auth.user?.userId,
+    pinnedIds: chat.pinnedIds,
+    mutedIds: chat.mutedIds,
+    membersOf: (conversationId: string) => chat.members[conversationId],
   }
 }
 
-const conversations = computed<Conversation[]>(() => sortedCards.value.map(toConversation))
+const conversations = computed<Conversation[]>(() =>
+  buildConversations(chat.visibleCards, conversationOptions()),
+)
 
 /**
  * 当前打开但被「不显示」的会话：聊天列表里没有它，
@@ -146,7 +111,7 @@ const activeHiddenConversation = computed<Conversation | null>(() => {
   const id = chat.activeId
   if (!id || conversations.value.some((item) => item.id === id)) return null
   const card = chat.cards.find((item) => item.conversationId === id)
-  return card ? toConversation(card) : null
+  return card ? toConversation(card, conversationOptions()) : null
 })
 
 const activeCard = computed(() => chat.activeCard)
@@ -159,116 +124,12 @@ const activeMembers = computed(() =>
   chat.activeId ? chat.members[chat.activeId] ?? [] : [],
 )
 
-/** 消息类型 → 附件种类；非附件消息返回 undefined。 */
-function attachmentKindOf(type: string): Attachment['kind'] | undefined {
-  if (type === 'IMAGE') return 'image'
-  if (type === 'VIDEO') return 'video'
-  if (type === 'AUDIO') return 'audio'
-  if (type === 'FILE') return 'file'
-  return undefined
-}
-
-function attachmentOf(item: MessageView): Attachment | undefined {
-  if (item.recalled) return undefined
-  const kind = attachmentKindOf(item.type)
-  if (!kind) return undefined
-  const content = decodeMessageContent(item.content, item.contentEncoding)
-  try {
-    const data = parseJson<{
-      fileId?: Id
-      fileName?: string
-      name?: string
-      sizeBytes?: number
-      width?: number
-      height?: number
-      contentType?: string
-      coverFileId?: Id
-      thumbnailFileId?: Id
-      durationSeconds?: number
-    }>(content)
-    const fileId = data.fileId ? String(data.fileId) : undefined
-    const name = data.fileName || data.name || `文件 ${fileId || ''}`.trim()
-    const poster = data.coverFileId ?? data.thumbnailFileId
-    return {
-      name,
-      size: humanBytes(Number(data.sizeBytes ?? 0)),
-      kind,
-      fileId,
-      width: Number(data.width) || undefined,
-      height: Number(data.height) || undefined,
-      posterId: poster ? String(poster) : undefined,
-      duration: Number(data.durationSeconds) || undefined,
-      contentType: data.contentType,
-      animated: kind === 'image' && (data.contentType ?? '').toLowerCase() === 'image/gif',
-    }
-  } catch {
-    return {
-      name: kind === 'image' ? '图片' : kind === 'video' ? '视频' : kind === 'audio' ? '语音' : '文件',
-      size: '',
-      kind,
-    }
-  }
-}
-
-function authorOf(item: MessageView): string {
-  if (sameId(item.senderId, chat.myId)) return '我'
-  if (activeCard.value?.type === 'GROUP') {
-    const member = activeMembers.value.find((entry) => sameId(entry.userId, item.senderId))
-    return member ? member.remark?.trim() || member.nickname : `成员 ${item.senderId}`
-  }
-  return activeCard.value?.title ?? '对方'
-}
-
-/** 引用块显示被引用消息的发送者：单聊里只有「我 / 对方」。 */
-function senderNameOf(id: Id): string {
-  if (sameId(id, chat.myId)) return '我'
-  if (activeCard.value?.type === 'GROUP') {
-    const member = activeMembers.value.find((entry) => sameId(entry.userId, id))
-    return member ? member.remark?.trim() || member.nickname : `成员 ${id}`
-  }
-  return activeCard.value?.title ?? '对方'
-}
-
-function replyOf(item: MessageView): ChatMessage['replyTo'] {
-  if (!item.replyToId || !item.replyPreview) return null
-  return {
-    messageId: String(item.replyToId),
-    author: senderNameOf(item.replySenderId ?? ''),
-    preview: item.replyPreview,
-  }
-}
-
 const messages = computed<ChatMessage[]>(() =>
-  chat.activeMessages.map((item) => {
-    const mine = sameId(item.senderId, chat.myId)
-    const author = authorOf(item)
-    const peerReadSeq = chat.peerReadSeq(item.conversationId)
-    const attachment = attachmentOf(item)
-    return {
-      id: String(item.messageId),
-      author,
-      initials: mine ? '我' : initialsOf(author),
-      tone: mine ? 'jade' : toneOf(item.senderId),
-      side: mine ? 'out' : 'in',
-      time: clockTime(item.createdAt),
-      text: item.recalled
-        ? '消息已撤回'
-        : decodeMessageContent(item.content, item.contentEncoding),
-      attachment,
-      image: attachment?.kind === 'image',
-      read: mine && !!peerReadSeq && item.seq <= peerReadSeq,
-      recalled: !!item.recalled,
-      messageId: String(item.messageId),
-      clientMsgId: item.clientMsgId ?? null,
-      senderId: String(item.senderId),
-      type: item.type,
-      raw: decodeMessageContent(item.content, item.contentEncoding),
-      seq: item.seq,
-      mine,
-      createdAt: item.createdAt,
-      pending: item.pending,
-      replyTo: replyOf(item),
-    }
+  buildChatMessages(chat.activeMessages, {
+    myId: chat.myId,
+    conversation: activeCard.value,
+    members: activeMembers.value,
+    peerReadSeq: (conversationId) => chat.peerReadSeq(conversationId),
   }),
 )
 

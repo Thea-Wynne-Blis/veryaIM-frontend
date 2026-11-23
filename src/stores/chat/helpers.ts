@@ -1,4 +1,5 @@
-import { api, type ConversationCard, type Id, type MessagePage, type MessageView } from '../../api/client'
+import { api, type ConversationCard, type MessagePage, type MessageView } from '../../api/client'
+import type { ChatMember } from '../../utils/member'
 import { decodeBase64Text } from '../../utils/message'
 
 /** 每次拉消息的页大小。 */
@@ -19,21 +20,9 @@ export const MEMBERS_TTL_MS = 30_000
 /** 超过这个大小的图片不再把本地预览塞进缓存，避免几十张原图把内存顶爆。 */
 export const SEED_PREVIEW_MAX_BYTES = 3 * 1024 * 1024
 
-export type ChatMember = {
-  userId: Id
-  nickname: string
-  /** 我给这个成员设的好友备注；展示名优先用它 */
-  remark?: string | null
-  avatar?: string | null
-  online?: boolean
-  role?: string
-}
-
-/** 群成员在界面上的显示名：好友备注优先，没设备注才用群昵称。 */
-export function memberDisplayName(member: Pick<ChatMember, 'nickname' | 'remark'>): string {
-  const remark = member.remark?.trim()
-  return remark ? remark : member.nickname
-}
+// 成员模型与展示名和界面转换共用一份实现，这里只做兼容导出。
+export type { ChatMember } from '../../utils/member'
+export { memberDisplayName } from '../../utils/member'
 
 /** 上传统计：准备 / 上传 / 发送，供输入区渲染进度条。 */
 export type UploadTask = {
