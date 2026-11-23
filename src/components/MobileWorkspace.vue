@@ -12,8 +12,6 @@ import {
   Paperclip,
   Smile,
   AtSign,
-  CheckCheck,
-  Check,
   Loader2,
   Copy,
   Languages,
@@ -32,7 +30,7 @@ import {
 import AppAvatar from './AppAvatar.vue'
 import ContactsView from './ContactsView.vue'
 import MeView from './MeView.vue'
-import MessageAttachment from './MessageAttachment.vue'
+import MessageContent from './MessageContent.vue'
 import EmojiPanel from './EmojiPanel.vue'
 import DetailPanel from './DetailPanel.vue'
 import FavoritesView from './FavoritesView.vue'
@@ -792,60 +790,16 @@ onBeforeUnmount(() => {
             @pointercancel="cancelPress"
             @contextmenu.prevent
           >
-            <span v-if="!grouped && message.side === 'in'" class="msg-author">
-              {{ message.author }}
-            </span>
-            <div class="msg-body">
-              <div class="msg-avatar-slot">
-                <button
-                  v-if="!grouped"
-                  class="avatar-btn"
-                  type="button"
-                  :aria-label="`查看 ${message.author} 的资料`"
-                  @click.stop="openProfile(message.senderId, $event)"
-                >
-                  <AppAvatar
-                    :initials="message.initials"
-                    :tone="message.tone"
-                    :src="userAvatarSrc(message.senderId)"
-                    size="sm"
-                  />
-                </button>
-              </div>
-              <div class="msg-main">
-                <div v-if="message.replyTo" class="m-quote" @click.stop="locateMessage(message.replyTo.messageId)">
-                  <span class="m-quote-author">{{ message.replyTo.author }}</span>
-                  <span class="m-quote-text">{{ message.replyTo.preview }}</span>
-                </div>
-                <MessageAttachment
-                  v-if="message.attachment && !message.recalled"
-                  :attachment="message.attachment"
-                />
-                <div v-else class="bubble" :class="{ recalled: message.recalled }">
-                  {{ message.text }}
-                </div>
-                <div v-if="translationOf(message)" class="bubble m-translation">
-                  <span class="m-translation-head">
-                    <Languages :size="10" :stroke-width="2.2" />
-                    译文 · {{ translateLabel }}
-                  </span>
-                  <span>{{ translationOf(message)?.text }}</span>
-                </div>
-                <div v-else-if="translatingId === midOf(message)" class="bubble m-translation pending">
-                  <Loader2 :size="11" class="spin" />
-                  翻译中…
-                </div>
-                <div class="msg-foot">
-                  <span class="num">{{ message.time }}</span>
-                  <template v-if="message.side === 'out'">
-                    <span class="tick" :class="message.read ? 'read' : 'sent'">
-                      <CheckCheck v-if="message.read" :size="11" :stroke-width="2.4" />
-                      <Check v-else :size="11" :stroke-width="2.4" />
-                    </span>
-                  </template>
-                </div>
-              </div>
-            </div>
+            <MessageContent
+              :message="message"
+              :grouped="grouped"
+              variant="mobile"
+              :translate-label="translateLabel"
+              :translation="translationOf(message)"
+              :translating="translatingId === midOf(message)"
+              @locate="locateMessage"
+              @profile="openProfile"
+            />
           </div>
           </template>
           <p v-if="loading && !currentMessages.length" :key="`l-${current.id}`" class="m-loading enter">
@@ -1019,8 +973,8 @@ onBeforeUnmount(() => {
 .m-chat-head { min-height: 60px; gap: 6px; padding: calc(env(safe-area-inset-top, 0px) + 3px) 8px 3px; background: var(--canvas); }
 .m-chat-name { font-size: 16px; font-weight: 600; }
 .m-chat-sub { font-size: 11px; }
-.m-chat .bubble { font-size: 16px; line-height: 1.6; padding: 10px 13px; overflow-wrap: anywhere; white-space: pre-wrap; }
-.m-chat .msg-main { min-width: 0; }
+.m-chat :deep(.bubble) { font-size: 16px; line-height: 1.6; padding: 10px 13px; overflow-wrap: anywhere; white-space: pre-wrap; }
+.m-chat :deep(.msg-main) { min-width: 0; }
 .m-chat :deep(.bubble.media) { width: min(258px, calc(100vw - 104px)); max-width: 100%; padding: 4px; }
 .m-chat :deep(.image-wrap), .m-chat :deep(.image-wrap img), .m-chat :deep(.video-player), .m-chat :deep(.media-ph) { width: 100%; max-width: 100%; }
 .m-chat :deep(.media-ph) { height: auto; }
@@ -1067,15 +1021,6 @@ onBeforeUnmount(() => {
 .m-embed :deep(.head-right) { margin-left: auto; }
 .m-embed :deep(.files-body) { padding: 16px 16px 24px; }
 
-/* 点头像 / 昵称看资料 */
-.avatar-btn {
-  display: flex;
-  padding: 0;
-  border: 0;
-  background: none;
-  cursor: pointer;
-}
-
 .m-embed {
   flex: 1;
   min-height: 0;
@@ -1101,47 +1046,11 @@ onBeforeUnmount(() => {
   color: var(--ink-3);
 }
 
-.bubble.recalled {
-  background: transparent;
-  border: 1px dashed var(--line-strong);
-  color: var(--ink-3);
-  font-size: 11.5px;
-  font-style: italic;
-}
-
-.m-quote {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  max-width: 100%;
-  margin-bottom: 4px;
-  padding: 4px 8px;
-  border-left: 2px solid var(--accent);
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--ink) 5%, transparent);
-}
-
-.m-quote-author {
-  font-size: 10px;
-  font-weight: 640;
-  color: var(--ink-2);
-}
-
-.m-quote-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 11px;
-  color: var(--ink-3);
-}
-
 /* 长按选中时不弹系统文本选择菜单 */
 .m-chat .msg {
   -webkit-touch-callout: none;
   user-select: none;
 }
-
-
 
 .m-quote-bar {
   display: flex;
@@ -1182,32 +1091,6 @@ onBeforeUnmount(() => {
   background: var(--surface-3);
   color: var(--ink-2);
   font-size: 11px;
-}
-
-.bubble.m-translation {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  margin-top: 4px;
-  border-style: dashed;
-  background: color-mix(in srgb, var(--accent) 5%, transparent);
-  font-size: 13px;
-}
-
-.bubble.m-translation.pending {
-  flex-direction: row;
-  align-items: center;
-  gap: 5px;
-  font-size: 11px;
-  color: var(--ink-3);
-}
-
-.m-translation-head {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 9.5px;
-  color: var(--ink-4);
 }
 
 .msg-menu-item:disabled {

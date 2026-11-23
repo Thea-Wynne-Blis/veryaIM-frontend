@@ -15,8 +15,6 @@ import {
   Image as ImageIcon,
   Mic,
   Send,
-  Check,
-  CheckCheck,
   Sparkles,
   Users,
   Loader2,
@@ -32,8 +30,8 @@ import {
   CircleAlert,
 } from 'lucide-vue-next'
 import AppAvatar from './AppAvatar.vue'
-import MessageAttachment from './MessageAttachment.vue'
 import EmojiPanel from './EmojiPanel.vue'
+import MessageContent from './MessageContent.vue'
 import { resetMagnet, trackMagnet, trackSpotlight } from '../composables/usePointerFx'
 import { useTranslatePrefs } from '../composables/useTranslatePrefs'
 import { useChatStore } from '../stores/chat'
@@ -508,76 +506,18 @@ watch(() => props.messages.length, () => scrollToBottom())
             @contextmenu.prevent="openMenu($event, message)"
             @click="selecting && toggleSelect(message)"
           >
-          <span v-if="!grouped && message.side === 'in'" class="msg-author">
-            {{ message.author }}
-          </span>
-
-          <div class="msg-body">
-            <div class="msg-avatar-slot">
-              <button
-                v-if="!grouped"
-                class="avatar-btn"
-                type="button"
-                :title="`查看 ${message.author} 的资料`"
-                @click="selecting ? toggleSelect(message) : openProfile(message.senderId, $event)"
-              >
-                <AppAvatar
-                  :initials="message.initials"
-                  :tone="message.tone"
-                  :src="userAvatarSrc(message.senderId)"
-                  size="sm"
-                />
-              </button>
-            </div>
-
-            <div class="msg-main">
-              <span v-if="selecting" class="msg-check">
-                <Check v-if="isSelected(message)" :size="11" :stroke-width="3.2" />
-              </span>
-
-              <button
-                v-if="message.replyTo"
-                class="quote-block"
-                type="button"
-                :title="`定位到 ${message.replyTo.author} 的消息`"
-                @click.stop="locateMessage(message.replyTo.messageId)"
-              >
-                <span class="quote-block-author">{{ message.replyTo.author }}</span>
-                <span class="quote-block-text">{{ message.replyTo.preview }}</span>
-              </button>
-
-              <MessageAttachment
-                v-if="message.attachment"
-                :attachment="message.attachment"
-              />
-
-              <div v-else-if="message.recalled" class="bubble recalled">消息已撤回</div>
-
-              <div v-else class="bubble">{{ message.text }}</div>
-
-              <div v-if="translationOf(message)" class="bubble translation">
-                <span class="translation-head">
-                  <Languages :size="11" :stroke-width="2" />
-                  译文 · {{ translateLabel }}
-                </span>
-                <span class="translation-text">{{ translationOf(message)?.text }}</span>
-              </div>
-              <div v-else-if="translatingId === midOf(message)" class="bubble translation pending">
-                <Loader2 :size="12" class="spin" />
-                翻译中…
-              </div>
-
-              <div class="msg-foot">
-                <span class="num">{{ message.time }}</span>
-                <template v-if="message.side === 'out'">
-                  <span class="tick" :class="message.read ? 'read' : 'sent'">
-                    <CheckCheck v-if="message.read" :size="12" :stroke-width="2.4" />
-                    <Check v-else :size="12" :stroke-width="2.4" />
-                  </span>
-                </template>
-              </div>
-            </div>
-          </div>
+            <MessageContent
+              :message="message"
+              :grouped="grouped"
+              :selecting="selecting"
+              :selected="isSelected(message)"
+              :translate-label="translateLabel"
+              :translation="translationOf(message)"
+              :translating="translatingId === midOf(message)"
+              @locate="locateMessage"
+              @profile="openProfile"
+              @toggle="toggleSelect"
+            />
           </div>
         </template>
 
@@ -849,23 +789,6 @@ watch(() => props.messages.length, () => scrollToBottom())
   animation: surface-rise 280ms var(--ease-out) both;
 }
 
-.avatar-btn {
-  display: flex;
-  padding: 0;
-  border: 0;
-  background: none;
-  border-radius: var(--r-full);
-  cursor: pointer;
-}
-
-.avatar-btn :deep(.avatar) {
-  transition: transform var(--dur-1) var(--ease-out);
-}
-
-.avatar-btn:hover :deep(.avatar) {
-  transform: scale(1.08);
-}
-
 .send-error {
   display: flex;
   align-items: center;
@@ -939,74 +862,6 @@ watch(() => props.messages.length, () => scrollToBottom())
   font-size: 11.5px;
 }
 
-.quote-block {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  max-width: 100%;
-  margin-bottom: 4px;
-  padding: 5px 9px;
-  border: 0;
-  border-left: 2px solid var(--accent);
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--ink) 4%, transparent);
-  text-align: left;
-  cursor: pointer;
-  transition: background var(--dur-1) var(--ease-out);
-}
-
-.quote-block:hover {
-  background: color-mix(in srgb, var(--ink) 7%, transparent);
-}
-
-.quote-block-author {
-  font-size: 10.5px;
-  font-weight: 640;
-  color: var(--ink-2);
-}
-
-.quote-block-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 11.5px;
-  color: var(--ink-3);
-}
-
-/* 定位原消息时闪一下描边，不动画布局。 */
-
-
-/* ---------- 译文 ---------- */
-.bubble.translation {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  margin-top: 4px;
-  border-style: dashed;
-  background: color-mix(in srgb, var(--accent) 5%, transparent);
-}
-
-.translation-head {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 10px;
-  color: var(--ink-4);
-}
-
-.translation-text {
-  font-size: 13px;
-  line-height: 1.6;
-}
-
-.bubble.translation.pending {
-  flex-direction: row;
-  align-items: center;
-  gap: 6px;
-  color: var(--ink-3);
-  font-size: 11.5px;
-}
-
 .msg-menu-item:disabled {
   color: var(--ink-4);
   cursor: not-allowed;
@@ -1026,12 +881,6 @@ watch(() => props.messages.length, () => scrollToBottom())
   padding: 28px 12px;
   color: var(--ink-3);
   font-size: 12px;
-}
-
-.bubble.recalled {
-  color: var(--ink-3);
-  font-style: italic;
-  background: var(--surface-3);
 }
 
 .spin {
