@@ -9,6 +9,7 @@ import { useMomentsStore } from '../../stores/moments'
 import { useToast } from '../../composables/useToast'
 import { messageOf } from '../../utils/error'
 import { initialsOf, relativeTime, toneOfPerson } from '../../utils/present'
+import { userAvatarSrc } from '../../utils/avatar'
 
 /**
  * 动态详情：完整正文 + 全部评论 + 评论/回复输入。
@@ -143,7 +144,7 @@ function replyLabel(comment: MomentComment): string {
         <article class="detail-moment">
           <header class="detail-author">
             <button type="button" class="detail-avatar" @click="openProfile($event, moment.author.userId)">
-              <AppAvatar :initials="initialsOf(name)" :tone="toneOf(moment.author.userId)" size="md" />
+              <AppAvatar :initials="initialsOf(name)" :tone="toneOf(moment.author.userId)" :src="moment.author.avatar || userAvatarSrc(moment.author.userId)" size="md" />
             </button>
             <div>
               <button type="button" class="detail-name" @click="openProfile($event, moment.author.userId)">{{ name }}</button>
@@ -178,7 +179,7 @@ function replyLabel(comment: MomentComment): string {
           <ul v-else class="detail-list">
             <li v-for="comment in visibleComments" :key="String(comment.id)" class="detail-comment">
               <button type="button" class="detail-avatar sm" @click="openProfile($event, comment.author.userId)">
-                <AppAvatar :initials="initialsOf(authorName(comment.author))" :tone="toneOf(comment.author.userId)" size="sm" />
+                <AppAvatar :initials="initialsOf(authorName(comment.author))" :tone="toneOf(comment.author.userId)" :src="comment.author.avatar || userAvatarSrc(comment.author.userId)" size="sm" />
               </button>
               <div class="detail-comment-body">
                 <p class="detail-comment-head">

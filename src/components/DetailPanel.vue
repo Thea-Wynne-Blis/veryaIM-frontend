@@ -9,6 +9,7 @@ import { api, type GroupModeration } from '../api/client'
 import type { ChatMember } from '../stores/chat'
 import { useAuthStore } from '../stores/auth'
 import { initialsOf, toneOfPerson } from '../utils/present'
+import { groupAvatarSrc, userAvatarSrc } from '../utils/avatar'
 import type { Conversation } from '../types/chat'
 
 const props = defineProps<{
@@ -119,6 +120,9 @@ watch(() => props.conversation.id, () => {
             :initials="conversation.initials"
             :tone="conversation.tone"
             :rounded="isGroup"
+            :src="isGroup
+              ? groupAvatarSrc(conversation.id)
+              : userAvatarSrc(conversation.peerId)"
             size="xl"
           />
         </button>
@@ -159,6 +163,7 @@ watch(() => props.conversation.id, () => {
               <AppAvatar
                 :initials="initialsOf(member.remark?.trim() || member.nickname)"
                 :tone="toneOfPerson(member.userId, myId)"
+                :src="member.avatar || userAvatarSrc(member.userId)"
                 size="sm"
                 :presence="member.online ? 'online' : 'offline'"
               />

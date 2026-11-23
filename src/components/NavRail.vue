@@ -9,6 +9,7 @@ import {
 import AppAvatar from './AppAvatar.vue'
 import { useAuthStore } from '../stores/auth'
 import { initialsOf } from '../utils/present'
+import { userAvatarSrc } from '../utils/avatar'
 
 type ViewKey = 'chat' | 'contacts' | 'moments' | 'favorites' | 'me'
 
@@ -78,7 +79,7 @@ function badgeOf(key: string): number {
     </button>
 
     <button class="rail-avatar tip" data-tip="我的账号" aria-label="我的账号" @click="go('me')">
-      <AppAvatar :initials="initialsOf(auth.user?.nickname || '我')" tone="jade" size="sm" />
+      <AppAvatar :initials="initialsOf(auth.user?.nickname || '我')" :src="auth.user?.avatar || userAvatarSrc(auth.user?.userId)" tone="jade" size="sm" />
     </button>
   </aside>
 </template>

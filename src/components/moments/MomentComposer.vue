@@ -15,6 +15,7 @@ import { useToast } from '../../composables/useToast'
 import { createTaskQueue } from '../../utils/async'
 import { messageOf } from '../../utils/error'
 import { initialsOf } from '../../utils/present'
+import { userAvatarSrc } from '../../utils/avatar'
 
 /**
  * 发布动态：正文 + 最多 9 个图片/视频 + 可见范围。
@@ -223,7 +224,12 @@ async function submit() {
 
       <div class="composer-body">
         <div class="composer-author">
-          <AppAvatar :initials="initialsOf(auth.user?.nickname || '我')" tone="jade" size="md" />
+          <AppAvatar
+            :initials="initialsOf(auth.user?.nickname || '我')"
+            :src="auth.user?.avatar || userAvatarSrc(auth.user?.userId)"
+            tone="jade"
+            size="md"
+          />
           <div>
             <p>{{ auth.user?.nickname || '我' }}</p>
             <span>{{ VISIBILITY_LABEL[visibility] }}</span>

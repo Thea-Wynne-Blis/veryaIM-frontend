@@ -5,6 +5,8 @@ export type GroupDetail = {
   name: string
   ownerId: Id
   memberIds: Id[]
+  /** 群头像地址；未设置时接口返回 404，前端回退到文字头像。 */
+  avatar?: string | null
   createdAt?: string
   updatedAt?: string
   roleInGroup?: GroupRole | null

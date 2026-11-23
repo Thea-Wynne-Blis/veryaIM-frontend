@@ -11,6 +11,7 @@ import { api, ApiError, type Id } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import { useChatStore } from '../stores/chat'
 import { initialsOf, toneOfPerson } from '../utils/present'
+import { userAvatarSrc } from '../utils/avatar'
 
 /**
  * 统一的用户资料卡：好友、陌生人、自己三种形态共用一套展示。
@@ -296,6 +297,7 @@ watch([card, loading], () => {
             <AppAvatar
               :initials="initialsOf(displayName)"
               :tone="toneOfPerson(avatarSeed, auth.user?.userId)"
+              :src="card?.avatar || props.fallback?.avatar || userAvatarSrc(card?.userId ?? props.userId)"
               size="xl"
             />
             <span v-if="card?.online" class="online-dot" title="在线" />

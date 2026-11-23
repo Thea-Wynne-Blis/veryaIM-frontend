@@ -512,6 +512,33 @@ export const useChatStore = defineStore('chat', {
     },
 
     /**
+     * 发送表情包：本质是一条 IMAGE 消息，只是列表预览显示「[表情]」。
+     *
+     * <p>文件已由服务端从第三方站点下载入库，fileId 归属当前用户，
+     * 因此能通过 IMAGE 消息策略的归属校验。</p>
+     */
+    async sendSticker(file: {
+      fileId: number
+      name: string
+      contentType: string
+      sizeBytes: number
+      width?: number
+      height?: number
+    }, conversationId?: string) {
+      const payload: Record<string, unknown> = {
+        fileId: file.fileId,
+        fileName: file.name,
+        sizeBytes: file.sizeBytes,
+        contentType: file.contentType,
+      }
+      if (file.width && file.height) {
+        payload.width = file.width
+        payload.height = file.height
+      }
+      return this.sendRaw('IMAGE', JSON.stringify(payload), '[表情]', conversationId)
+    },
+
+    /**
      * 转发：把原消息的 type + 原始 content 再发到目标会话。
      * 后端没有独立转发接口，复用发送消息（幂等由新的 clientMessageId 保证）。
      * 附件消息会携带原 fileId，后端只允许引用发送者自己的文件，

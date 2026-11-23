@@ -13,6 +13,7 @@ import { useIsMobile } from '../composables/useIsMobile'
 import { api, sameId, type Id } from '../api/client'
 import { useChatStore } from '../stores/chat'
 import { initialsOf, relativeTime, toneOf } from '../utils/present'
+import { groupAvatarSrc, userAvatarSrc } from '../utils/avatar'
 
 /** 后端 /contacts 的 friends 只有 friendId，没有 userId / username。 */
 type Friend = {
@@ -26,7 +27,7 @@ type Friend = {
   /** 成为好友的时间，后端取自 im_friend.created_at。 */
   createdAt?: string
 }
-type GroupItem = { groupId: string; name: string }
+type GroupItem = { groupId: string; name: string; avatar?: string | null }
 type Contacts = { friends: Friend[]; groups: GroupItem[]; pendingRequests: number }
 type Request = {
   requestId: number
@@ -342,7 +343,7 @@ onMounted(load)
             @click="pickFriend(f)"
           >
             <span class="avatar-wrap">
-              <AppAvatar :initials="initialsOf(f.remark || f.nickname)" :tone="toneOf(f.friendId)" size="md" />
+              <AppAvatar :initials="initialsOf(f.remark || f.nickname)" :tone="toneOf(f.friendId)" :src="f.avatar || userAvatarSrc(f.friendId)" size="md" />
               <span v-if="f.online" class="online-dot" title="在线" />
             </span>
             <span class="row-main">
@@ -385,7 +386,7 @@ onMounted(load)
             @pointermove="spot"
             @click="openGroup(g)"
           >
-            <AppAvatar :initials="initialsOf(g.name)" :tone="toneOf(g.groupId)" size="md" rounded />
+            <AppAvatar :initials="initialsOf(g.name)" :tone="toneOf(g.groupId)" :src="g.avatar || groupAvatarSrc(g.groupId)" size="md" rounded />
             <span class="row-main">
               <span class="row-name">{{ g.name }}</span>
               <span class="row-sub">群聊</span>
@@ -399,7 +400,7 @@ onMounted(load)
         <!-- 申请 -->
         <template v-else>
           <div v-for="r in requests" :key="r.requestId" class="req spot" @pointermove="spot">
-            <AppAvatar :initials="initialsOf(r.fromNickname)" :tone="toneOf(r.fromUserId)" size="md" />
+            <AppAvatar :initials="initialsOf(r.fromNickname)" :tone="toneOf(r.fromUserId)" :src="userAvatarSrc(r.fromUserId)" size="md" />
             <span class="req-main">
               <span class="row-name">{{ r.fromNickname }}</span>
               <span class="row-sub">
@@ -431,6 +432,7 @@ onMounted(load)
             <AppAvatar
               :initials="initialsOf(selected.remark || selected.nickname)"
               :tone="toneOf(selected.friendId)"
+              :src="selected.avatar || userAvatarSrc(selected.friendId)"
               size="xl"
             />
             <span v-if="selected.online" class="online-dot" title="在线" />

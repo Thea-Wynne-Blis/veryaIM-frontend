@@ -32,6 +32,7 @@ import AppAvatar from './AppAvatar.vue'
 import ContactsView from './ContactsView.vue'
 import MeView from './MeView.vue'
 import MessageAttachment from './MessageAttachment.vue'
+import StickerPicker from './StickerPicker.vue'
 import DetailPanel from './DetailPanel.vue'
 import FavoritesView from './FavoritesView.vue'
 import MomentsView from './moments/MomentsView.vue'
@@ -42,6 +43,7 @@ import { useChatStore } from '../stores/chat'
 import { useMomentsStore } from '../stores/moments'
 import type { ChatMessage, Conversation } from '../types/chat'
 import { stableMessageKey } from '../utils/message'
+import { groupAvatarSrc, userAvatarSrc } from '../utils/avatar'
 
 type ReplyRef = { messageId: string; senderId: string; preview: string }
 
@@ -100,6 +102,8 @@ const infoOpen = ref(false)
 const infoBack = ref<HTMLButtonElement | null>(null)
 const infoButton = ref<HTMLButtonElement | null>(null)
 const emojiOpen = ref(false)
+/** 表情面板两个页签：内置表情 / 搜网络表情包。 */
+const emojiTab = ref<'emoji' | 'sticker'>('emoji')
 const emojis = ['😀', '😊', '🥰', '😎', '🤔', '👍', '👏', '🙏', '🎉', '❤️', '🔥', '✅', '😂', '😭', '🙌', '💪']
 const viewportHeight = ref(window.visualViewport?.height ?? window.innerHeight)
 const scroller = ref<HTMLElement | null>(null)
@@ -649,6 +653,7 @@ onBeforeUnmount(() => {
               :tone="item.tone"
               :presence="item.presence"
               :rounded="item.kind === 'group'"
+              :src="item.kind === 'group' ? groupAvatarSrc(item.id) : userAvatarSrc(item.peerId)"
               size="lg"
             />
             <span class="m-conv-main">
@@ -771,6 +776,7 @@ onBeforeUnmount(() => {
                   <AppAvatar
                     :initials="message.initials"
                     :tone="message.tone"
+                    :src="userAvatarSrc(message.senderId)"
                     size="sm"
                   />
                 </button>
@@ -865,7 +871,32 @@ onBeforeUnmount(() => {
             <input ref="fileInput" type="file" hidden @change="onFilePicked" />
           </div>
           <div v-if="emojiOpen" id="mobile-emoji-picker" class="m-emoji-picker" role="group" aria-label="选择表情">
-            <button v-for="emoji in emojis" :key="emoji" :aria-label="`插入 ${emoji}`" @click="insertEmoji(emoji)">{{ emoji }}</button>
+            <div class="m-emoji-tabs">
+              <button
+                type="button"
+                class="m-emoji-tab"
+                :class="{ active: emojiTab === 'emoji' }"
+                @click="emojiTab = 'emoji'"
+              >
+                表情
+              </button>
+              <button
+                type="button"
+                class="m-emoji-tab"
+                :class="{ active: emojiTab === 'sticker' }"
+                @click="emojiTab = 'sticker'"
+              >
+                斗图
+              </button>
+            </div>
+            <div v-if="emojiTab === 'emoji'" class="m-emoji-grid">
+              <button v-for="emoji in emojis" :key="emoji" :aria-label="`插入 ${emoji}`" @click="insertEmoji(emoji)">{{ emoji }}</button>
+            </div>
+            <StickerPicker
+              v-else-if="current"
+              :conversation-id="current.id"
+              @sent="emojiOpen = false"
+            />
           </div>
         </div>
 
@@ -975,9 +1006,15 @@ onBeforeUnmount(() => {
 .m-input:focus { box-shadow: none; }
 .m-input:focus-visible { outline: none; }
 .m-send { min-width: 54px; width: auto; height: 44px; padding: 0 12px; border-radius: 7px; background: var(--accent); box-shadow: none; font-size: 14px; font-weight: 600; }
-.m-emoji-picker { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 3px; padding: 12px 4px 4px; }
-.m-emoji-picker button { min-height: 44px; font-size: 25px; border-radius: 8px; }
-.m-emoji-picker button:active { background: var(--surface-active); }
+.m-emoji-picker { padding: 8px 6px 4px; }
+.m-emoji-tabs { display: flex; gap: 2px; padding: 0 2px 6px; border-bottom: 1px solid var(--line); }
+.m-emoji-tab { min-height: 30px; padding: 0 12px; border-radius: 8px; font-size: 12.5px; color: var(--ink-3); }
+.m-emoji-tab.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.m-emoji-grid { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 3px; padding-top: 8px; }
+.m-emoji-grid button { min-height: 44px; font-size: 25px; border-radius: 8px; }
+.m-emoji-grid button:active { background: var(--surface-active); }
+.m-emoji-picker :deep(.sticker-picker) { width: 100%; padding-top: 8px; }
+.m-emoji-picker :deep(.sticker-body) { max-height: 42vh; }
 .m-upload { display: flex; align-items: center; gap: 8px; padding-left: 6px; font-size: 12px; color: var(--ink-3); }
 .m-upload > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
 .m-upload progress { width: 56px; height: 5px; accent-color: var(--accent); }

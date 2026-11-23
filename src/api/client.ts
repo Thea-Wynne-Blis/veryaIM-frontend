@@ -326,6 +326,20 @@ export function uploadWithProgress<T>(
   })
 }
 
+/**
+ * 小文件表单上传（头像、表情包等）：直接 POST/PUT 一个 FormData。
+ *
+ * <p>大文件请走 `uploadFile`（带进度、断点续传）；这里只处理几十 KB 的场景，
+ * 不需要进度条，也不需要分片。</p>
+ */
+export function uploadForm<T>(
+  path: string,
+  form: FormData,
+  method: 'POST' | 'PUT' = 'POST',
+): Promise<T> {
+  return request<T>(path, { method, body: form })
+}
+
 
 /* ---------- 大文件分片上传 ---------- */
 

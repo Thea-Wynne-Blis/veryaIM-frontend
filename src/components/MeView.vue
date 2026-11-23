@@ -3,11 +3,12 @@ import { computed, onMounted, ref } from 'vue'
 import { messageOf } from '../utils/error'
 import {
   LogOut, Save, Shield, Smartphone, Loader2, Trash2, User, Languages,
-  MapPin, PenLine, Moon, Sun, Star, ChevronRight,
+  MapPin, PenLine, Moon, Sun, Star, ChevronRight, Camera,
 } from 'lucide-vue-next'
 import AppAvatar from './AppAvatar.vue'
 import {
   api,
+  uploadForm,
   type DeviceInfo,
   type UserPrivacy,
   type UserProfile,
@@ -17,6 +18,7 @@ import { useChatStore } from '../stores/chat'
 import { useTranslatePrefs } from '../composables/useTranslatePrefs'
 import { useTheme } from '../composables/useTheme'
 import { initialsOf, relativeTime } from '../utils/present'
+import { squareAvatarFile, userAvatarSrc } from '../utils/avatar'
 
 withDefaults(defineProps<{ showFavorites?: boolean }>(), { showFavorites: false })
 const emit = defineEmits<{ (e: 'favorites'): void }>()
@@ -42,6 +44,11 @@ const privacyBusy = ref(false)
 const removingDevice = ref<string | null>(null)
 const message = ref('')
 const error = ref('')
+const avatarInput = ref<HTMLInputElement | null>(null)
+const avatarBusy = ref(false)
+
+/** 头像地址优先用后端返回的（带 ?v= 版本号），其次按用户 ID 推导。 */
+const avatarSrc = computed(() => profile.value?.avatar || userAvatarSrc(profile.value?.userId))
 
 /** 资料有改动才允许保存，避免无意义的请求。 */
 const profileDirty = computed(() => {
@@ -93,6 +100,20 @@ async function load() {
   }
 }
 
+/** 资料卡、输入框与登录态一起更新，避免侧栏头像和设置页不一致。 */
+function applyProfile(updated: UserProfile) {
+  profile.value = updated
+  nickname.value = updated.nickname
+  region.value = updated.region ?? ''
+  signature.value = updated.signature ?? ''
+  auth.updateUser({
+    nickname: updated.nickname,
+    avatar: updated.avatar,
+    region: updated.region,
+    signature: updated.signature,
+  })
+}
+
 /** 昵称、地区、个性签名一起提交，资料卡和设置页始终一致。 */
 async function saveProfile() {
   const name = nickname.value.trim()
@@ -105,21 +126,57 @@ async function saveProfile() {
       region: region.value.trim(),
       signature: signature.value.trim(),
     })
-    profile.value = updated
-    nickname.value = updated.nickname
-    region.value = updated.region ?? ''
-    signature.value = updated.signature ?? ''
-    auth.updateUser({
-      nickname: updated.nickname,
-      avatar: updated.avatar ?? auth.user?.avatar,
-      region: updated.region,
-      signature: updated.signature,
-    })
+    applyProfile(updated)
     flash('个人资料已保存')
   } catch (e) {
     error.value = messageOf(e, '保存失败')
   } finally {
     saving.value = false
+  }
+}
+
+function pickAvatar() {
+  if (!avatarBusy.value) avatarInput.value?.click()
+}
+
+/** 选图后在浏览器里居中裁成 512 见方并压成 JPEG，服务端只做校验与落盘。 */
+async function onAvatarPicked(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file || avatarBusy.value) return
+  if (!file.type.startsWith('image/')) {
+    error.value = '请选择图片文件'
+    return
+  }
+  avatarBusy.value = true
+  error.value = ''
+  try {
+    const cropped = await squareAvatarFile(file)
+    const form = new FormData()
+    form.append('file', cropped)
+    applyProfile(await uploadForm<UserProfile>('/users/me/avatar', form))
+    flash('头像已更新')
+  } catch (e) {
+    error.value = messageOf(e, '头像上传失败')
+  } finally {
+    avatarBusy.value = false
+  }
+}
+
+async function removeAvatar() {
+  if (avatarBusy.value) return
+  avatarBusy.value = true
+  error.value = ''
+  try {
+    await api.delete('/users/me/avatar')
+    if (profile.value) profile.value = { ...profile.value, avatar: null }
+    auth.updateUser({ avatar: null })
+    flash('头像已移除')
+  } catch (e) {
+    error.value = messageOf(e, '移除头像失败')
+  } finally {
+    avatarBusy.value = false
   }
 }
 
@@ -187,7 +244,33 @@ onMounted(load)
           <div v-if="error" class="toast-err" style="margin-bottom: 2px">{{ error }}</div>
 
           <div class="me-card hero glare">
-            <AppAvatar :initials="initialsOf(profile?.nickname || '我')" tone="jade" size="xl" />
+            <div class="hero-avatar">
+              <button
+                class="hero-avatar-btn"
+                type="button"
+                :disabled="avatarBusy"
+                :aria-label="profile?.avatar ? '更换头像' : '上传头像'"
+                @click="pickAvatar"
+              >
+                <AppAvatar
+                  :initials="initialsOf(profile?.nickname || '我')"
+                  :src="avatarSrc"
+                  tone="jade"
+                  size="xl"
+                />
+                <span class="hero-avatar-mask">
+                  <Loader2 v-if="avatarBusy" :size="16" class="spin" />
+                  <Camera v-else :size="16" :stroke-width="2" />
+                </span>
+              </button>
+              <input
+                ref="avatarInput"
+                type="file"
+                accept="image/*"
+                hidden
+                @change="onAvatarPicked"
+              />
+            </div>
             <div class="hero-text">
               <p class="hero-name">{{ profile?.nickname }}</p>
               <p class="hero-sub">@{{ profile?.username }} · ID {{ profile?.userId }}</p>
@@ -199,6 +282,15 @@ onMounted(load)
                 {{ profile?.region || '未填写地区' }}
                 <span class="dot">·</span>
                 {{ profile?.online ? '在线' : '离线' }}
+                <button
+                  v-if="profile?.avatar"
+                  class="hero-remove"
+                  type="button"
+                  :disabled="avatarBusy"
+                  @click="removeAvatar"
+                >
+                  移除头像
+                </button>
               </p>
             </div>
           </div>
@@ -395,6 +487,32 @@ onMounted(load)
 .me-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-md); padding: 14px; display: flex; flex-direction: column; gap: 10px; }
 .me-card.busy { opacity: 0.7; pointer-events: none; }
 .me-card.hero { flex-direction: row; align-items: center; gap: 14px; }
+.hero-avatar { position: relative; flex-shrink: 0; }
+.hero-avatar-btn { position: relative; display: block; border-radius: var(--r-full); }
+.hero-avatar-btn:disabled { cursor: default; }
+.hero-avatar-mask {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-full);
+  color: #fff;
+  background: rgba(8, 14, 18, 0.52);
+  opacity: 0;
+  transition: opacity var(--dur-2) var(--ease-out);
+}
+.hero-avatar-btn:hover .hero-avatar-mask,
+.hero-avatar-btn:focus-visible .hero-avatar-mask,
+.hero-avatar-btn:disabled .hero-avatar-mask { opacity: 1; }
+.hero-remove {
+  margin-left: 8px;
+  padding: 0;
+  font-size: 10.5px;
+  color: var(--ink-3);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.hero-remove:hover { color: var(--danger); }
 .hero-text { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .hero-name { font-size: 17px; font-weight: 680; letter-spacing: -0.3px; }
 .hero-sub { font-size: 11.5px; color: var(--ink-3); }

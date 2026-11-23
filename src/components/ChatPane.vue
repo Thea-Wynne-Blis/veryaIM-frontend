@@ -33,10 +33,12 @@ import {
 } from 'lucide-vue-next'
 import AppAvatar from './AppAvatar.vue'
 import MessageAttachment from './MessageAttachment.vue'
+import StickerPicker from './StickerPicker.vue'
 import { resetMagnet, trackMagnet, trackSpotlight } from '../composables/usePointerFx'
 import { useTranslatePrefs } from '../composables/useTranslatePrefs'
 import { useChatStore } from '../stores/chat'
 import type { ChatMessage, Conversation } from '../types/chat'
+import { groupAvatarSrc, userAvatarSrc } from '../utils/avatar'
 import { humanBytes } from '../utils/present'
 import { stableMessageKey } from '../utils/message'
 
@@ -129,6 +131,8 @@ const {
 
 /* ---------- 表情 ---------- */
 const emojiOpen = ref(false)
+/** 表情面板两个页签：内置表情 / 搜网络表情包。 */
+const emojiTab = ref<'emoji' | 'sticker'>('emoji')
 const emojis = ['😀', '😄', '😊', '🥰', '😎', '🤔', '👍', '👏', '🙏', '🎉', '❤️', '🔥']
 
 /** 群聊在线人数：直接数成员在线状态（由成员接口与实时刷新维护），不再按人数估算。 */
@@ -424,6 +428,9 @@ watch(() => props.messages.length, () => scrollToBottom())
             :tone="conversation.tone"
             :presence="conversation.presence"
             :rounded="conversation.kind === 'group'"
+            :src="conversation.kind === 'group'
+              ? groupAvatarSrc(conversation.id)
+              : userAvatarSrc(conversation.peerId)"
             size="sm"
           />
         </button>
@@ -510,6 +517,7 @@ watch(() => props.messages.length, () => scrollToBottom())
                 <AppAvatar
                   :initials="message.initials"
                   :tone="message.tone"
+                  :src="userAvatarSrc(message.senderId)"
                   size="sm"
                 />
               </button>
@@ -627,15 +635,42 @@ watch(() => props.messages.length, () => scrollToBottom())
         </div>
 
         <div v-if="emojiOpen" class="emoji-panel">
-          <button
-            v-for="emoji in emojis"
-            :key="emoji"
-            class="emoji"
-            type="button"
-            @click="insertEmoji(emoji)"
-          >
-            {{ emoji }}
-          </button>
+          <div class="emoji-tabs">
+            <button
+              class="emoji-tab"
+              type="button"
+              :class="{ active: emojiTab === 'emoji' }"
+              @click="emojiTab = 'emoji'"
+            >
+              表情
+            </button>
+            <button
+              class="emoji-tab"
+              type="button"
+              :class="{ active: emojiTab === 'sticker' }"
+              @click="emojiTab = 'sticker'"
+            >
+              斗图
+            </button>
+          </div>
+
+          <div v-if="emojiTab === 'emoji'" class="emoji-grid">
+            <button
+              v-for="emoji in emojis"
+              :key="emoji"
+              class="emoji"
+              type="button"
+              @click="insertEmoji(emoji)"
+            >
+              {{ emoji }}
+            </button>
+          </div>
+
+          <StickerPicker
+            v-else
+            :conversation-id="conversation.id"
+            @sent="emojiOpen = false"
+          />
         </div>
 
         <div v-if="replyTo" class="quote-bar">
@@ -1006,14 +1041,46 @@ watch(() => props.messages.length, () => scrollToBottom())
 
 .emoji-panel {
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
+  flex-direction: column;
+  gap: 6px;
   margin-bottom: 6px;
   padding: 8px;
   border-radius: var(--r-md);
   border: 1px solid var(--line);
   background: var(--surface);
   box-shadow: var(--shadow-sm);
+}
+
+.emoji-tabs {
+  display: flex;
+  gap: 2px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--line);
+}
+
+.emoji-tab {
+  height: 24px;
+  padding: 0 10px;
+  border-radius: var(--r-xs);
+  font-size: 11.5px;
+  font-weight: 560;
+  color: var(--ink-3);
+}
+
+.emoji-tab:hover {
+  background: var(--surface-hover);
+  color: var(--ink);
+}
+
+.emoji-tab.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.emoji-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
 }
 
 .emoji {

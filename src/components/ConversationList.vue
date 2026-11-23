@@ -5,6 +5,7 @@ import AppAvatar from './AppAvatar.vue'
 import { trackSpotlight } from '../composables/usePointerFx'
 import { api, type Id } from '../api/client'
 import { initialsOf, toneOfPerson } from '../utils/present'
+import { groupAvatarSrc, userAvatarSrc } from '../utils/avatar'
 import type { Conversation } from '../types/chat'
 
 const props = defineProps<{
@@ -32,7 +33,7 @@ const keyword = ref('')
 const searchInput = ref<HTMLInputElement | null>(null)
 
 /** 搜索框同时查联系人：第一次输入时懒加载好友列表 */
-type Contact = { friendId: Id; nickname: string; remark?: string | null; online?: boolean }
+type Contact = { friendId: Id; nickname: string; remark?: string | null; avatar?: string | null; online?: boolean }
 const contacts = ref<Contact[]>([])
 let contactsLoaded = false
 
@@ -260,6 +261,7 @@ onBeforeUnmount(() => {
             :tone="item.tone"
             :presence="item.presence"
             :rounded="item.kind === 'group'"
+            :src="item.kind === 'group' ? groupAvatarSrc(item.id) : userAvatarSrc(item.peerId)"
             size="md"
           />
           <span class="conv-main">
@@ -310,6 +312,7 @@ onBeforeUnmount(() => {
           :tone="item.tone"
           :presence="item.presence"
           :rounded="item.kind === 'group'"
+          :src="item.kind === 'group' ? groupAvatarSrc(item.id) : userAvatarSrc(item.peerId)"
           size="md"
         />
         <span class="conv-main">
@@ -348,6 +351,7 @@ onBeforeUnmount(() => {
             :initials="initialsOf(contactName(friend))"
             :tone="toneOfPerson(friend.friendId)"
             :presence="friend.online ? 'online' : 'offline'"
+            :src="friend.avatar || userAvatarSrc(friend.friendId)"
             size="md"
           />
           <span class="conv-main">

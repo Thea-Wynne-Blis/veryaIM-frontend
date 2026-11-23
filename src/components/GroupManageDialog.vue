@@ -4,7 +4,7 @@ import { messageOf } from '../utils/error'
 import { useToast } from '../composables/useToast'
 import {
   X, Loader2, Users, Megaphone, Shield, UserMinus, Crown,
-  BellOff, Bell, LogOut, Trash2, Save, UserPlus, UserCheck, Clock, Check,
+  BellOff, Bell, LogOut, Trash2, Save, UserPlus, UserCheck, Clock, Check, Camera,
 } from 'lucide-vue-next'
 import AppAvatar from './AppAvatar.vue'
 import UserProfileDialog from './UserProfileDialog.vue'
@@ -15,10 +15,11 @@ import {
   type GroupModeration,
   type GroupMuteDuration,
 } from '../api/groups'
-import { ApiError, api, type Id } from '../api/client'
+import { ApiError, api, uploadForm, type Id } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import { useChatStore } from '../stores/chat'
 import { initialsOf, toneOfPerson } from '../utils/present'
+import { groupAvatarSrc, squareAvatarFile, userAvatarSrc } from '../utils/avatar'
 
 const props = defineProps<{ open: boolean; groupId: string | null }>()
 const emit = defineEmits<{
@@ -63,6 +64,63 @@ const isOwner = computed(
 )
 const isAdmin = computed(() => !isOwner.value && role.value === 'ADMIN')
 const canManage = computed(() => isOwner.value || isAdmin.value)
+
+/* ---------- 群头像 ---------- */
+const avatarInput = ref<HTMLInputElement | null>(null)
+/** 上传后加一个版本号，绕过浏览器对旧头像的短缓存。 */
+const avatarVersion = ref(0)
+const avatarBusy = computed(() => busy.value === 'avatar')
+const avatarSrc = computed(() =>
+  groupAvatarSrc(props.groupId, avatarVersion.value || undefined),
+)
+
+function pickGroupAvatar() {
+  if (canManage.value && !avatarBusy.value) avatarInput.value?.click()
+}
+
+async function onGroupAvatarPicked(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  const groupId = props.groupId
+  if (!file || !groupId || avatarBusy.value) return
+  if (!file.type.startsWith('image/')) {
+    error.value = '请选择图片文件'
+    return
+  }
+  busy.value = 'avatar'
+  error.value = ''
+  try {
+    const cropped = await squareAvatarFile(file)
+    const form = new FormData()
+    form.append('file', cropped)
+    detail.value = await uploadForm<GroupDetail>(`/groups/${groupId}/avatar`, form, 'PUT')
+    avatarVersion.value = Date.now()
+    flash('群头像已更新')
+    emit('changed')
+  } catch (e) {
+    error.value = messageOf(e, '群头像上传失败')
+  } finally {
+    busy.value = ''
+  }
+}
+
+async function removeGroupAvatar() {
+  const groupId = props.groupId
+  if (!groupId || busy.value) return
+  busy.value = 'avatar'
+  error.value = ''
+  try {
+    detail.value = await api.delete<GroupDetail>(`/groups/${groupId}/avatar`)
+    avatarVersion.value = 0
+    flash('群头像已移除')
+    emit('changed')
+  } catch (e) {
+    error.value = messageOf(e, '移除群头像失败')
+  } finally {
+    busy.value = ''
+  }
+}
 
 const MUTE_OPTIONS: { value: GroupMuteDuration; label: string }[] = [
   { value: 'MUTE_7M', label: '禁言 7 分钟' },
@@ -380,6 +438,53 @@ onBeforeUnmount(() => {
         <div v-else class="dialog-body">
           <p v-if="error" class="dialog-error">{{ error }}</p>
 
+          <!-- 群头像 -->
+          <section class="block">
+            <p class="block-label">群头像</p>
+            <div class="avatar-row">
+              <button
+                class="group-avatar-btn"
+                type="button"
+                :disabled="!canManage || avatarBusy"
+                :aria-label="canManage ? '更换群头像' : '群头像'"
+                @click="pickGroupAvatar"
+              >
+                <AppAvatar
+                  :initials="initialsOf(detail?.name || '群')"
+                  :src="avatarSrc"
+                  tone="jade"
+                  size="xl"
+                  rounded
+                />
+                <span v-if="canManage" class="group-avatar-mask">
+                  <Loader2 v-if="avatarBusy" :size="16" class="spin" />
+                  <Camera v-else :size="16" :stroke-width="2" />
+                </span>
+              </button>
+              <div class="avatar-hint">
+                <p class="block-hint">
+                  {{ canManage ? '点击头像上传，自动裁成正方形' : '群主和管理员可以修改群头像' }}
+                </p>
+                <button
+                  v-if="canManage"
+                  class="mini-btn"
+                  type="button"
+                  :disabled="avatarBusy"
+                  @click="removeGroupAvatar"
+                >
+                  移除群头像
+                </button>
+              </div>
+            </div>
+            <input
+              ref="avatarInput"
+              type="file"
+              accept="image/*"
+              hidden
+              @change="onGroupAvatarPicked"
+            />
+          </section>
+
           <!-- 群名称 -->
           <section class="block">
             <p class="block-label">群名称</p>
@@ -449,7 +554,7 @@ onBeforeUnmount(() => {
                   :title="`查看 ${nameOf(m)} 的资料`"
                   @click="openProfile(m, $event)"
                 >
-                  <AppAvatar :initials="initialsOf(nameOf(m))" :tone="toneOfPerson(m.userId, auth.user?.userId)" size="sm" />
+                  <AppAvatar :initials="initialsOf(nameOf(m))" :tone="toneOfPerson(m.userId, auth.user?.userId)" :src="m.avatar || userAvatarSrc(m.userId)" size="sm" />
                   <span class="member-main">
                     <span class="member-name">
                       {{ nameOf(m) }}
@@ -653,6 +758,25 @@ onBeforeUnmount(() => {
 .block-label { display: flex; align-items: center; gap: 5px; font-size: 10px; font-weight: 660; letter-spacing: 0.09em; text-transform: uppercase; color: var(--ink-3); }
 .block-hint { font-size: 11px; color: var(--ink-4); margin-top: 2px; }
 .inline-row { display: flex; align-items: center; gap: 6px; }
+.avatar-row { display: flex; align-items: center; gap: 14px; }
+.avatar-hint { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0; }
+.group-avatar-btn { position: relative; flex-shrink: 0; border-radius: var(--r-md); }
+.group-avatar-btn:disabled { cursor: default; }
+.group-avatar-mask {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-md);
+  color: #fff;
+  background: rgba(8, 14, 18, 0.52);
+  opacity: 0;
+  transition: opacity var(--dur-2) var(--ease-out);
+}
+.group-avatar-btn:hover .group-avatar-mask,
+.group-avatar-btn:focus-visible .group-avatar-mask,
+.group-avatar-btn:disabled .group-avatar-mask { opacity: 1; }
+.group-avatar-btn :deep(.avatar) { box-shadow: var(--shadow-xs); }
 .field-input { flex: 1; height: 34px; padding: 0 11px; border-radius: var(--r-sm); background: var(--surface-3); border: 1px solid transparent; font-size: 13px; }
 .field-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); background: var(--surface); }
 .field-input:disabled { color: var(--ink-3); }
