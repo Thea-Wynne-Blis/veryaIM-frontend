@@ -15,12 +15,10 @@
 
 首次使用在登录页点「注册」创建账号即可。
 
-运营后台默认账号（首次启动自动创建）：
-
-```text
-用户名：platform_admin
-密码：  Veryal@2026
-```
+运营后台账号在 `/home/ubuntu/veryal/backend/veryal.env` 的
+`VERYAL_PLATFORM_BOOTSTRAP_USERNAME` / `VERYAL_PLATFORM_BOOTSTRAP_PASSWORD` 里，
+**仅在后端首次启动创建管理员时生效**；之后改这两项不会重置已存在的账号。
+忘记密码时用另一个管理员调 `POST /api/v1/platform/admins/{id}/password` 重置。
 
 ---
 
@@ -34,7 +32,7 @@ Nginx（系统服务）
   ├── /            → /home/ubuntu/veryal/web   前端静态文件
   ├── /api/        → 127.0.0.1:8080            Spring Boot
   ├── /ws          → 127.0.0.1:8080            WebSocket（Upgrade）
-  └── /actuator/   → 127.0.0.1:8080            健康检查
+  └── /actuator/health → 127.0.0.1:8080        健康检查（其余 /actuator/* 一律 403）
                           │
         ┌─────────────────┼─────────────────┐
         ▼                 ▼                 ▼
@@ -51,8 +49,15 @@ Docker 只负责数据中间件，Nginx 与后端都跑在宿主机。
 ```text
 /home/ubuntu/veryal/              部署根目录（属主 ubuntu）
 ├── backend/
-│   ├── veryal-bootstrap.jar      后端程序
-│   └── veryal.env                运行时环境变量（root 所有，0644）
+│   └── veryal-bootstrap.jar      后端程序
+├── config/                       运行时配置（只改 .env）
+│   ├── .env                      真实值，0600，不提交
+│   ├── .env.example              样例
+│   ├── application-local.yaml    由下面的脚本生成，0600，不提交
+│   ├── application-local.yaml.example
+│   ├── render-config.sh          .env → application-local.yaml
+│   ├── start.sh                  渲染 + 导出环境变量 + 启动 jar
+│   └── README.md
 ├── web/                          前端静态文件（www-data 所有）
 ├── bin/
 │   └── *.sh                      运维脚本（status / start-up / stop / restart / logs / health）
@@ -63,7 +68,7 @@ Docker 只负责数据中间件，Nginx 与后端都跑在宿主机。
     └── vapid-keys.json           Web Push 密钥（开启后生成）
 
 /etc/nginx/sites-available/veryal.conf     站点配置（root 指向 /home/ubuntu/veryal/web）
-/etc/systemd/system/veryal-backend.service 后端服务
+/etc/systemd/system/veryal-backend.service 后端服务（ExecStart=/home/ubuntu/veryal/config/start.sh）
 ```
 
 > 早期版本使用的 `/opt/veryal`、`/var/www/veryal` 已废弃；`install.sh` 重装时会自动清除。
@@ -149,13 +154,19 @@ ssh ubuntu@82.157.47.151 'rm -rf /tmp/veryal-upload && mkdir -p /tmp/veryal-uplo
   && bash /tmp/veryal-upload/install.sh'
 ```
 
-`install.sh` 是幂等的：重跑会覆盖程序与配置、重建 systemd 与 nginx 站点、重启服务。
+`install.sh` 是幂等的：重跑会覆盖程序、脚本与 nginx/systemd 配置、重启服务，
+但**不会覆盖**服务器上的 `config/.env`（密钥只在本机与服务器上）。
 
 ---
 
 ## 六、配置项
 
-全部集中在 `/home/ubuntu/veryal/backend/veryal.env`，改动后 `sudo systemctl restart veryal-backend`。
+全部集中在 `/home/ubuntu/veryal/config/.env`（0600，不进版本库）。改完
+`sudo systemctl restart veryal-backend`，`config/start.sh` 会重新渲染
+`application-local.yaml` 并带上 `prod,local` 两个 profile 启动，不需要重新打包。
+
+模板见 `deploy/config/.env.example` 与 `deploy/config/application-local.yaml.example`：
+新增配置项时先在 `.env.example` 加一行，再在 yaml 模板里用 `${KEY:default}` 引用。
 
 | 变量 | 说明 |
 |---|---|
@@ -216,6 +227,9 @@ sudo systemctl daemon-reload && sudo systemctl restart veryal-backend
 5. **首次启动较慢**：Flyway 迁移到 V23 约 20–30 秒，期间 `/actuator/health` 不可用属正常。
 6. **实时消息为 WebSocket 长连接**：前端先 `POST /api/v1/auth/ws-ticket` 换一次性 ticket，再连 `/ws?ticket=...&format=json`；Nginx 需对 `/ws` 开启 Upgrade 头透传与长连接超时。低频轮询仅作兜底。
 7. **中文编码**：JSON 接口未声明 charset，浏览器按 UTF-8 解析正常；非浏览器客户端（如 PowerShell 的 `Invoke-RestMethod`）可能按 Latin-1 解码出现乱码，属客户端问题。
+8. **敏感信息**：`deploy/veryal.env` 只存在服务器与本机（已加入 `.gitignore`），仓库内只保留 `deploy/veryal.env.example` 模板。
+9. **接口文档**：生产默认关闭 springdoc（`/v3/api-docs`、`/swagger-ui` 不走 `/api/v1` 鉴权）。临时需要时设 `VERYAL_OPENAPI_ENABLED=true` 并重启后端。
+10. **限流取真实 IP**：Nginx 用 `$remote_addr` **覆盖** `X-Forwarded-For`，防止客户端伪造首段地址绕过登录限流。
 
 ---
 
@@ -231,8 +245,8 @@ sudo tail -100 /home/ubuntu/veryal/logs/error.log
 curl -s http://127.0.0.1:8080/actuator/health
 curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8899/api/v1/auth/login
 
-# 数据库连通性
-docker exec veryal-mysql mysql -uveryal -pveryal123 -e 'select 1' veryal_im
+# 数据库连通性（密码见 backend/veryal.env）
+docker exec veryal-mysql mysql -uveryal -p"$(sudo grep '^VERYAL_DB_PASSWORD=' /home/ubuntu/veryal/backend/veryal.env | cut -d= -f2-)" -e 'select 1' veryal_im
 
 # Nginx 配置
 sudo nginx -t

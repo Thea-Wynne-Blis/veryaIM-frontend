@@ -50,7 +50,7 @@ echo
 echo "──── 入口 ────"
 printf '页面   HTTP %s\n' "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:${WEB_PORT}/ || echo 000)"
 printf 'API    HTTP %s\n' "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:${WEB_PORT}/api/v1/auth/login || echo 000)"
-printf 'Swagger HTTP %s\n' "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:${WEB_PORT}/swagger-ui/index.html || echo 000)"
+printf '健康   HTTP %s\n' "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:${WEB_PORT}/actuator/health || echo 000)"
 
 echo
 echo "──── 日志体积 ────"

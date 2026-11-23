@@ -33,12 +33,16 @@ if [ -z "$H" ]; then
 fi
 echo "backend  $H"
 
-for path in "/" "/api/v1/auth/login" "/swagger-ui/index.html" "/v3/api-docs"; do
+for path in "/" "/api/v1/auth/login" "/actuator/health"; do
   code=$(curl -s -o /dev/null -m 5 -w '%{http_code}' "http://127.0.0.1:${WEB_PORT}${path}")
   printf '%-28s %s\n' "$path" "$code"
 done
 
 echo
 echo "数据库:"
-docker exec veryal-mysql mysql -uveryal -pveryal123 -N -e 'select 1' veryal_im 2>/dev/null \
+DB_PASS="$(awk -F= '/^VERYAL_DB_PASSWORD=/{sub(/^[^=]*=/, ""); gsub(/^["\x27]|["\x27]$/, ""); print; exit}' \
+  "${APP_HOME}/config/.env" 2>/dev/null)"
+DB_USER="$(awk -F= '/^VERYAL_DB_USER=/{sub(/^[^=]*=/, ""); gsub(/^["\x27]|["\x27]$/, ""); print; exit}' \
+  "${APP_HOME}/config/.env" 2>/dev/null)"
+docker exec veryal-mysql mysql -u"${DB_USER:-veryal}" -p"${DB_PASS:-veryal}" -N -e 'select 1' veryal_im 2>/dev/null \
   | head -1 | sed 's/^1$/  OK 可连接/' || echo "  连接失败"

@@ -1,0 +1,68 @@
+# ============================================================
+# application-local.yaml 模板
+#
+# 不要直接改 application-local.yaml：它由 config/render-config.sh
+# 根据 config/.env 生成（每次启动都会重新生成）。
+# 需要改配置请改 .env，或直接改本模板。
+#
+# 占位符两种写法都支持：
+#   ${KEY:default}  .env 里有 KEY 就替换，没有就保留原样交给 Spring，用 default；
+#   ${KEY}          .env 里有 KEY 就替换，没有就保留原样，交给 Spring 从环境变量读。
+# 这样 .env 只写想覆盖的项，其余沿用 application.yml 里的默认值。
+# ============================================================
+
+spring:
+  datasource:
+    url: "${VERYAL_DB_URL:jdbc:mysql://127.0.0.1:3306/veryal_im?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC}"
+    username: "${VERYAL_DB_USER:veryal}"
+    password: "${VERYAL_DB_PASSWORD:veryal}"
+  data:
+    redis:
+      host: "${SPRING_DATA_REDIS_HOST:127.0.0.1}"
+      port: "${SPRING_DATA_REDIS_PORT:6379}"
+  rabbitmq:
+    host: "${SPRING_RABBITMQ_HOST:127.0.0.1}"
+    port: "${SPRING_RABBITMQ_PORT:5672}"
+    username: "${SPRING_RABBITMQ_USERNAME:veryal}"
+    password: "${SPRING_RABBITMQ_PASSWORD:veryal}"
+
+veryal:
+  node-id: "${VERYAL_NODE_ID:1}"
+  security:
+    token:
+      secret: "${VERYAL_TOKEN_SECRET}"
+  redis:
+    enabled: "${VERYAL_REDIS_ENABLED:true}"
+  mq:
+    enabled: "${VERYAL_MQ_ENABLED:false}"
+  realtime:
+    fanout:
+      threads: "${VERYAL_REALTIME_FANOUT_THREADS:2}"
+  storage:
+    type: "${VERYAL_STORAGE_TYPE:local}"
+    local:
+      root-path: "${VERYAL_STORAGE_LOCAL_ROOT:./data/files}"
+  upload:
+    staging-path: "${VERYAL_UPLOAD_STAGING:./data/uploads}"
+  platform:
+    token-secret: "${VERYAL_PLATFORM_TOKEN_SECRET:}"
+    bootstrap-username: "${VERYAL_PLATFORM_BOOTSTRAP_USERNAME:}"
+    bootstrap-password: "${VERYAL_PLATFORM_BOOTSTRAP_PASSWORD:}"
+  push:
+    web-push:
+      enabled: "${VERYAL_PUSH_WEB_PUSH_ENABLED:false}"
+      key-file: "${VERYAL_PUSH_WEB_PUSH_KEY_FILE:./data/vapid-keys.json}"
+  translate:
+    app-id: "${VERYAL_TRANSLATE_APP_ID:}"
+    secret: "${VERYAL_TRANSLATE_SECRET:}"
+
+management:
+  health:
+    rabbit:
+      enabled: "${MANAGEMENT_HEALTH_RABBIT_ENABLED:false}"
+
+logging:
+  # logback 不认 yaml，这里只放 Spring 自己的日志级别；文件路径仍然走环境变量。
+  level:
+    root: INFO
+    com.veryal: INFO

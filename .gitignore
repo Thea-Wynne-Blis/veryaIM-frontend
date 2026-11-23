@@ -6,10 +6,15 @@ dist/
 !.env.example
 *.local
 
-# ½ØÍ¼²úÎï
+# ç”Ÿäº§ç¯å¢ƒå˜é‡ï¼ˆå«æ•°æ®åº“å¯†ç ã€JWT å¯†é’¥ï¼‰ï¼Œåªæäº¤ .example
+deploy/veryal.env
+deploy/config/.env
+deploy/config/application-local.yaml
+
+# ï¿½ï¿½Í¼ï¿½ï¿½ï¿½ï¿½
 .shots/
 
-# ²¿Êğ²úÎï
+# ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 deploy/out/
 
 tools/e2e-fail.png

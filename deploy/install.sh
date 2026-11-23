@@ -3,7 +3,7 @@
 # VERYAL 一键安装 / 迁移部署
 #   部署根目录: /home/ubuntu/veryal
 #   用法: bash install.sh
-#   前置: /tmp/veryal-upload/ 下有 jar、dist、配置、脚本
+#   前置: /tmp/veryal-upload/ 下有 jar、dist、config/、配置、脚本
 # ============================================================
 set -euo pipefail
 
@@ -39,8 +39,25 @@ chmod 0755 "$APP_HOME" "$APP_HOME"/web
 # ---------- 2. 后端 ----------
 info "安装后端"
 install -m 0644 "$UP/veryal-bootstrap.jar" "$APP_HOME/backend/veryal-bootstrap.jar"
-install -m 0644 "$UP/veryal.env" "$APP_HOME/backend/veryal.env"
 touch "$APP_HOME/logs/backend.log"
+
+# ---------- 2.1 运行时配置 ----------
+# config/.env 与生成的 application-local.yaml 含密码，不进版本库：
+# 上传包里从不包含它们，重装只覆盖脚本与模板，保留服务器上已有的 .env。
+info "安装运行时配置"
+mkdir -p "$APP_HOME/config"
+for f in start.sh render-config.sh; do
+  install -m 0755 "$UP/config/$f" "$APP_HOME/config/$f"
+done
+for f in README.md .env.example application-local.yaml.example; do
+  install -m 0644 "$UP/config/$f" "$APP_HOME/config/$f"
+done
+if [ -f "$APP_HOME/config/.env" ]; then
+  chmod 600 "$APP_HOME/config/.env"
+  ok "保留现有 config/.env"
+else
+  warn "缺少 config/.env：请先 cp config/.env.example config/.env 并填真实值，否则后端无法启动"
+fi
 
 # ---------- 3. 前端 ----------
 info "安装前端静态文件"
@@ -114,8 +131,6 @@ fi
 info "验证入口"
 printf '  前端页面    HTTP %s\n' "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${PORT}/" || echo 000)"
 printf '  API 代理    HTTP %s\n' "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${PORT}/api/v1/auth/login" || echo 000)"
-printf '  Swagger UI  HTTP %s\n' "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${PORT}/swagger-ui/index.html" || echo 000)"
-printf '  OpenAPI     HTTP %s\n' "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${PORT}/v3/api-docs" || echo 000)"
+printf '  健康检查    HTTP %s\n' "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${PORT}/actuator/health" || echo 000)"
 
 ok "部署完成 → http://<服务器IP>:${PORT}/"
-ok "接口文档 → http://<服务器IP>:${PORT}/swagger-ui.html"
