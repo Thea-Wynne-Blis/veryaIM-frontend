@@ -957,6 +957,14 @@ onBeforeUnmount(() => {
               >
                 斗图
               </button>
+              <button
+                type="button"
+                class="m-emoji-close"
+                aria-label="关闭表情面板"
+                @click="emojiOpen = false"
+              >
+                <X :size="16" :stroke-width="2" />
+              </button>
             </div>
             <div v-if="emojiTab === 'emoji'" class="m-emoji-grid">
               <button v-for="emoji in emojis" :key="emoji" :aria-label="`插入 ${emoji}`" @click="insertEmoji(emoji)">{{ emoji }}</button>
@@ -1080,7 +1088,9 @@ onBeforeUnmount(() => {
 .m-mention-item:active { background: var(--surface-active); }
 .m-mention-empty { padding: 6px 4px; font-size: 12.5px; color: var(--ink-3); }
 .m-emoji-picker { padding: 8px 6px 4px; }
-.m-emoji-tabs { display: flex; gap: 2px; padding: 0 2px 6px; border-bottom: 1px solid var(--line); }
+.m-emoji-tabs { display: flex; align-items: center; gap: 2px; padding: 0 2px 6px; border-bottom: 1px solid var(--line); }
+.m-emoji-close { display: grid; place-items: center; width: 30px; height: 30px; margin-left: auto; border-radius: 8px; color: var(--ink-3); }
+.m-emoji-close:active { background: var(--surface-active); color: var(--ink); }
 .m-emoji-tab { min-height: 30px; padding: 0 12px; border-radius: 8px; font-size: 12.5px; color: var(--ink-3); }
 .m-emoji-tab.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
 .m-emoji-grid { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 3px; padding-top: 8px; }

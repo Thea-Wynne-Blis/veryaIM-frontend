@@ -218,15 +218,23 @@ function closeMenu() {
 }
 
 function onGlobalPointerDown(event: PointerEvent) {
-  if (!menu.value) return
   const target = event.target as HTMLElement | null
-  if (target?.closest('.msg-menu')) return
-  closeMenu()
+  if (menu.value && !target?.closest('.msg-menu')) closeMenu()
+  // 面板和它的开关按钮不算「外面」：点别处（消息、会话列表）就收起来
+  if (
+    (emojiOpen.value || mentionOpen.value) &&
+    !target?.closest('.emoji-panel, .mention-pop, [aria-label="表情"], [aria-label="提及成员"]')
+  ) {
+    emojiOpen.value = false
+    mentionOpen.value = false
+  }
 }
 
 function onGlobalKeydown(event: KeyboardEvent) {
   if (event.key !== 'Escape') return
   closeMenu()
+  emojiOpen.value = false
+  mentionOpen.value = false
   if (selecting.value) exitSelect()
 }
 
@@ -426,6 +434,9 @@ watch(
     rememberScroll(oldId)
     closeMenu()
     exitSelect()
+    // 切换会话时收掉浮层：表情面板和 @ 候选都是针对上一个会话的
+    emojiOpen.value = false
+    mentionOpen.value = false
     if (!newId) {
       disarmEnter()
       return
@@ -668,7 +679,7 @@ watch(() => props.messages.length, () => scrollToBottom())
           </div>
         </div>
 
-        <div v-if="emojiOpen" class="emoji-panel">
+        <div v-if="emojiOpen" id="chat-emoji-panel" class="emoji-panel">
           <div class="emoji-tabs">
             <button
               class="emoji-tab"
@@ -685,6 +696,15 @@ watch(() => props.messages.length, () => scrollToBottom())
               @click="emojiTab = 'sticker'"
             >
               斗图
+            </button>
+            <button
+              class="emoji-close"
+              type="button"
+              aria-label="关闭表情面板"
+              title="关闭表情面板"
+              @click="emojiOpen = false"
+            >
+              <X :size="13" :stroke-width="2" />
             </button>
           </div>
 
@@ -732,13 +752,26 @@ watch(() => props.messages.length, () => scrollToBottom())
           </div>
 
           <div class="composer-tools">
-            <button class="icon-btn sm" aria-label="提及成员" @click="mentionOpen = !mentionOpen">
+            <button
+              class="icon-btn sm"
+              aria-label="提及成员"
+              :class="{ on: mentionOpen }"
+              :aria-expanded="mentionOpen"
+              @click="mentionOpen = !mentionOpen; emojiOpen = false"
+            >
               <AtSign :size="15" :stroke-width="1.9" />
             </button>
             <button class="icon-btn sm" aria-label="附件" @click="pickAttachment('file')">
               <Paperclip :size="15" :stroke-width="1.9" />
             </button>
-            <button class="icon-btn sm" aria-label="表情" @click="emojiOpen = !emojiOpen">
+            <button
+              class="icon-btn sm"
+              aria-label="表情"
+              :class="{ on: emojiOpen }"
+              :aria-expanded="emojiOpen"
+              aria-controls="chat-emoji-panel"
+              @click="emojiOpen = !emojiOpen; mentionOpen = false"
+            >
               <Smile :size="15" :stroke-width="1.9" />
             </button>
             <button class="icon-btn sm" aria-label="图片、视频或音频" @click="pickAttachment('image')">
@@ -1087,9 +1120,25 @@ watch(() => props.messages.length, () => scrollToBottom())
 
 .emoji-tabs {
   display: flex;
+  align-items: center;
   gap: 2px;
   padding-bottom: 4px;
   border-bottom: 1px solid var(--line);
+}
+
+.emoji-close {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  margin-left: auto;
+  border-radius: var(--r-xs);
+  color: var(--ink-3);
+}
+
+.emoji-close:hover {
+  background: var(--surface-hover);
+  color: var(--ink);
 }
 
 .emoji-tab {
