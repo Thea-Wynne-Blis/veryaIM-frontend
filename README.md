@@ -4,6 +4,8 @@ VERYAL 的客户端：面向个人用户的即时通讯，**Web 与移动端同�
 
 **Vue 3 · TypeScript · Vite · Pinia · Vue Router · Lucide Icons**
 
+> 客户端 + 服务端的整体架构图见服务端仓库的 [veryaI-backend/README.md](https://github.com/Thea-Wynne-Blis/veryaIM#readme)（第 1 节「全模块通信架构」）。
+
 ```bash
 npm install
 npm run dev      # http://localhost:5173
